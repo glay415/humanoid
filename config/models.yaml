@@ -1,21 +1,22 @@
-# LLM 모델 설정
+# LLM 모델 설정 (OpenAI via LiteLLM)
+# 환경변수: AGENT_OPENAI_API_KEY (런타임에 OPENAI_API_KEY로 매핑됨)
 small_model:
-  provider: "anthropic"
-  model: "claude-haiku-4-5-20251001"
+  provider: "openai"
+  model: "gpt-4o-mini"
   max_tokens: 1024
   temperature: 0.7
   timeout_ms: 3000
 
 large_model:
-  provider: "anthropic"
-  model: "claude-sonnet-4-6"
+  provider: "openai"
+  model: "gpt-4o"
   max_tokens: 2048
   temperature: 0.8
   timeout_ms: 10000
 
 dmn_model:
-  provider: "anthropic"
-  model: "claude-haiku-4-5-20251001"
+  provider: "openai"
+  model: "gpt-4o-mini"
   max_tokens: 1024
   temperature: 0.9
   timeout_ms: 5000
