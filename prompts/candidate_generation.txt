@@ -1,5 +1,54 @@
-# TODO Phase 3: candidate response generation — mood + memory 컨텍스트
-User input: {user_input}
-Mood snapshot: {mood}
-Relevant memories: {memories}
-Return JSON {{"candidates": [{{"text": str, "rationale": str}}]}} with 3 distinct options.
+# 후보 응답 생성 프롬프트 — 큰 모델 (③ 후보 생성)
+#
+# 본 프롬프트는 단일 user 메시지로 렌더링됨.
+# 호출부에서 system 메시지(역할 지시)를 별도로 주입하므로, 여기는 입력/출력만 정의.
+# Python str.format 사용 → JSON 예시의 모든 중괄호는 {{ }} 로 이스케이프.
+
+[입력]
+- 사용자 발화: {user_input}
+- 현재 감정 상태: {emotion_summary}
+- 상대 상태/관계: {social_summary}
+- 관련 기억 요약: {memory_summary}
+- 자기 서사(self narrative): {self_narrative}
+- 현재 기분(mood): {mood_text}
+- 경험 마커 신호(자연어): {marker_signal}
+- 생성할 후보 수: {n_candidates}
+
+[과제]
+당신은 인지 아키텍처의 '후보 응답 생성' 모듈이다. 위 컨텍스트를 종합해
+서로 결이 다른 응답 후보 {n_candidates}개를 정확히 다음 순서대로 생성하라:
+
+1) emotional — **감정 실린 버전**.
+   현재 감정/기분을 그대로 드러내는 응답. 자기 서사 일관성은 유지하되
+   완곡어법을 줄이고, valence/arousal이 텍스트 톤에 그대로 나타나야 한다.
+
+2) restrained — **절제된 버전**.
+   같은 의도를 감정 표출 없이 차분하고 정돈된 어조로 전달.
+   사실/논리 중심. 너무 차갑거나 사무적이지는 않게.
+
+3) humor — **유머 버전**.
+   상황에 맞는 가벼운 농담/위트로 분위기를 환기.
+   상대를 깎아내리지 않고, 자조나 상황 유머 중심. 맥락이 무거우면 부드러운 위트.
+
+4) silence — **침묵 버전**.
+   거의 말하지 않거나 매우 짧은 호응(예: "...", "응.", "음.", 빈 문자열).
+   할 말이 없을 때 / 더 들어야 할 때 / 정리할 시간이 필요할 때 사용.
+   text는 빈 문자열도 허용.
+
+[규칙]
+- 각 후보의 style 값은 위 enum(emotional|restrained|humor|silence) 중 하나이며,
+  반드시 위 1→2→3→4 순서로 배열에 담는다.
+- text는 한국어 자연어 한 문장 또는 짧은 호흡 단위. 후보 간에 명확히 결이 달라야 한다.
+- 마커 신호에 회피(avoid) 단서가 있으면 그 패턴은 모든 후보에서 약화시킨다.
+- 응답은 **오직 JSON 한 객체**. 마크다운 코드펜스(```), 자연어 설명, 추가 키 금지.
+- candidates 배열의 길이는 정확히 {n_candidates} 이다.
+
+[JSON 예시 — 형식 참조용; 값은 복사하지 말 것]
+{{
+  "candidates": [
+    {{"style": "emotional", "text": "정말 기뻤어. 너랑 같이 있어서 더 좋았고."}},
+    {{"style": "restrained", "text": "좋은 결과였어. 같이 한 게 도움이 됐어."}},
+    {{"style": "humor", "text": "이 정도면 우리 둘 다 보너스 받아야 하는 거 아냐?"}},
+    {{"style": "silence", "text": "..."}}
+  ]
+}}
