@@ -3,6 +3,8 @@
 모든 이벤트 버스 메시지의 타입 안전성을 보장.
 """
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -43,3 +45,24 @@ class MemoryRetrieved(BaseModel):
     memories: list[MemoryItem]
     prospective_items: list[ProspectiveItem]
     retrieval_context: dict  # {mood_bias_applied: bool}
+
+
+# ---------------------------------------------------------------------------
+# ③ 후보 생성 / ④ 최종 판단 — 큰 모델 출력 스키마
+# ---------------------------------------------------------------------------
+
+
+class Candidate(BaseModel):
+    style: Literal['emotional', 'restrained', 'humor', 'silence']
+    text: str
+
+
+class CandidatesResponse(BaseModel):
+    candidates: list[Candidate]
+
+
+class FinalResponse(BaseModel):
+    selected_index: int
+    text: str
+    rationale: str
+    marker_match: Literal['approach', 'avoid', 'none']
