@@ -43,3 +43,9 @@ class MemoryRetrieved(BaseModel):
     memories: list[MemoryItem]
     prospective_items: list[ProspectiveItem]
     retrieval_context: dict  # {mood_bias_applied: bool}
+
+
+class ToneEvaluation(BaseModel):
+    response_valence: float = Field(ge=-1.0, le=1.0)
+    response_arousal: float = Field(ge=0.0, le=1.0)
+    rationale: str
