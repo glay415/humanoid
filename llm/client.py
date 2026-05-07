@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import litellm  # 모듈 최상단에서 import — 테스트에서 patch('llm.client.litellm.acompletion') 가능하도록.
 import yaml
 from dotenv import load_dotenv
 
@@ -75,9 +76,6 @@ class LLMClient:
         return self._configs[name]
 
     async def _call_litellm(self, cfg: ModelConfig, messages: list[dict], **extra: Any):
-        # 지연 임포트로 테스트에서 patch 하기 쉽게 한다.
-        import litellm
-
         timeout_s = cfg.timeout_ms / 1000.0
         return await asyncio.wait_for(
             litellm.acompletion(
