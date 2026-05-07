@@ -1,9 +1,13 @@
 """humanoid — 인지 아키텍처 v12 진입점.
 
-Phase 1: 저수준 파이프라인 단독 실행 (CLI).
-Phase 4~: 대화 루프.
+Phase 1: 저수준 파이프라인 단독 실행 (CLI, HUMANOID_MODE=low).
+Phase 4~: 대화 루프 (CLI, HUMANOID_MODE=dialogue, default).
 """
 
+from __future__ import annotations
+
+import asyncio
+import os
 from pathlib import Path
 
 from low_level.internal_state import InternalState
@@ -65,7 +69,7 @@ def build_low_level(config_path: Path | str | None = None) -> LowLevelPipeline:
 def build_orchestrator(
     config_path: Path | str | None = None,
 ) -> Orchestrator:
-    """오케스트레이터 조립."""
+    """오케스트레이터 조립 — Phase 1 호환 (저수준 + 인터페이스만)."""
     low_level = build_low_level(config_path)
     cfg = low_level.temperament.config
 
@@ -82,8 +86,149 @@ def build_orchestrator(
     )
 
 
+def build_full_orchestrator(
+    config_path: Path | str | None = None,
+    llm_client=None,
+) -> Orchestrator:
+    """Phase 4: 모든 고수준 모듈 + 스토리지를 조립한 오케스트레이터.
+
+    config_path: 기질 YAML. None 이면 default.
+    llm_client: 테스트에서 MockLLMClient 주입용. None 이면 LLMClient() 생성.
+
+    스토리지 경로: 기질 이름별로 분리 → ./chroma_db/humanoid_<name>,
+    ./storage_data/<name>/ 하위에 sqlite DB 생성.
+    """
+    # 지연 import — 모듈 임포트 시점에 chroma/litellm 로드를 강제하지 않는다.
+    from llm.client import LLMClient
+    from high_level.emotion_appraisal import EmotionAppraisal
+    from high_level.social_cognition import SocialCognition
+    from high_level.memory_retrieval import MemoryRetrieval
+    from high_level.candidate_generation import CandidateGeneration
+    from high_level.final_judgment import FinalJudgment
+    from high_level.output_postprocess import OutputPostprocess
+    from high_level.metacognition import Metacognition
+    from storage.vector_db import VectorDB
+    from storage.memory_store import EpisodicMemory
+    from storage.prospective import ProspectiveQueue
+    from storage.self_model import SelfModel
+    from storage.other_model import OtherModel
+
+    low_level = build_low_level(config_path)
+    cfg = low_level.temperament.config
+    name = cfg.get('name', 'default')
+
+    # LLM 클라이언트 — None 이면 실제 OpenAI 클라이언트 (LLMClient) 생성
+    if llm_client is None:
+        llm_client = LLMClient()
+
+    # 스토리지 경로: 기질별 분리
+    chroma_dir = f"./chroma_db/humanoid_{name}"
+    storage_dir = Path(f"./storage_data/{name}")
+    storage_dir.mkdir(parents=True, exist_ok=True)
+    prospective_db = str(storage_dir / "prospective.db")
+
+    vector_db = VectorDB(
+        collection_name=f"episodic_{name}",
+        persist_dir=chroma_dir,
+    )
+    episodic = EpisodicMemory(
+        vector_db=vector_db,
+        reconsolidation_alpha=cfg.get('reconsolidation_alpha', 0.3),
+    )
+    prospective = ProspectiveQueue(db_path=prospective_db)
+
+    # 고수준 모듈
+    emotion_appraisal = EmotionAppraisal(llm_client=llm_client)
+    social_cognition = SocialCognition()
+    memory_retrieval = MemoryRetrieval(
+        episodic=episodic,
+        prospective=prospective,
+    )
+    candidate_generation = CandidateGeneration(llm_client=llm_client)
+    final_judgment = FinalJudgment(llm_client=llm_client)
+    output_postprocess = OutputPostprocess(llm_client=llm_client)
+    metacognition = Metacognition(
+        sensitivity=cfg.get('metacognition_sensitivity', 0.5),
+        floor=cfg.get('metacognition_floor', 0.1),
+        recovery_rate=cfg.get('meta_resource_recovery', 0.05),
+        regulation_capacity=cfg.get('emotion_regulation_capacity', 0.5),
+    )
+
+    self_model = SelfModel()
+    other_model = OtherModel()
+
+    return Orchestrator(
+        low_level=low_level,
+        event_bus=EventBus(),
+        trigger_registry=TriggerRegistry(),
+        signal_rise=SignalRise(
+            resolution=cfg.get('self_awareness_resolution', 3),
+            meta_beta=cfg.get('meta_beta', 0.08),
+        ),
+        experience_descent=ExperienceDescent(),
+        auto_encoding_threshold=cfg.get('auto_encoding_threshold', 1.2),
+        emotion_appraisal=emotion_appraisal,
+        social_cognition=social_cognition,
+        memory_retrieval=memory_retrieval,
+        candidate_generation=candidate_generation,
+        final_judgment=final_judgment,
+        output_postprocess=output_postprocess,
+        metacognition=metacognition,
+        episodic_memory=episodic,
+        self_model=self_model,
+        other_model=other_model,
+    )
+
+
 def main():
-    """Phase 1 CLI: 경험 벡터를 수동 주입하며 상태 변화 관찰."""
+    """CLI 진입점.
+
+    환경변수 HUMANOID_MODE:
+      'low'      → Phase 1 수동 경험 벡터 모드.
+      'dialogue' → Phase 4 대화 루프 (default).
+    """
+    mode = os.environ.get('HUMANOID_MODE', 'dialogue').lower()
+    if mode == 'low':
+        return _run_low_level_cli()
+    return asyncio.run(_run_dialogue_cli())
+
+
+async def _run_dialogue_cli():
+    """Phase 4 대화 루프 — 사용자 메시지 → process_conversation_turn → 응답."""
+    orch = build_full_orchestrator()
+    print("=== humanoid v12 — Phase 4: 대화 루프 ===")
+    print("'q' = 종료. 빈 줄 = 무입력 턴 (저수준만).")
+    print()
+
+    while True:
+        try:
+            user_input = input(f"[턴 {orch.turn_number + 1}] > ").strip()
+        except (EOFError, KeyboardInterrupt):
+            break
+        if user_input.lower() == 'q':
+            break
+        if not user_input:
+            r = orch.run_low_level_only()
+            print(
+                f"  (저수준만) raw v={r['raw_core_affect']['valence']:.3f} "
+                f"a={r['raw_core_affect']['arousal']:.3f}"
+            )
+            continue
+
+        result = await orch.process_conversation_turn(user_input)
+        # 옵션: arousal 기반 sleep — CLI 에서는 비활성. 필요 시 아래 주석 해제.
+        # await asyncio.sleep(result['recommended_delay_ms'] / 1000.0)
+        print(f"  → {result['response']}")
+        print(
+            f"     [action={result['action']}, "
+            f"delay={result['recommended_delay_ms']}ms, "
+            f"mood v={result['low_level']['mood']['valence']:.3f}]"
+        )
+        print()
+
+
+def _run_low_level_cli():
+    """Phase 1 호환 모드 — 경험 벡터를 수동 주입하며 상태 변화 관찰."""
     orch = build_orchestrator()
     print("=== humanoid v12 — Phase 1: 저수준 파이프라인 ===")
     print(f"안정성 검증: PASS")
