@@ -52,3 +52,26 @@ class SignalRise:
             -1.0, 1.0,
         ))
         return final
+
+    def generate_marker_signal(self, markers: list) -> str:
+        """경험 마커 목록을 자연어로 변환 (정밀도 손실 포함). 빈 리스트면 '관련 마커 없음'.
+
+        markers: low_level.markers.Marker dataclass 인스턴스 리스트, 또는 valence/strength
+        키를 가진 dict 리스트. 둘 다 허용.
+        """
+        if not markers:
+            return "(관련 경험 마커 없음)"
+        parts = []
+        for m in markers:
+            # dataclass 와 dict 모두 지원
+            v = getattr(m, 'valence', None)
+            if v is None:
+                v = m.get('valence', 0.0) if isinstance(m, dict) else 0.0
+            s = getattr(m, 'strength', None)
+            if s is None:
+                s = m.get('strength', 0.0) if isinstance(m, dict) else 0.0
+            approach = "접근" if v > 0 else ("회피" if v < 0 else "중립")
+            # 강도를 라벨로 양자화 (정밀도 손실)
+            intensity = self.labels[min(int(s * self.resolution), self.resolution - 1)]
+            parts.append(f"{approach}({intensity})")
+        return ", ".join(parts)
