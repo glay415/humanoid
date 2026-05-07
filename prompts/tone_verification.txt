@@ -1,0 +1,4 @@
+# TODO Phase 3: tone verification — 응답 톤이 core affect 와 일치하는지 검증
+Response: {response}
+Target affect: valence={valence}, arousal={arousal}
+Return JSON {{"matches": bool, "deviation": float, "suggested_revision": str}}.

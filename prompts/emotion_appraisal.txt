@@ -1,0 +1,4 @@
+# TODO Phase 3: emotion appraisal prompt — Scherer CPM 4 stages
+You are evaluating: {user_input}
+Current core affect: valence={valence}, arousal={arousal}
+Return JSON {{"valence": float, "arousal": float, "preliminary_labels": [str], "experience_dimensions": {{"reward": float, "threat": float, "novelty": float}}}}.

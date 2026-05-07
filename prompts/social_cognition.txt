@@ -1,0 +1,4 @@
+# TODO Phase 3: social cognition prompt — ToM / other-model 갱신
+User said: {user_input}
+Other-model summary so far: {other_model_summary}
+Return JSON {{"updated_summary": str, "inferred_intent": str, "trust_delta": float}}.
