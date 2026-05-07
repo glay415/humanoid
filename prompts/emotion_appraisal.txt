@@ -1,4 +1,50 @@
-# TODO Phase 3: emotion appraisal prompt — Scherer CPM 4 stages
-You are evaluating: {user_input}
-Current core affect: valence={valence}, arousal={arousal}
-Return JSON {{"valence": float, "arousal": float, "preliminary_labels": [str], "experience_dimensions": {{"reward": float, "threat": float, "novelty": float}}}}.
+# 감정 평가 프롬프트 — Scherer CPM (관련성/함의) + Barrett TCE (예측 먼저)
+#
+# 본 프롬프트는 단일 user 메시지로 렌더링됨.
+# 호출부에서 system 메시지(역할 지시)를 별도로 주입하므로, 여기는 입력/출력만 정의.
+# Python str.format 사용 → JSON 예시의 모든 중괄호는 {{ }} 로 이스케이프.
+
+[입력]
+- 사용자 발화: {user_input}
+- 현재 코어어펙트(저수준 항상성에서 산출): valence={valence}, arousal={arousal}
+- 최근 기억 요약(없으면 빈 문자열): {recent_memory_summary}
+
+[과제]
+당신은 Scherer CPM의 4단계 중 **관련성(relevance)** 과 **함의(implications)** 만 판단한다.
+대처(coping)는 메타인지가, 규범(normative)은 사회인지가 담당하므로 절대 판단하지 마라.
+
+1) 관련성 — 이 입력이 자기에게 중요한가? 자기 목표·정체성과 어떻게 닿아 있는가?
+2) 함의 — 이 사건의 결과로 무엇이 일어나는가? 보상(reward)인가 위협(threat)인가?
+   reward 와 threat 는 같은 평가의 양면이지만 강도는 독립적으로 산정한다.
+3) novelty — 입력이 얼마나 새롭거나 예측을 벗어나는가? recent_memory_summary 와의 거리감을 활용.
+
+또한 Barrett TCE의 "예측이 먼저(prediction first)" 원칙에 따라 코어어펙트 + 입력만으로
+**preliminary_labels** 를 1~3개 만든다. 이 라벨은 사회인지/기억 결과 합류 후 메타인지가
+수정할 수 있는 **초벌(prelim)** 이라는 점을 명심하라. 확정 라벨이 아니다.
+
+[출력 — 반드시 아래 JSON 스키마와 동일하게]
+- valence: -1.0 ~ 1.0 (입력 평가 후 예상되는 혼합 정서가; 코어어펙트와 다를 수 있음)
+- arousal: 0.0 ~ 1.0 (각성도; 코어어펙트와 다를 수 있음)
+- preliminary_labels: 한국어 또는 영어 1~3개의 짧은 라벨 배열 (예: ["기쁨"], ["불안","경계"])
+- experience_dimensions:
+    - reward: 0.0 ~ 1.0 (입력의 보상성: 칭찬/새 정보/목표 진전 신호 등)
+    - threat: 0.0 ~ 1.0 (입력의 위협성: 비난/손실/규칙 위반 신호 등)
+    - novelty: 0.0 ~ 1.0 (입력의 새로움/예측이탈 정도)
+
+[규칙]
+- 응답은 **오직 JSON 한 객체**. 마크다운 코드펜스(```), 자연어 설명, 추가 키 금지.
+- 모든 수치는 명시 범위를 절대 벗어나지 않는다. 범위를 넘으면 잘라낸다.
+- preliminary_labels 가 비지 않도록 한다(최소 1개). 애매하면 "중립" 사용.
+- 코어어펙트(valence/arousal 입력값)는 *현재 신체 상태*이고, 출력 valence/arousal 은 *입력 평가 후*의 혼합 추정치다. 둘이 다를 수 있다.
+
+[JSON 예시(형식 참조용; 값은 복사하지 말 것)]
+{{
+  "valence": 0.42,
+  "arousal": 0.55,
+  "preliminary_labels": ["기쁨", "기대"],
+  "experience_dimensions": {{
+    "reward": 0.7,
+    "threat": 0.05,
+    "novelty": 0.4
+  }}
+}}
