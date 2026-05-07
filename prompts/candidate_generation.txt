@@ -1,0 +1,5 @@
+# TODO Phase 3: candidate response generation — mood + memory 컨텍스트
+User input: {user_input}
+Mood snapshot: {mood}
+Relevant memories: {memories}
+Return JSON {{"candidates": [{{"text": str, "rationale": str}}]}} with 3 distinct options.

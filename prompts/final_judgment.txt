@@ -1,0 +1,5 @@
+# TODO Phase 3: final judgment — somatic marker 가중 후보 선택
+Candidates: {candidates}
+Marker signal: {marker_signal}
+Confidence: {confidence}
+Return JSON {{"chosen_index": int, "reason": str}}.
