@@ -1,0 +1,358 @@
+<svg width="1360" height="3080" viewBox="0 0 680 1540" xmlns="http://www.w3.org/2000/svg" style="background:#ffffff">
+<style>
+  text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
+  .ts { font-size: 12px; fill: #5F5E5A; font-weight: 400; }
+  .th { font-size: 14px; fill: #2C2C2A; font-weight: 500; }
+  .leader { stroke: #B4B2A9; stroke-width: 0.5; stroke-dasharray: 3 2; }
+
+  .c-gray > rect, .c-gray > circle { fill: #F1EFE8; stroke: #5F5E5A; }
+  .c-gray > text.th, .c-gray text.th { fill: #444441; }
+  .c-gray > text.ts, .c-gray text.ts { fill: #5F5E5A; }
+
+  .c-blue > rect { fill: #E6F1FB; stroke: #185FA5; }
+  .c-blue > text.th, .c-blue text.th { fill: #0C447C; }
+  .c-blue > text.ts, .c-blue text.ts { fill: #185FA5; }
+
+  .c-red > rect { fill: #FCEBEB; stroke: #A32D2D; }
+  .c-red > text.th, .c-red text.th { fill: #791F1F; }
+  .c-red > text.ts, .c-red text.ts { fill: #A32D2D; }
+
+  .c-coral > rect { fill: #FAECE7; stroke: #993C1D; }
+  .c-coral > text.th, .c-coral text.th { fill: #712B13; }
+  .c-coral > text.ts, .c-coral text.ts { fill: #993C1D; }
+
+  .c-purple > rect { fill: #EEEDFE; stroke: #534AB7; }
+  .c-purple > text.th, .c-purple text.th { fill: #3C3489; }
+  .c-purple > text.ts, .c-purple text.ts { fill: #534AB7; }
+
+  .c-teal > rect { fill: #E1F5EE; stroke: #0F6E56; }
+  .c-teal > text.th, .c-teal text.th { fill: #085041; }
+  .c-teal > text.ts, .c-teal text.ts { fill: #0F6E56; }
+
+  .c-amber > rect { fill: #FAEEDA; stroke: #854F0B; }
+  .c-amber > text.th, .c-amber text.th { fill: #633806; }
+  .c-amber > text.ts, .c-amber text.ts { fill: #854F0B; }
+
+  .c-green > rect { fill: #EAF3DE; stroke: #3B6D11; }
+  .c-green > text.th, .c-green text.th { fill: #27500A; }
+  .c-green > text.ts, .c-green text.ts { fill: #3B6D11; }
+
+  .c-pink > rect { fill: #FBEAF0; stroke: #993556; }
+  .c-pink > text.th, .c-pink text.th { fill: #72243E; }
+  .c-pink > text.ts, .c-pink text.ts { fill: #993556; }
+</style>
+<defs>
+  <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+</defs>
+
+<!-- PREMISE -->
+<rect x="35" y="8" width="610" height="18" rx="5" fill="none" stroke="#993556" stroke-width="0.5" opacity="0.5"/>
+<text class="ts" x="340" y="21" text-anchor="middle" dominant-baseline="central" fill="#993556" opacity="0.7">텍스트=몸 · 복사가능 · 1인관계 · 예측→오차→수정 · 개인기억>범용 · 인간다움을 시뮬레이션하는 소프트웨어</text>
+
+<!-- SYSTEM LEVEL -->
+<g class="c-gray">
+  <rect x="25" y="34" width="510" height="146" rx="12" stroke-width="0.5"/>
+  <text class="th" x="280" y="52" text-anchor="middle" dominant-baseline="central">시스템 레벨 — 오케스트레이터</text>
+</g>
+
+<g class="c-gray">
+  <rect x="38" y="64" width="240" height="32" rx="6" stroke-width="0.5"/>
+  <text class="th" x="158" y="74" text-anchor="middle" dominant-baseline="central">외부 입력</text>
+  <text class="ts" x="158" y="90" text-anchor="middle" dominant-baseline="central">텍스트·소리·이미지·인터넷·[확장]</text>
+</g>
+
+<g class="c-red">
+  <rect x="290" y="64" width="236" height="32" rx="6" stroke-width="0.5"/>
+  <text class="th" x="408" y="74" text-anchor="middle" dominant-baseline="central">트리거 레지스트리</text>
+  <text class="ts" x="408" y="90" text-anchor="middle" dominant-baseline="central">외부·시간·내부·관계</text>
+</g>
+
+<g class="c-gray">
+  <rect x="38" y="104" width="488" height="66" rx="6" stroke-width="0.5"/>
+  <text class="th" x="282" y="120" text-anchor="middle" dominant-baseline="central">턴 유형</text>
+  <text class="ts" x="282" y="138" text-anchor="middle" dominant-baseline="central">대화턴(최우선) · DMN턴(유휴) · 정비턴</text>
+  <text class="th" x="282" y="154" text-anchor="middle" dominant-baseline="central">이벤트 규칙</text>
+  <text class="ts" x="282" y="168" text-anchor="middle" dominant-baseline="central">동기화(수렴플래그) · 깊이제한3 · 동적타임아웃 · 미평가→재처리큐</text>
+</g>
+
+<!-- STORAGE SERVICE -->
+<g class="c-teal">
+  <rect x="545" y="34" width="110" height="970" rx="10" stroke-width="0.5"/>
+  <text class="th" x="600" y="52" text-anchor="middle" dominant-baseline="central">스토리지</text>
+</g>
+
+<g class="c-teal">
+  <rect x="553" y="66" width="94" height="54" rx="4" stroke-width="0.5"/>
+  <text class="th" x="600" y="80" text-anchor="middle" dominant-baseline="central">일화기억</text>
+  <text class="ts" x="600" y="96" text-anchor="middle" dominant-baseline="central">시간·감정·출처</text>
+  <text class="ts" x="600" y="110" text-anchor="middle" dominant-baseline="central">재고정화 변형</text>
+</g>
+
+<g class="c-teal">
+  <rect x="553" y="126" width="94" height="40" rx="4" stroke-width="0.5"/>
+  <text class="th" x="600" y="140" text-anchor="middle" dominant-baseline="central">의미(개인)</text>
+  <text class="ts" x="600" y="156" text-anchor="middle" dominant-baseline="central">감정조절 경유</text>
+</g>
+
+<g class="c-teal">
+  <rect x="553" y="172" width="94" height="40" rx="4" stroke-width="0.5"/>
+  <text class="th" x="600" y="186" text-anchor="middle" dominant-baseline="central">절차기억</text>
+  <text class="ts" x="600" y="202" text-anchor="middle" dominant-baseline="central">사례→규칙 승격</text>
+</g>
+
+<g class="c-teal">
+  <rect x="553" y="218" width="94" height="36" rx="4" stroke-width="0.5"/>
+  <text class="th" x="600" y="230" text-anchor="middle" dominant-baseline="central">전망기억 큐</text>
+  <text class="ts" x="600" y="246" text-anchor="middle" dominant-baseline="central">자발적 행동</text>
+</g>
+
+<g class="c-teal">
+  <rect x="553" y="262" width="94" height="100" rx="4" stroke-width="0.5"/>
+  <text class="th" x="600" y="278" text-anchor="middle" dominant-baseline="central">자기 모델</text>
+  <text class="ts" x="600" y="294" text-anchor="middle" dominant-baseline="central">초기: 최소 시드</text>
+  <text class="th" x="600" y="314" text-anchor="middle" dominant-baseline="central">타자 모델</text>
+  <text class="ts" x="600" y="330" text-anchor="middle" dominant-baseline="central">관계단계(양방향)</text>
+  <text class="ts" x="600" y="346" text-anchor="middle" dominant-baseline="central">베이지안 가중</text>
+</g>
+
+<text class="ts" x="600" y="378" text-anchor="middle" dominant-baseline="central" opacity="0.4">동일 스키마</text>
+<text class="ts" x="600" y="394" text-anchor="middle" dominant-baseline="central" opacity="0.3">goals[] emotions{}</text>
+<text class="ts" x="600" y="408" text-anchor="middle" dominant-baseline="central" opacity="0.3">narrative confidence</text>
+<text class="ts" x="600" y="434" text-anchor="middle" dominant-baseline="central" opacity="0.4">접근 규칙</text>
+<text class="ts" x="600" y="450" text-anchor="middle" dominant-baseline="central" opacity="0.3">고: 내용 r/w</text>
+<text class="ts" x="600" y="464" text-anchor="middle" dominant-baseline="central" opacity="0.3">저: 메타 r/w</text>
+<text class="ts" x="600" y="490" text-anchor="middle" dominant-baseline="central" opacity="0.4">이중 부호화</text>
+<text class="ts" x="600" y="506" text-anchor="middle" dominant-baseline="central" opacity="0.3">자동(감정강도)</text>
+<text class="ts" x="600" y="520" text-anchor="middle" dominant-baseline="central" opacity="0.3">의도적(LLM압축)</text>
+<text class="ts" x="600" y="546" text-anchor="middle" dominant-baseline="central" opacity="0.4">출처 우선순위</text>
+<text class="ts" x="600" y="562" text-anchor="middle" dominant-baseline="central" opacity="0.3">경험>인터넷</text>
+<text class="ts" x="600" y="576" text-anchor="middle" dominant-baseline="central" opacity="0.3">>범용≫상상</text>
+
+<!-- HIGH-LEVEL ZONE -->
+<rect x="25" y="190" width="510" height="382" rx="12" fill="none" stroke="#185FA5" stroke-width="0.8" opacity="0.15"/>
+<text class="ts" x="44" y="204" dominant-baseline="central" fill="#185FA5" opacity="0.4">고수준 (이벤트 버스 · 큰+작은 LLM 혼합 · 논리적 분리)</text>
+
+<g class="c-amber">
+  <rect x="38" y="214" width="488" height="28" rx="6" stroke-width="0.5"/>
+  <text class="th" x="282" y="222" text-anchor="middle" dominant-baseline="central">메타인지</text>
+  <text class="ts" x="282" y="238" text-anchor="middle" dominant-baseline="central">불확실성·불일치·자원소모 | 동기화 지점 안에서 감정조절 검토</text>
+</g>
+
+<text class="ts" x="282" y="258" text-anchor="middle" dominant-baseline="central" opacity="0.4">감정(작은) → [사회인지(작은) ‖ 기억인출] → 동기화+검토 → 후보(큰) → 최종(큰) → 후처리</text>
+
+<g class="c-coral">
+  <rect x="38" y="268" width="488" height="30" rx="6" stroke-width="0.5"/>
+  <text class="th" x="282" y="277" text-anchor="middle" dominant-baseline="central">① 감정 평가 (작은 모델, 반자동)</text>
+  <text class="ts" x="282" y="293" text-anchor="middle" dominant-baseline="central">입력+코어어펙트 → 혼합벡터 + threat/novelty 차원</text>
+</g>
+
+<g class="c-purple">
+  <rect x="38" y="306" width="236" height="30" rx="6" stroke-width="0.5"/>
+  <text class="th" x="156" y="315" text-anchor="middle" dominant-baseline="central">② 사회인지 (감정 참조)</text>
+  <text class="ts" x="156" y="331" text-anchor="middle" dominant-baseline="central">상대추정 + social_reward</text>
+</g>
+<g class="c-teal">
+  <rect x="290" y="306" width="236" height="30" rx="6" stroke-width="0.5"/>
+  <text class="th" x="408" y="315" text-anchor="middle" dominant-baseline="central">② 기억 인출 (감정태그 참조)</text>
+  <text class="ts" x="408" y="331" text-anchor="middle" dominant-baseline="central">교차검색 + 전망큐 주입</text>
+</g>
+
+<text class="ts" x="274" y="316" text-anchor="middle" dominant-baseline="central" opacity="0.3">‖</text>
+
+<rect x="38" y="344" width="488" height="16" rx="3" fill="#FAEEDA" opacity="0.3"/>
+<text class="ts" x="282" y="356" text-anchor="middle" dominant-baseline="central" fill="#854F0B" opacity="0.7">▼ 동기화 — 경험벡터 합성 조립 + 메타인지 검토 + 수렴 플래그</text>
+
+<g class="c-blue">
+  <rect x="38" y="366" width="488" height="26" rx="6" stroke-width="0.5"/>
+  <text class="th" x="282" y="379" text-anchor="middle" dominant-baseline="central">③ 후보 생성 (큰 모델) — 감정+상대+기억+자기모델+기분 → N개</text>
+</g>
+
+<g class="c-blue">
+  <rect x="38" y="398" width="488" height="26" rx="6" stroke-width="0.5"/>
+  <text class="th" x="282" y="411" text-anchor="middle" dominant-baseline="central">④ 최종 판단 (큰 모델) — 후보 + marker_signal(변환손실) + 확신도</text>
+</g>
+
+<g class="c-gray">
+  <rect x="38" y="430" width="488" height="26" rx="6" stroke-width="0.5"/>
+  <text class="th" x="282" y="443" text-anchor="middle" dominant-baseline="central">⑤ 출력 후처리 — 톤 검증(극단불일치만 재생성) + 응답 지연(각성도)</text>
+</g>
+
+<!-- DMN -->
+<rect x="38" y="466" width="310" height="54" rx="8" fill="none" stroke="#534AB7" stroke-width="0.5" stroke-dasharray="4 3" opacity="0.4"/>
+<text class="th" x="193" y="480" text-anchor="middle" dominant-baseline="central" fill="#534AB7" opacity="0.6">DMN (활성도 0~1, 이벤트 기반)</text>
+<text class="ts" x="193" y="496" text-anchor="middle" dominant-baseline="central" opacity="0.4">반추·시뮬레이션·서사·내면화·승격</text>
+<text class="ts" x="193" y="512" text-anchor="middle" dominant-baseline="central" opacity="0.4">우선순위: 미평가>반추>승격>사색</text>
+
+<rect x="360" y="466" width="166" height="54" rx="8" fill="none" stroke="#185FA5" stroke-width="0.5" stroke-dasharray="6 3" opacity="0.25"/>
+<text class="th" x="443" y="486" text-anchor="middle" dominant-baseline="central" fill="#185FA5" opacity="0.4">+ 확장</text>
+<text class="ts" x="443" y="504" text-anchor="middle" dominant-baseline="central" opacity="0.3">표정·음성·게임AI</text>
+
+<text class="ts" x="282" y="540" text-anchor="middle" dominant-baseline="central" opacity="0.3">빠른 경로 발동 시: 저수준 즉시 변경 → 정상 경로 재평가 → 불일치면 점진적 보정</text>
+
+<!-- INTERFACE -->
+<rect x="25" y="554" width="510" height="38" rx="6" fill="#FAEEDA" opacity="0.15"/>
+<text class="th" x="282" y="566" text-anchor="middle" dominant-baseline="central" fill="#854F0B" opacity="0.6">인터페이스</text>
+<text class="ts" x="282" y="582" text-anchor="middle" dominant-baseline="central" fill="#854F0B" opacity="0.5">↑ 신호 상승(변환 정밀도 손실=자기인식 해상도) | ↓ 경험 하강(벡터, 수치 지정 불가)</text>
+
+<!-- LOW-LEVEL ZONE -->
+<rect x="25" y="600" width="510" height="404" rx="12" fill="none" stroke="#D85A30" stroke-width="0.8" opacity="0.15"/>
+<text class="ts" x="44" y="614" dominant-baseline="central" fill="#D85A30" opacity="0.4">저수준 (고정 파이프라인 · 자동 · 독립 작동 가능)</text>
+
+<text class="ts" x="282" y="632" text-anchor="middle" dominant-baseline="central" opacity="0.4">실행 순서 (매 턴 시작 전, 고정):</text>
+
+<g class="c-red">
+  <rect x="38" y="642" width="114" height="36" rx="4" stroke-width="0.5"/>
+  <text class="th" x="95" y="654" text-anchor="middle" dominant-baseline="central">1. 빠른 경로</text>
+  <text class="ts" x="95" y="672" text-anchor="middle" dominant-baseline="central">패턴매칭</text>
+</g>
+<line x1="152" y1="660" x2="162" y2="660" stroke="#A32D2D" stroke-width="0.5" marker-end="url(#arrow)" opacity="0.4"/>
+
+<g class="c-blue">
+  <rect x="164" y="642" width="114" height="36" rx="4" stroke-width="0.5"/>
+  <text class="th" x="221" y="654" text-anchor="middle" dominant-baseline="central">2. 내부 상태</text>
+  <text class="ts" x="221" y="672" text-anchor="middle" dominant-baseline="central">상호작용 행렬</text>
+</g>
+<line x1="278" y1="660" x2="288" y2="660" stroke="#185FA5" stroke-width="0.5" marker-end="url(#arrow)" opacity="0.4"/>
+
+<g class="c-coral">
+  <rect x="290" y="642" width="114" height="36" rx="4" stroke-width="0.5"/>
+  <text class="th" x="347" y="654" text-anchor="middle" dominant-baseline="central">3. 감정 기저</text>
+  <text class="ts" x="347" y="672" text-anchor="middle" dominant-baseline="central">어펙트·기분·마커</text>
+</g>
+<line x1="404" y1="660" x2="414" y2="660" stroke="#D85A30" stroke-width="0.5" marker-end="url(#arrow)" opacity="0.4"/>
+
+<g class="c-purple">
+  <rect x="416" y="642" width="110" height="36" rx="4" stroke-width="0.5"/>
+  <text class="th" x="471" y="654" text-anchor="middle" dominant-baseline="central">4. 감지</text>
+  <text class="ts" x="471" y="672" text-anchor="middle" dominant-baseline="central">드라이브·자기</text>
+</g>
+
+<!-- Internal state detail -->
+<g class="c-blue">
+  <rect x="38" y="692" width="488" height="52" rx="6" stroke-width="0.5"/>
+  <text class="th" x="282" y="708" text-anchor="middle" dominant-baseline="central">내부 상태 — 기능적 파라미터 (상호작용 쌍)</text>
+</g>
+<g class="c-blue"><rect x="48" y="718" width="88" height="20" rx="4" stroke-width="0.5"/><text class="ts" x="92" y="728" text-anchor="middle" dominant-baseline="central">reward↔patience</text></g>
+<g class="c-blue"><rect x="142" y="718" width="88" height="20" rx="4" stroke-width="0.5"/><text class="ts" x="186" y="728" text-anchor="middle" dominant-baseline="central">arousal↔learning</text></g>
+<g class="c-blue"><rect x="236" y="718" width="80" height="20" rx="4" stroke-width="0.5"/><text class="ts" x="276" y="728" text-anchor="middle" dominant-baseline="central">excite↔inhibit</text></g>
+<g class="c-blue"><rect x="322" y="718" width="60" height="20" rx="4" stroke-width="0.5"/><text class="ts" x="352" y="728" text-anchor="middle" dominant-baseline="central">stress</text></g>
+<g class="c-blue"><rect x="388" y="718" width="62" height="20" rx="4" stroke-width="0.5"/><text class="ts" x="419" y="728" text-anchor="middle" dominant-baseline="central">bonding</text></g>
+<g class="c-blue"><rect x="456" y="718" width="62" height="20" rx="4" stroke-width="0.5"/><text class="ts" x="487" y="728" text-anchor="middle" dominant-baseline="central">comfort</text></g>
+
+<!-- Emotion base -->
+<g class="c-coral">
+  <rect x="38" y="754" width="488" height="48" rx="6" stroke-width="0.5"/>
+  <text class="th" x="282" y="770" text-anchor="middle" dominant-baseline="central">감정 기저</text>
+</g>
+<g class="c-coral"><rect x="48" y="778" width="148" height="18" rx="4" stroke-width="0.5"/><text class="ts" x="122" y="787" text-anchor="middle" dominant-baseline="central">코어 어펙트 (유인가×각성)</text></g>
+<g class="c-coral"><rect x="204" y="778" width="148" height="18" rx="4" stroke-width="0.5"/><text class="ts" x="278" y="787" text-anchor="middle" dominant-baseline="central">기분 (leaky integral)</text></g>
+<g class="c-coral"><rect x="360" y="778" width="158" height="18" rx="4" stroke-width="0.5"/><text class="ts" x="439" y="787" text-anchor="middle" dominant-baseline="central">경험 마커 (접근/회피·관성)</text></g>
+
+<!-- Drives + Self-sensing -->
+<g class="c-pink">
+  <rect x="38" y="814" width="238" height="32" rx="6" stroke-width="0.5"/>
+  <text class="th" x="157" y="824" text-anchor="middle" dominant-baseline="central">드라이브</text>
+  <text class="ts" x="157" y="840" text-anchor="middle" dominant-baseline="central">호기심(자기완결)·유대·보존·안전·쾌락</text>
+</g>
+<g class="c-purple">
+  <rect x="288" y="814" width="238" height="32" rx="6" stroke-width="0.5"/>
+  <text class="th" x="407" y="824" text-anchor="middle" dominant-baseline="central">자기감지</text>
+  <text class="ts" x="407" y="840" text-anchor="middle" dominant-baseline="central">변환 정밀도 손실 = 자기인식 한계</text>
+</g>
+
+<!-- Experience descent -->
+<rect x="38" y="858" width="488" height="24" rx="4" fill="none" stroke="#D85A30" stroke-width="0.5" stroke-dasharray="3 2" opacity="0.15"/>
+<text class="ts" x="282" y="870" text-anchor="middle" dominant-baseline="central" opacity="0.3">경험 하강 수신: { reward, novelty, threat, social_reward, goal, ext{} } → 자기 규칙으로 처리</text>
+
+<!-- Temperament -->
+<g class="c-amber">
+  <rect x="38" y="894" width="488" height="54" rx="6" stroke-width="0.5"/>
+  <text class="th" x="282" y="910" text-anchor="middle" dominant-baseline="central">기질 — 극도로 느리게 변함 (기본 K=5000턴, 테스트 100턴)</text>
+  <text class="ts" x="282" y="928" text-anchor="middle" dominant-baseline="central">내부상태기저선·DMN활성도·메타인지개입도·감정조절력·마커관성·자기인식해상도</text>
+  <text class="ts" x="282" y="944" text-anchor="middle" dominant-baseline="central">서사압력·드라이브비율·관계임계값·메타자원회복률·기분감쇠N·기질표류K</text>
+</g>
+
+<!-- Low extension -->
+<rect x="38" y="958" width="488" height="20" rx="4" fill="none" stroke="#D85A30" stroke-width="0.5" stroke-dasharray="6 3" opacity="0.2"/>
+<text class="ts" x="282" y="968" text-anchor="middle" dominant-baseline="central" fill="#D85A30" opacity="0.35">+ 확장: 경험벡터에 ext{} 차원 추가 → 새 파라미터가 구독</text>
+
+<!-- Storage → both layers -->
+<line class="leader" x1="545" y1="400" x2="530" y2="400"/>
+<line class="leader" x1="545" y1="750" x2="530" y2="750"/>
+
+<!-- TIME SCALE -->
+<rect x="25" y="1014" width="630" height="36" rx="6" fill="none" stroke="#B4B2A9" stroke-width="0.5" stroke-dasharray="3 2" opacity="0.2"/>
+<text class="th" x="340" y="1028" text-anchor="middle" dominant-baseline="central" opacity="0.4">시간 축 (턴 기반)</text>
+<text class="ts" x="340" y="1044" text-anchor="middle" dominant-baseline="central" opacity="0.35">감정 1턴 | 기분 N턴(20~50) | 상태이동 M턴(200~500) | 기질표류 K턴(5000+) | 테스트: N=5 M=20 K=100</text>
+
+<!-- CAN'T DO -->
+<rect x="25" y="1058" width="630" height="44" rx="6" fill="none" stroke="#B4B2A9" stroke-width="0.5" stroke-dasharray="3 2" opacity="0.15"/>
+<text class="ts" x="340" y="1072" text-anchor="middle" dominant-baseline="central" opacity="0.35">고→저 직접 쓰기 불가 · 기분/마커/드라이브 제어 불가 · 자기기만 = 계층 간 불일치 자동 감지</text>
+<text class="ts" x="340" y="1090" text-anchor="middle" dominant-baseline="central" opacity="0.35">가능: 감정조절(의미기억 경유) · 주의전환 · 서사재구성 · 행동선택 · 의도적 기억저장</text>
+
+<!-- OPERATIONAL MODES -->
+<g class="c-green">
+  <rect x="25" y="1110" width="630" height="44" rx="8" stroke-width="0.5"/>
+  <text class="th" x="340" y="1126" text-anchor="middle" dominant-baseline="central">운용 모드</text>
+</g>
+<g class="c-green"><rect x="38" y="1134" width="195" height="16" rx="4" stroke-width="0.5"/><text class="ts" x="136" y="1142" text-anchor="middle" dominant-baseline="central">짧은: 저수준 정비</text></g>
+<g class="c-green"><rect x="242" y="1134" width="195" height="16" rx="4" stroke-width="0.5"/><text class="ts" x="340" y="1142" text-anchor="middle" dominant-baseline="central">중간: +DMN 사이클</text></g>
+<g class="c-green"><rect x="446" y="1134" width="195" height="16" rx="4" stroke-width="0.5"/><text class="ts" x="544" y="1142" text-anchor="middle" dominant-baseline="central">긴: 정지 → Δt일괄</text></g>
+
+<!-- INIT SEQUENCE -->
+<rect x="25" y="1164" width="630" height="36" rx="6" fill="none" stroke="#B4B2A9" stroke-width="0.5" stroke-dasharray="3 2" opacity="0.15"/>
+<text class="th" x="340" y="1178" text-anchor="middle" dominant-baseline="central" opacity="0.35">초기화 시퀀스</text>
+<text class="ts" x="340" y="1194" text-anchor="middle" dominant-baseline="central" opacity="0.3">기질→기저선→빈기억→최소시드자기모델→일반타자모델→호기심주도 첫 대화</text>
+
+<!-- EXTENSION -->
+<rect x="25" y="1208" width="630" height="44" rx="6" fill="none" stroke="#B4B2A9" stroke-width="0.5" stroke-dasharray="3 2" opacity="0.12"/>
+<text class="th" x="340" y="1222" text-anchor="middle" dominant-baseline="central" opacity="0.3">확장 방법</text>
+<text class="ts" x="340" y="1238" text-anchor="middle" dominant-baseline="central" opacity="0.25">고수준: 이벤트 구독/발행 모듈 추가 | 저수준: 경험벡터 ext 차원 추가</text>
+<text class="ts" x="340" y="1248" text-anchor="middle" dominant-baseline="central" opacity="0.25">스토리지: 새 테이블 추가 | 기존 모듈 수정 없음</text>
+
+<!-- STRUCTURE SUMMARY -->
+<rect x="25" y="1262" width="630" height="44" rx="6" fill="none" stroke="#B4B2A9" stroke-width="0.5" stroke-dasharray="3 2" opacity="0.1"/>
+<text class="th" x="340" y="1276" text-anchor="middle" dominant-baseline="central" opacity="0.25">3층 + 1서비스</text>
+<text class="ts" x="340" y="1290" text-anchor="middle" dominant-baseline="central" opacity="0.2">시스템(오케스트레이터) · 고수준(이벤트 버스, 다중LLM) · 저수준(고정 파이프라인)</text>
+<text class="ts" x="340" y="1302" text-anchor="middle" dominant-baseline="central" opacity="0.2">스토리지(기억+모델, 양쪽 접근) · 인터페이스(변환+경험벡터)</text>
+
+<!-- LEGEND -->
+<rect x="32" y="1322" width="10" height="10" rx="3" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.5"/>
+<text class="ts" x="46" y="1330" dominant-baseline="central">시스템</text>
+<rect x="88" y="1322" width="10" height="10" rx="3" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+<text class="ts" x="102" y="1330" dominant-baseline="central">LLM/상태</text>
+<rect x="156" y="1322" width="10" height="10" rx="3" fill="#FAECE7" stroke="#993C1D" stroke-width="0.5"/>
+<text class="ts" x="170" y="1330" dominant-baseline="central">감정</text>
+<rect x="202" y="1322" width="10" height="10" rx="3" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.5"/>
+<text class="ts" x="216" y="1330" dominant-baseline="central">스토리지</text>
+<rect x="266" y="1322" width="10" height="10" rx="3" fill="#FCEBEB" stroke="#A32D2D" stroke-width="0.5"/>
+<text class="ts" x="280" y="1330" dominant-baseline="central">트리거</text>
+<rect x="320" y="1322" width="10" height="10" rx="3" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
+<text class="ts" x="334" y="1330" dominant-baseline="central">기질</text>
+<rect x="366" y="1322" width="10" height="10" rx="3" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.5"/>
+<text class="ts" x="380" y="1330" dominant-baseline="central">감지</text>
+<rect x="412" y="1322" width="10" height="10" rx="3" fill="#EAF3DE" stroke="#3B6D11" stroke-width="0.5"/>
+<text class="ts" x="426" y="1330" dominant-baseline="central">운용</text>
+<rect x="458" y="1322" width="10" height="10" rx="3" fill="#FBEAF0" stroke="#993556" stroke-width="0.5"/>
+<text class="ts" x="472" y="1330" dominant-baseline="central">드라이브</text>
+<rect x="524" y="1322" width="10" height="10" rx="4" fill="none" stroke="#185FA5" stroke-width="0.5" stroke-dasharray="3 2"/>
+<text class="ts" x="538" y="1330" dominant-baseline="central">확장포인트</text>
+
+<!-- VERSION -->
+<text class="ts" x="340" y="1370" text-anchor="middle" dominant-baseline="central" opacity="0.2">v12 — 이벤트 드리븐 이중계층 시뮬레이션 명세</text>
+<text class="ts" x="340" y="1390" text-anchor="middle" dominant-baseline="central" opacity="0.15">기능적 이름 · 턴 기반 시간 · 3층+1서비스 · 고정 파이프라인(저)+이벤트(고) · 경험벡터 합성 조립</text>
+<text class="ts" x="340" y="1410" text-anchor="middle" dominant-baseline="central" opacity="0.12">12회 반복 · 4회 논문검증 · 27 시나리오 · 6 서비스sim · 이루다/뉴로사마 분석 · 30+ 구조결함 수정</text>
+<text class="ts" x="340" y="1432" text-anchor="middle" dominant-baseline="central" opacity="0.1">Barrett TCE · Scherer CPM · Daw DA-5HT · Menon DMN · Damasio SM · DeYoung CB5T · Bennett IA · Fleming MC</text>
+<text class="ts" x="340" y="1454" text-anchor="middle" dominant-baseline="central" opacity="0.08">사람을 복사하지 않는다 — 인간다움의 원리를 디지털 존재에 맞게 재해석한다</text>
+
+<!-- MODULATION ARROWS -->
+<line x1="28" y1="754" x2="28" y2="592" stroke="#D85A30" stroke-width="0.6" marker-end="url(#arrow)" opacity="0.3"/>
+<text class="ts" x="16" y="680" text-anchor="end" dominant-baseline="central" fill="#D85A30" opacity="0.4" transform="rotate(-90 16 680)">신호 ↑</text>
+<line x1="28" y1="554" x2="28" y2="540" stroke="#D85A30" stroke-width="0.6" marker-end="url(#arrow)" opacity="0.3"/>
+<line x1="532" y1="540" x2="532" y2="554" stroke="#185FA5" stroke-width="0.6" marker-end="url(#arrow)" opacity="0.3"/>
+<line x1="532" y1="592" x2="532" y2="642" stroke="#185FA5" stroke-width="0.6" marker-end="url(#arrow)" opacity="0.3"/>
+<text class="ts" x="538" y="620" dominant-baseline="central" fill="#185FA5" opacity="0.4">경험 ↓</text>
+
+</svg>

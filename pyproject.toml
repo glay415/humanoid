@@ -1,0 +1,28 @@
+[project]
+name = "humanoid"
+version = "0.1.0"
+description = "인지 아키텍처 v12 — 이벤트 드리븐 이중계층 시뮬레이션"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26",
+    "pydantic>=2.0",
+    "pyyaml>=6.0",
+    "chromadb>=0.5",
+    "litellm>=1.0",
+    "aiohttp>=3.9",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-p no:dash"

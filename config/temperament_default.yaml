@@ -1,0 +1,70 @@
+# 기질 파라미터 — "같은 코드, 다른 기저선 → 다른 사람"
+name: "default"
+description: "기본 기질 프로필"
+
+# 내부 상태 기저선 (9개, 0.0~1.0)
+baselines:
+  reward: 0.5
+  patience: 0.5
+  arousal: 0.4
+  learning: 0.5
+  excitation: 0.4
+  inhibition: 0.5
+  stress: 0.2
+  bonding: 0.3
+  comfort: 0.5
+
+# DMN 활성도 (유휴 시 기본)
+dmn_activity: 0.5
+
+# 메타인지
+metacognition_sensitivity: 0.5
+metacognition_floor: 0.1
+meta_resource_recovery: 0.05
+emotion_regulation_capacity: 0.5
+
+# 경험 마커
+marker_inertia: 50
+
+# 자기 인식
+self_awareness_resolution: 3
+
+# 서사
+narrative_pressure: 0.5
+
+# 드라이브 비율
+drive_ratios:
+  curiosity: 0.25
+  bonding: 0.25
+  preservation: 0.15
+  safety: 0.15
+  pleasure: 0.20
+
+# 관계
+relationship_threshold: 100
+
+# 기분
+mood_decay_eta: 0.05
+
+# 기질 표류
+temperament_drift_beta: 0.0002
+temperament_drift_gamma: 0.001
+
+# 재고정화
+reconsolidation_alpha: 0.3
+
+# 코어 어펙트 보정 계수
+negativity_weight: 0.6
+drive_alpha: 0.1
+drive_gamma: 0.05
+meta_beta: 0.08
+
+# 자동 부호화
+auto_encoding_threshold: 1.2
+
+# 빠른 경로
+fast_path_confidence_threshold: 0.6
+
+# 경험 마커
+marker_formation_threshold: 0.7
+marker_decay_rate: 0.01
