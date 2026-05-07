@@ -66,3 +66,14 @@ class FinalResponse(BaseModel):
     text: str
     rationale: str
     marker_match: Literal['approach', 'avoid', 'none']
+
+
+# ---------------------------------------------------------------------------
+# ⑤ 출력 후처리 — 톤 평가 스키마
+# ---------------------------------------------------------------------------
+
+
+class ToneEvaluation(BaseModel):
+    response_valence: float = Field(ge=-1.0, le=1.0)
+    response_arousal: float = Field(ge=0.0, le=1.0)
+    rationale: str
