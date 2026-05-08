@@ -122,6 +122,28 @@
 
 **Status**: accepted. 첫 적용: Wave 12 (`wave12/hard_reset`). 향후 destructive API (예: `/api/admin/reset-personas`, `/api/instances/{id}/forget-recent`) 도 동일 패턴 (typed-token if global, inline-confirm if per-instance) 따른다.
 
+## ADR-010 (2026-05-08): 출력 채널 — 9-dim 매질 + 강도 앵커를 candidate prompt 로 직접 주입
+
+**Context**: 채팅 도중 사용자가 "내부 상태가 천장에 박혔는데 응답 톤은 평탄하다" 를 관찰. 추적 결과 정보 병목 4 단:
+1. 9 → 2 dim 압축 (`raw_core_affect`): 보상-만-높음 vs 유대-만-높음 이 동일한 valence 1 슬롯에 합쳐짐.
+2. `emotion_appraisal` LLM 이 raw_core_affect 를 참고만 하고 자기가 valence/arousal 을 재생성 — 사용자 발화 의미만으로 결정. 내부 상태 saturation 이 *제안* 으로만 작동, 입력이 약하면 묵살.
+3. spec §3.1 의 "정밀도 손실 (자기 인식 한계)" 의도로 `marker_signal` 이 자연어 단서로 뭉개짐.
+4. `candidate_generation` 프롬프트의 톤 가이드에 강도 앵커가 없어서 valence 0.5 vs 0.9 톤 차이가 LLM 입장에서 "약간 긍정 ~ 매우 긍정" 사이의 default "따뜻한 친구톤" 으로 평탄화.
+
+매트릭스 캘리브레이션 (Δmax / D 조정) 으로는 이 병목을 못 푼다. 출력 채널부터 뚫어야 함.
+
+**Decision**: 두 가지를 candidate prompt 에 추가.
+
+- (β) **강도 앵커**: prompt 의 [강도 앵커] 섹션에 valence/arousal 단계별 톤 예시. `_intensity_label` 헬퍼가 숫자를 정성 라벨 ("매우 강한 긍정", "고조") 로 변환해 emotion_summary / mood_text 에 동봉.
+- (α) **9-dim 정성 라벨**: 새 `internal_state_summary` 변수. `_fmt_internal_state(state, baselines)` 가 baseline 에서 |편차| ≥ 0.15 인 파라미터만 정성 표현 ("유대감 거의 만점↑", "스트레스 꽤 높음↑") 으로 노출. 숫자는 안 보낸다 — spec §3.1 의 정밀도 손실 의도 보존. 평소엔 "(전반 안정 — baseline 근방)" 한 줄.
+- 보조: `emotion_appraisal` / `social_cognition` prompt 에 LLM scoring anchor 추가 (0.2~0.4 = 일상 긍정 등) — LLM 이 평범한 대화에서 0.7 default 찍는 거 방지.
+
+**spec §1 / §3.1 충돌 검토**: spec 은 "텍스트 = 몸" + "신호 상승 시 정밀도 손실" 을 명시한다. 본 ADR 의 9-dim 노출은 *정성 라벨* 형태라 정밀도 손실은 보존된다 (숫자/소수점 비공개). 추가로 prompt 가 "이 매질 정보는 의식적으로 '내가 지금 유대감 만점이야' 라고 말하라는 게 아니라 그 상태에 자연스럽게 어울리는 말투/단어/길이를 고르라는 신호" 라고 명시 — 매질 자체를 메타발화로 노출하지 않도록 가드. spec 위반이 아니라 layered identity 의 surface 표현력 강화.
+
+**Consequences**: 채팅 톤이 내부 상태 saturation 에 즉각 반응 (이전엔 평탄). 매트릭스 캘리브레이션 (Δmax / D 조정 — 사용자 분석 옵션 A) 결정은 본 변경의 효과 측정 후 별도 진행. emotion_appraisal LLM 의 덮어쓰기 (병목 #2) 는 옵션 γ 로 따로 — raw_core_affect 와 LLM 출력 가중평균 — fitness function 정의가 어려워서 본 ADR 후속 ADR 로 미룸.
+
+**Status**: accepted (commit `f098bdc` 본 변경 + 본 ADR 별도 commit).
+
 ---
 
 ## Future ADRs (placeholder)
