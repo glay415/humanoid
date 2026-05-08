@@ -6,8 +6,12 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass, field
 from typing import Callable, Any
+
+
+_log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -60,8 +64,25 @@ class EventBus:
         self._subscribers.setdefault(event_name, []).append(handler)
 
     async def publish(self, event: Event) -> None:
+        """이벤트 발행 — 구독자 한 명의 예외가 나머지 구독자/동기화 지점을
+        막지 않도록 각 핸들러 호출을 try/except 로 격리한다 (audit β10).
+
+        ``asyncio.CancelledError`` 는 task 종료 신호이므로 swallow 하지 않고
+        그대로 propagate 한다. 일반 ``Exception`` 만 잡아 logger 에 남기고
+        다음 핸들러로 진행한다. SyncPoint.receive 는 항상 호출되므로
+        한 핸들러 실패가 sync_point 를 영구 incomplete 상태로 만들지 않는다.
+        """
         for handler in self._subscribers.get(event.name, []):
-            await handler(event)
+            try:
+                await handler(event)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                _log.exception(
+                    "event_bus handler failed for event=%s source=%s",
+                    event.name,
+                    event.source,
+                )
         for sp in self._sync_points.values():
             sp.receive(event.name, event.data)
 

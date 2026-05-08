@@ -12,11 +12,13 @@ spawn 시 build_full_orchestrator(config_path=temperament.yaml, storage_root=...
 """
 from __future__ import annotations
 
+import asyncio
 import datetime as _dt
 import json
 import random
 import shutil
 import uuid
+from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -100,6 +102,10 @@ class InstanceManager:
         # In-memory cache: 살아있는 오케스트레이터.
         self._live: dict[str, Any] = {}
         self._meta_cache: dict[str, InstanceMetadata] = {}
+        # 인스턴스별 asyncio.Lock — 동시 turn 호출이 같은 orchestrator 의
+        # turn_number / internal_state 를 race condition 으로 손상시키지 않도록
+        # serialize 한다 (audit δ3). defaultdict 라 처음 접근 시 자동 생성.
+        self._locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         # LLM 클라이언트를 테스트에서 갈아끼우려는 훅. None 이면 build_full_orchestrator 가
         # 자체 LLMClient() 를 만든다.
         self._llm_client_factory = llm_client_factory
@@ -250,6 +256,16 @@ class InstanceManager:
         self._live[instance_id] = orch
         return orch
 
+    def get_lock(self, instance_id: str) -> asyncio.Lock:
+        """인스턴스별 asyncio.Lock 반환. 없으면 자동 생성 (defaultdict).
+
+        같은 인스턴스에 동시 turn 요청이 들어왔을 때 SSE generator 호출부가
+        ``async with manager.get_lock(instance_id):`` 로 직렬화해야 한다.
+        그렇지 않으면 두 코루틴이 동시에 ``orch.turn_number`` 를 증가시키고
+        ``orch.low_level.internal_state`` 를 동시에 변경해 상태가 손상된다.
+        """
+        return self._locks[instance_id]
+
     def get_metadata(self, instance_id: str) -> InstanceMetadata:
         if instance_id in self._meta_cache:
             return self._meta_cache[instance_id]
@@ -294,6 +310,8 @@ class InstanceManager:
         if instance_id in self._live:
             self._live.pop(instance_id, None)
         self._meta_cache.pop(instance_id, None)
+        # turn lock 도 함께 폐기 — 같은 id 가 다시 spawn 되면 새 lock 이 생성된다.
+        self._locks.pop(instance_id, None)
         idir = self.instance_dir(instance_id)
         if idir.exists():
             # SQLite 핸들이 GC 안 된 경우를 대비해 Windows 에서도 안전하게 시도.
@@ -450,6 +468,7 @@ class InstanceManager:
             self._release_storage_handles(iid)
         self._live.clear()
         self._meta_cache.clear()
+        self._locks.clear()
         # 2. 디렉토리 카운팅.
         removed = 0
         if self.root.exists():

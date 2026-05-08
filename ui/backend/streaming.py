@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from typing import AsyncGenerator
 
 from core.event_bus import Event
@@ -33,6 +34,9 @@ from ui.backend.sse_events import (
     MemoryEvent,
     ToneEvent,
 )
+
+
+_log = logging.getLogger(__name__)
 
 
 SSEMessage = dict[str, str]  # {'event': str, 'data': str}
@@ -59,6 +63,7 @@ async def stream_turn(
     user_input: str,
     *,
     on_mood_recorded=None,
+    turn_lock: asyncio.Lock | None = None,
 ) -> AsyncGenerator[SSEMessage, None]:
     """한 turn 을 stage 단위로 실행하며 SSE 메시지를 yield.
 
@@ -67,9 +72,64 @@ async def stream_turn(
         user_input: 사용자 입력.
         on_mood_recorded: callable(turn_number, mood) — low_level 이후 호출.
                            StateHolder.record_mood 를 묶어 외부 history 에 push.
+        turn_lock: 같은 인스턴스의 동시 turn 호출을 직렬화하기 위한 asyncio.Lock.
+                   ``InstanceManager.get_lock(instance_id)`` 의 반환값을 그대로 넘긴다.
+                   None 이면 직렬화 없이 곧바로 진행 (legacy /api/turn 호환).
+                   audit δ3 — 두 코루틴이 동시에 같은 ``orch.turn_number`` 를
+                   증가시키는 race 를 방지한다.
     Yields:
         {'event': str, 'data': json_str} — sse_starlette EventSourceResponse 가 그대로 전송.
+
+    클라이언트가 SSE 스트림을 abort 하면 generator 가 cancel 되는데, 그때
+    ``asyncio.CancelledError`` 를 잡아 logger 로 남기고 re-raise 한다 (audit δ4).
+    이렇게 해야 wasted LLM 토큰 발생을 막고 상위 task 가 cancel 상태를 정확히
+    인지한다 — 절대 CancelledError 를 swallow 하지 않는다.
     """
+    if turn_lock is not None:
+        async with turn_lock:
+            async for msg in _stream_turn_body(
+                orch, user_input, on_mood_recorded=on_mood_recorded
+            ):
+                yield msg
+        return
+    async for msg in _stream_turn_body(
+        orch, user_input, on_mood_recorded=on_mood_recorded
+    ):
+        yield msg
+
+
+async def _stream_turn_body(
+    orch,
+    user_input: str,
+    *,
+    on_mood_recorded=None,
+) -> AsyncGenerator[SSEMessage, None]:
+    """실제 turn 파이프라인. CancelledError 를 잡아 log + re-raise.
+
+    stream_turn 은 lock 획득만 책임지고 본 body 는 audit δ4 의 cancel 처리를 담당.
+    """
+    try:
+        async for msg in _stream_turn_pipeline(
+            orch, user_input, on_mood_recorded=on_mood_recorded
+        ):
+            yield msg
+    except asyncio.CancelledError:
+        # 클라이언트가 SSE 를 닫으면 starlette 가 generator task 를 cancel.
+        # 여기서 swallow 하면 상위 task 가 cancel 사실을 모르고 자원 누수.
+        _log.info(
+            "stream_turn cancelled mid-flight (turn=%s) — re-raising",
+            getattr(orch, 'turn_number', '?'),
+        )
+        raise
+
+
+async def _stream_turn_pipeline(
+    orch,
+    user_input: str,
+    *,
+    on_mood_recorded=None,
+) -> AsyncGenerator[SSEMessage, None]:
+    """순수 turn pipeline — lock / cancel 처리는 호출자 책임."""
     # core/orchestrator.process_conversation_turn 와 동일한 부팅 시퀀스.
     orch.turn_number += 1
     orch.current_turn_type = TurnType.CONVERSATION
