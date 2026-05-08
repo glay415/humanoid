@@ -279,3 +279,34 @@ class TestMultiTurnConvergence:
             engine.update(exp)
         assert np.all(engine.state >= 0.0)
         assert np.all(engine.state <= 1.0)
+
+
+# ---------------------------------------------------------------------------
+# 8. set_baselines — Temperament drift 동기화 (audit α1)
+# ---------------------------------------------------------------------------
+
+class TestSetBaselines:
+    def test_set_baselines_updates_engine_baselines(self, engine):
+        new_b = {p: 0.7 for p in InternalState.PARAMS}
+        engine.set_baselines(new_b)
+        np.testing.assert_array_almost_equal(
+            engine.baselines, np.full(9, 0.7, dtype=np.float64)
+        )
+
+    def test_set_baselines_does_not_mutate_state(self, engine):
+        original_state = engine.state.copy()
+        engine.set_baselines({p: 0.99 for p in InternalState.PARAMS})
+        np.testing.assert_array_equal(engine.state, original_state)
+
+    def test_set_baselines_changes_D_pull_target(self, engine):
+        """기저선을 옮기면 D × (baselines - state) 의 부호가 뒤집힌다."""
+        # state = 0.5, baselines = 0.5 → D 항 = 0.
+        zero_exp = _zero_exp()
+        delta1 = engine.A @ zero_exp + engine.W @ (engine.state - engine.baselines) \
+            + engine.D @ (engine.baselines - engine.state)
+        np.testing.assert_array_almost_equal(delta1, np.zeros(9))
+
+        # baselines 를 위로 옮기면 D 항이 양수가 되어야 한다.
+        engine.set_baselines({p: 0.7 for p in InternalState.PARAMS})
+        d_term = engine.D @ (engine.baselines - engine.state)
+        assert np.all(d_term > 0.0)
