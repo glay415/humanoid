@@ -20,6 +20,7 @@ import { Gallery } from './components/Gallery';
 import { SpawnModal } from './components/SpawnModal';
 import { WipeConfirmModal } from './components/WipeConfirmModal';
 import { LogsTabSwitcher, type ChatColumnMode } from './components/LogsTabSwitcher';
+import { LogsPanel } from './components/LogsPanel';
 
 export default function App() {
   const inst = useInstances();
@@ -99,9 +100,7 @@ export default function App() {
               }
             />
           ) : (
-            <div className="flex-1 flex items-center justify-center px-6 text-sm text-ink-500 dark:text-zinc-400 font-mono">
-              기록 패널 준비 중...
-            </div>
+            <LogsPanel instanceId={inst.selectedId} theme={theme} />
           )}
         </section>
 
