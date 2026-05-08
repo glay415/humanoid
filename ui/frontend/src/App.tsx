@@ -19,6 +19,7 @@ import { DriftStepPanel } from './components/DriftStepPanel';
 import { Gallery } from './components/Gallery';
 import { SpawnModal } from './components/SpawnModal';
 import { WipeConfirmModal } from './components/WipeConfirmModal';
+import { LogsTabSwitcher, type ChatColumnMode } from './components/LogsTabSwitcher';
 
 export default function App() {
   const inst = useInstances();
@@ -27,6 +28,7 @@ export default function App() {
   const { theme, toggle } = useTheme();
   const [spawnOpen, setSpawnOpen] = useState(false);
   const [wipeOpen, setWipeOpen] = useState(false);
+  const [columnMode, setColumnMode] = useState<ChatColumnMode>('chat');
 
   const server = chat.state.serverState;
   const isInFlight =
@@ -56,40 +58,51 @@ export default function App() {
           />
         </section>
 
-        {/* Center: chat */}
+        {/* Center: chat or logs (Wave 14D — switcher) */}
         <section className="border-x border-ink-200 bg-white dark:border-zinc-800 dark:bg-zinc-900 flex flex-col min-h-screen lg:max-h-screen">
-          <Chat
-            messages={chat.state.messages}
-            currentStage={chat.state.currentStage}
-            errors={chat.state.errors}
-            pendingFinal={chat.state.pendingFinal}
-            onSend={chat.sendMessage}
-            onReset={chat.reset}
-            disabled={isInFlight}
-            noInstance={noInstance}
-            subtitle={subtitle}
-            placeholder={
-              noInstance
-                ? '왼쪽 갤러리에서 캐릭터를 선택하거나 스폰하세요'
-                : '메시지를 입력하세요...'
-            }
-            emptyMessage={
-              noInstance
-                ? '왼쪽 갤러리에서 캐릭터를 선택하거나 스폰하세요.'
-                : '메시지를 입력해 대화를 시작하세요. (Enter 전송 / Shift+Enter 줄바꿈)'
-            }
-            headerExtra={
-              <>
-                {deep && isInFlight && (
-                  <span className="mr-2 px-1.5 py-0.5 rounded text-[10px] font-mono bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300">
-                    심층 모드
-                  </span>
-                )}
-                <DeepModeToggle deep={deep} onToggle={toggleDeep} />
-                <ThemeToggle theme={theme} onToggle={toggle} />
-              </>
-            }
+          <LogsTabSwitcher
+            mode={columnMode}
+            onChange={setColumnMode}
+            disabled={noInstance}
           />
+          {columnMode === 'chat' ? (
+            <Chat
+              messages={chat.state.messages}
+              currentStage={chat.state.currentStage}
+              errors={chat.state.errors}
+              pendingFinal={chat.state.pendingFinal}
+              onSend={chat.sendMessage}
+              onReset={chat.reset}
+              disabled={isInFlight}
+              noInstance={noInstance}
+              subtitle={subtitle}
+              placeholder={
+                noInstance
+                  ? '왼쪽 갤러리에서 캐릭터를 선택하거나 스폰하세요'
+                  : '메시지를 입력하세요...'
+              }
+              emptyMessage={
+                noInstance
+                  ? '왼쪽 갤러리에서 캐릭터를 선택하거나 스폰하세요.'
+                  : '메시지를 입력해 대화를 시작하세요. (Enter 전송 / Shift+Enter 줄바꿈)'
+              }
+              headerExtra={
+                <>
+                  {deep && isInFlight && (
+                    <span className="mr-2 px-1.5 py-0.5 rounded text-[10px] font-mono bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300">
+                      심층 모드
+                    </span>
+                  )}
+                  <DeepModeToggle deep={deep} onToggle={toggleDeep} />
+                  <ThemeToggle theme={theme} onToggle={toggle} />
+                </>
+              }
+            />
+          ) : (
+            <div className="flex-1 flex items-center justify-center px-6 text-sm text-ink-500 dark:text-zinc-400 font-mono">
+              기록 패널 준비 중...
+            </div>
+          )}
         </section>
 
         {/* Right rail: cognitive state sidebar */}
