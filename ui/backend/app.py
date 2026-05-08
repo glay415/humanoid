@@ -79,6 +79,11 @@ class SpawnRequest(BaseModel):
     jitter: float = 0.3
 
 
+class WipeRequest(BaseModel):
+    """전체 초기화 요청 — confirm 은 반드시 'WIPE' 와 정확히 일치해야 한다."""
+    confirm: str
+
+
 class InstanceCardModel(BaseModel):
     instance_id: str
     display_name: str
@@ -304,3 +309,41 @@ async def reset_instance(instance_id: str) -> Response:
     MANAGER.reset(instance_id)
     _instance_mood_history.pop(instance_id, None)
     return Response(status_code=204)
+
+
+@app.post("/api/instances/{instance_id}/hard-reset", status_code=200)
+async def hard_reset_instance(instance_id: str) -> dict:
+    """페르소나 + jitter_seed 보존 / 영속 스토리지 (chroma·sqlite·state) 삭제.
+
+    soft `/reset` 와의 차이: hard reset 은 디스크 영속 영역 (ChromaDB,
+    SQLite, state.json) 까지 모두 비운 뒤 같은 baselines 로 재구축한다.
+    페르소나와 jitter_seed 가 보존되므로 결정론적으로 동일한 캐릭터가
+    "기억 없는" 상태로 다시 시작한다.
+
+    반환: 갱신된 InstanceCard dict (turn_number=0, last_mood 영점).
+    """
+    if not MANAGER.exists(instance_id):
+        raise HTTPException(status_code=404, detail=f"instance not found: {instance_id}")
+    meta = MANAGER.hard_reset(instance_id)
+    _instance_mood_history.pop(instance_id, None)
+    return _card_dict(meta)
+
+
+@app.post("/api/admin/wipe", status_code=200)
+async def admin_wipe_all(body: WipeRequest) -> dict:
+    """모든 인스턴스를 영구 삭제. body.confirm 은 정확히 'WIPE' 여야 한다.
+
+    토큰 불일치 시 400. 성공 시 {removed: int} 반환. legacy /api/turn 은
+    이후 첫 호출에서 _default 인스턴스를 자동 재스폰한다.
+    """
+    if body.confirm != "WIPE":
+        raise HTTPException(status_code=400, detail="confirmation token mismatch")
+    result = MANAGER.wipe_all()
+    _instance_mood_history.clear()
+    # legacy /api/turn 을 위한 _default 자동 재스폰. 실패해도 wipe 결과는 그대로.
+    try:
+        STATE.initialize()
+    except Exception:
+        STATE.orchestrator = None
+        STATE.mood_history.clear()
+    return result
