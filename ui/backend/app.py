@@ -23,7 +23,7 @@ from collections import defaultdict
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from slowapi import Limiter
@@ -51,7 +51,7 @@ limiter = Limiter(key_func=get_remote_address)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """앱 시작 시 production invariants 검증 + STATE.initialize()."""
-    # production 모드라면 ALLOWED_ORIGINS 검증.
+    # production 모드라면 ALLOWED_ORIGINS / ADMIN_TOKEN 검증.
     _auth.enforce_production_invariants()
     if STATE.orchestrator is None:
         # 테스트가 미리 STATE.initialize() 한 경우는 건드리지 않는다.
@@ -83,6 +83,25 @@ app.add_middleware(
     allow_methods=_auth.cors_methods(),
     allow_headers=_auth.cors_headers(),
 )
+
+
+# ---------------------------------------------------------------------------
+# 보안 의존성 — admin token 헤더 검사
+# ---------------------------------------------------------------------------
+
+
+def _require_admin_token(
+    x_admin_token: str | None = Header(default=None, alias=_auth.ADMIN_TOKEN_HEADER),
+) -> None:
+    """destructive 라우트용 admin token 게이트.
+
+    `HUMANOID_ADMIN_TOKEN` 미설정 → no-op (dev 자유 모드).
+    설정됨 + 헤더 일치 → 통과. 그 외 → 401.
+    """
+    if not _auth.admin_token_required():
+        return
+    if not _auth.verify_admin_token(x_admin_token):
+        raise HTTPException(status_code=401, detail="admin token required")
 
 
 # ---------------------------------------------------------------------------
@@ -273,7 +292,11 @@ async def get_instance_state(instance_id: str) -> dict:
 
 @app.delete("/api/instances/{instance_id}", status_code=204)
 @limiter.limit("5/minute")
-async def delete_instance(request: Request, instance_id: str) -> Response:
+async def delete_instance(
+    request: Request,
+    instance_id: str,
+    _admin: None = Depends(_require_admin_token),
+) -> Response:
     if not MANAGER.exists(instance_id):
         raise HTTPException(status_code=404, detail=f"instance not found: {instance_id}")
     MANAGER.delete(instance_id)
@@ -337,7 +360,11 @@ async def reset_instance(instance_id: str) -> Response:
 
 @app.post("/api/instances/{instance_id}/hard-reset", status_code=200)
 @limiter.limit("5/minute")
-async def hard_reset_instance(request: Request, instance_id: str) -> dict:
+async def hard_reset_instance(
+    request: Request,
+    instance_id: str,
+    _admin: None = Depends(_require_admin_token),
+) -> dict:
     """페르소나 + jitter_seed 보존 / 영속 스토리지 (chroma·sqlite·state) 삭제.
 
     soft `/reset` 와의 차이: hard reset 은 디스크 영속 영역 (ChromaDB,
@@ -356,7 +383,11 @@ async def hard_reset_instance(request: Request, instance_id: str) -> dict:
 
 @app.post("/api/admin/wipe", status_code=200)
 @limiter.limit("5/minute")
-async def admin_wipe_all(request: Request, body: WipeRequest) -> dict:
+async def admin_wipe_all(
+    request: Request,
+    body: WipeRequest,
+    _admin: None = Depends(_require_admin_token),
+) -> dict:
     """모든 인스턴스를 영구 삭제. body.confirm 은 정확히 'WIPE' 여야 한다.
 
     토큰 불일치 시 400. 성공 시 {removed: int} 반환. legacy /api/turn 은
