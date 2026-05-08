@@ -22,6 +22,9 @@ class InternalState:
     def __init__(self, baselines: dict[str, float]):
         self.state = np.array([baselines[p] for p in self.PARAMS], dtype=np.float64)
         self.baselines = self.state.copy()
+        # cached eigenvalues of J = W - D (lazy). W/D 는 init 후 변하지 않으므로
+        # 첫 호출 시 1회 계산해 저장 — debug 페이로드 매 턴 재계산 회피.
+        self._cached_eigenvalues: np.ndarray | None = None
 
         # A: 경험 벡터(5) → 내부 상태(9) 매핑
         # fmt: off
@@ -79,6 +82,55 @@ class InternalState:
         delta = np.clip(delta, -self.DELTA_MAX, self.DELTA_MAX)
         self.state = np.clip(self.state + delta, 0.0, 1.0)
         return self.state
+
+    def compute_decomposition(
+        self, experience_vector: np.ndarray
+    ) -> dict[str, dict[str, float]]:
+        """현재 state 기준으로 update() 의 3개 항을 분해해 dict 로 반환.
+
+        Δstate = A·exp + W·(state - baseline) + D·(baseline - state)
+        의 각 항을 9 파라미터별로 풀어 시각화용 dict 로 만든다.
+        ``update()`` 와 다르게 **state 를 mutate 하지 않는다** — 즉 debug=True
+        일 때 streaming 에서 호출해도 안전하다.
+
+        Returns:
+            {
+              'a_exp_term':   {param: value, ...9},
+              'w_dev_term':   {param: value, ...9},
+              'd_recovery_term': {param: value, ...9},
+              'delta_clamped': {param: value, ...9},  # Δmax + [0,1] 클램프 후 실제 적용 Δ
+              'exp_vec':      {dim: value, ...5},
+            }
+        """
+        a_exp = self.A @ experience_vector
+        deviation = self.state - self.baselines
+        w_dev = self.W @ deviation
+        d_rec = self.D @ (self.baselines - self.state)
+
+        delta = a_exp + w_dev + d_rec
+        delta_clamped = np.clip(delta, -self.DELTA_MAX, self.DELTA_MAX)
+        # 후 [0,1] 클램프까지 반영한 실제 적용 Δ.
+        applied = np.clip(self.state + delta_clamped, 0.0, 1.0) - self.state
+
+        return {
+            'a_exp_term': dict(zip(self.PARAMS, a_exp.tolist())),
+            'w_dev_term': dict(zip(self.PARAMS, w_dev.tolist())),
+            'd_recovery_term': dict(zip(self.PARAMS, d_rec.tolist())),
+            'delta_clamped': dict(zip(self.PARAMS, applied.tolist())),
+            'exp_vec': dict(zip(self.EXP_DIMS, experience_vector.tolist())),
+        }
+
+    @property
+    def cached_eigenvalues(self) -> np.ndarray:
+        """J = W - D 의 고유값 배열. 최초 호출 시 계산 후 캐시.
+
+        W/D 는 init 후 변경되지 않는다고 가정 (현재 코드상 fast_path 도 W/D 를
+        건드리지 않음). 외부에서 W/D 를 강제로 바꾸는 경우 ``_cached_eigenvalues``
+        를 None 으로 리셋하면 다음 호출에 다시 계산된다.
+        """
+        if self._cached_eigenvalues is None:
+            self._cached_eigenvalues = np.linalg.eigvals(self.W - self.D)
+        return self._cached_eigenvalues
 
     def apply_fast_path(self, state_changes: dict[str, float]) -> None:
         """빠른 경로 즉시 상태 변경. Δmax 클램핑 + [0,1] 클램핑."""
