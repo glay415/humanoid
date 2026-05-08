@@ -69,6 +69,35 @@ class Temperament:
         for i, p in enumerate(InternalState.PARAMS):
             self.baselines[p] = float(new_baselines[i])
 
+    def compute_drift_step(
+        self, current_state: np.ndarray
+    ) -> tuple[dict[str, float], dict[str, float], float]:
+        """단일 turn 의 표류 step 을 mutate 없이 시뮬레이션해 반환.
+
+        debug 페이로드 전용. 실제 ``drift()`` 와 동일한 EMA 식을 적용하지만
+        ``self._baseline_ema`` 와 ``self.baselines`` 는 손대지 않는다.
+
+        Returns:
+            (before_ema, after_ema, drift_delta_norm)
+            - before_ema: 호출 전 baseline_ema dict (9 param)
+            - after_ema:  EMA 갱신 후 dict (9 param) — 실제로 ``drift()`` 가
+              호출됐다면 산출됐을 값
+            - drift_delta_norm: ‖after_ema - before_ema‖₂ (스칼라)
+        """
+        before_arr = self._baseline_ema.copy()
+        after_arr = (
+            self.beta * current_state + (1.0 - self.beta) * before_arr
+        )
+        delta_norm = float(np.linalg.norm(after_arr - before_arr))
+
+        before = {
+            p: float(before_arr[i]) for i, p in enumerate(InternalState.PARAMS)
+        }
+        after = {
+            p: float(after_arr[i]) for i, p in enumerate(InternalState.PARAMS)
+        }
+        return before, after, delta_norm
+
     def get(self, key: str, default=None):
         """config에서 임의 파라미터 조회."""
         return self.config.get(key, default)
