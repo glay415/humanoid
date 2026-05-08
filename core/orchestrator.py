@@ -666,50 +666,128 @@ class Orchestrator:
     # Phase 5: 트리거 레지스트리 wiring (spec §1.2)
     # ------------------------------------------------------------------
     def register_default_triggers(self) -> None:
-        """spec §1.2 의 기본 트리거 5종 등록.
+        """spec §1.2 의 12개 트리거 등록 (audit ε1).
+
+        spec §1.2 표 기준 12개 — EXTERNAL 2 + TEMPORAL 3 + INTERNAL 4 + RELATIONSHIP 3.
+
+        주의: 일부 트리거는 ``process_conversation_turn`` 자체로 암묵적으로
+        발동된다 (메시지 도착, 패턴 매칭, 시간대 변화). 그 트리거는 레지스트리
+        에는 등록하되 condition=lambda ctx: False 로 두어 evaluate_triggers
+        호출 흐름에서는 발동되지 않게 한다 (이중 발동 방지). 등록 자체는
+        spec 의도와 레지스트리 외형을 일치시키기 위함.
 
         build_full_orchestrator 인스턴스화 직후 1회 호출.
         """
-        # Internal: 드라이브 결핍 > 0.6 → DMN 후보
+        # ---- EXTERNAL (외부) — implicit (process_conversation_turn 가 직접 처리) ----
+        # spec §1.2 의 외부 트리거 (메시지 도착, 패턴 매칭) 는 본질적으로
+        # process_conversation_turn entry-point 와 low_level.fast_path 가
+        # 직접 발동한다. 즉 evaluate_triggers 의 컨텍스트 평가 흐름에서는
+        # 절대 발동되지 않아야 한다 (이중 발동 방지).
+        # 메시지 도착 트리거는 등록조차 하지 않는다 — process_conversation_turn
+        # 호출이 곧 그 트리거다.
+        # 패턴 매칭은 low_level.fast_path 가 자율적으로 발동하므로 condition=False.
+        self.trigger_registry.register(Trigger(
+            name='pattern_matched',
+            category=TriggerCategory.EXTERNAL,
+            condition=lambda ctx: False,  # implicit — low_level.fast_path
+            action='fast_path',
+        ))
+
+        # ---- INTERNAL (내부) — 4개 ----
+        # 내부: 드라이브 결핍 > 0.6 → DMN 또는 자발적 행동.
         self.trigger_registry.register(Trigger(
             name='drive_deficit_high',
             category=TriggerCategory.INTERNAL,
             condition=lambda ctx: ctx.get('max_deficit', 0.0) > 0.6,
             action='dmn_turn',
         ))
-        # Internal: 반추 카운터 초과 → 메타인지 개입
+        # 내부: 기분 극단값 |valence| > 0.85 → 긴급 정비.
         self.trigger_registry.register(Trigger(
-            name='rumination_high',
+            name='mood_extreme',
             category=TriggerCategory.INTERNAL,
-            condition=lambda ctx: ctx.get('rumination_count', 0) > 5,
-            action='metacog_break',
+            condition=lambda ctx: abs(ctx.get('mood_valence', 0.0)) > 0.85,
+            action='emergency_maintenance',
         ))
-        # Internal: 메타 자원 floor → 통제 해제
+        # 내부: 메타 자원 floor → 통제 해제.
         self.trigger_registry.register(Trigger(
             name='meta_resource_low',
             category=TriggerCategory.INTERNAL,
             condition=lambda ctx: ctx.get('meta_resource', 1.0) <= 0.15,
             action='control_release',
         ))
-        # Temporal: 짧은 공백 → DMN 턴
+        # 내부: 반추 카운터 초과 → 메타인지 개입.
+        self.trigger_registry.register(Trigger(
+            name='rumination_high',
+            category=TriggerCategory.INTERNAL,
+            condition=lambda ctx: ctx.get('rumination_count', 0) > 5,
+            action='metacog_break',
+        ))
+
+        # ---- RELATIONSHIP (관계) — 3개. INTERNAL 과 동일 우선순위 ----
+        # 관계: bonding 누적 > 0.7 → 관계 단계 상승.
+        self.trigger_registry.register(Trigger(
+            name='bonding_threshold',
+            category=TriggerCategory.RELATIONSHIP,
+            condition=lambda ctx: ctx.get('bonding_state', 0.0) > 0.7,
+            action='relationship_up',
+        ))
+        # 관계: threat 연속 N회 → 관계 단계 하강.
+        self.trigger_registry.register(Trigger(
+            name='threat_streak_high',
+            category=TriggerCategory.RELATIONSHIP,
+            condition=lambda ctx: ctx.get('threat_streak', 0) >= 3,
+            action='relationship_down',
+        ))
+        # 관계: bonding 장기 감쇠 (낮은 bonding + 긴 idle) → 관계 점진적 하강.
+        self.trigger_registry.register(Trigger(
+            name='bonding_long_decay',
+            category=TriggerCategory.RELATIONSHIP,
+            condition=lambda ctx: (
+                ctx.get('bonding_state', 1.0) < 0.15
+                and ctx.get('idle_turns', 0) > 50
+            ),
+            action='relationship_decay',
+        ))
+
+        # ---- TEMPORAL (시간) — 3개 ----
+        # 시간: 짧은 공백 → DMN 턴.
         self.trigger_registry.register(Trigger(
             name='idle_short',
             category=TriggerCategory.TEMPORAL,
             condition=lambda ctx: ctx.get('idle_turns', 0) >= 3,
             action='dmn_turn',
         ))
-        # Temporal: 더 긴 공백 → 정비 턴
+        # 시간: 더 긴 공백 → 정비 턴.
         self.trigger_registry.register(Trigger(
             name='idle_medium',
             category=TriggerCategory.TEMPORAL,
             condition=lambda ctx: ctx.get('idle_turns', 0) >= 10,
             action='maintenance_turn',
         ))
+        # 시간: 정비 주기 도달 → 정비 턴.
+        self.trigger_registry.register(Trigger(
+            name='maintenance_cycle',
+            category=TriggerCategory.TEMPORAL,
+            condition=lambda ctx: ctx.get('idle_turns', 0) >= 30,
+            action='maintenance_turn',
+        ))
+        # 시간: 시간대 변화 → 자기감지 입력. low_level.self_sensing 가 암묵 처리.
+        self.trigger_registry.register(Trigger(
+            name='time_of_day_change',
+            category=TriggerCategory.TEMPORAL,
+            condition=lambda ctx: False,  # implicit — low_level.self_sensing
+            action='self_sensing_input',
+        ))
 
     def evaluate_triggers(self, idle_turns: int = 0) -> list:
         """현재 컨텍스트로 트리거 발동 평가. 우선순위 정렬된 리스트 반환.
 
-        호출자는 `fired[0].action` 으로 다음 턴 유형을 결정한다.
+        호출자는 ``fired[0].action`` 으로 다음 턴 유형을 결정한다.
+
+        spec §1.2 의 12개 트리거가 참조하는 컨텍스트 필드를 모두 채운다:
+        - max_deficit, rumination_count, meta_resource, idle_turns (기존)
+        - mood_valence — 저수준 emotion_base.mood (audit ε1)
+        - bonding_state, threat_streak — other_model.data (audit ε1)
         """
         if self.low_level is None:
             return []
@@ -725,11 +803,37 @@ class Orchestrator:
                 except (ValueError, AttributeError):
                     rumination_count = 0
 
+        # mood_valence — emotion_base 의 leaky-integral mood. fallback 0.0.
+        mood_valence = 0.0
+        eb = getattr(self.low_level, 'emotion_base', None)
+        if eb is not None:
+            try:
+                mood_valence = float(eb.mood.get('valence', 0.0))
+            except (AttributeError, TypeError, ValueError):
+                mood_valence = 0.0
+
+        # 관계 컨텍스트 — other_model.data. 미주입 시 중립값 (트리거 불발).
+        bonding_state = 0.0
+        threat_streak = 0
+        if self.other_model is not None:
+            data = getattr(self.other_model, 'data', {}) or {}
+            try:
+                bonding_state = float(data.get('bonding_state', 0.0))
+            except (TypeError, ValueError):
+                bonding_state = 0.0
+            try:
+                threat_streak = int(data.get('threat_streak', 0))
+            except (TypeError, ValueError):
+                threat_streak = 0
+
         ctx = {
             'max_deficit': drive_status.get('max_deficit', 0.0),
             'rumination_count': rumination_count,
             'meta_resource': self.metacognition.resource if self.metacognition else 1.0,
             'idle_turns': idle_turns,
+            'mood_valence': mood_valence,
+            'bonding_state': bonding_state,
+            'threat_streak': threat_streak,
         }
         return self.trigger_registry.check_all(ctx)
 

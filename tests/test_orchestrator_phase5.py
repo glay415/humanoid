@@ -141,21 +141,38 @@ def orch(tmp_path, mock_llm):
 
 
 # ---------------------------------------------------------------------------
-# 1. register_default_triggers — 5개 등록
+# 1. register_default_triggers — spec §1.2 표 기준 12개 등록 (audit ε1)
 # ---------------------------------------------------------------------------
 
 
-def test_register_default_triggers_adds_five_triggers(orch):
+def test_register_default_triggers_adds_twelve_triggers(orch):
+    """spec §1.2 표 12개 = 5(기존) + 7(audit ε1 추가).
+
+    구성: external 1 + internal 4 + relationship 3 + temporal 4 = 12.
+    참고: 메시지 도착(external) 은 process_conversation_turn entry-point 가
+    곧 그 트리거이므로 레지스트리에 등록조차 하지 않는다.
+    """
     orch.register_default_triggers()
     triggers = orch.trigger_registry._triggers
-    assert len(triggers) == 5
+    assert len(triggers) == 12
     names = {t.name for t in triggers}
     assert names == {
+        # external (1, implicit — message_arrival 은 등록 안 함)
+        'pattern_matched',
+        # internal (4)
         'drive_deficit_high',
-        'rumination_high',
+        'mood_extreme',
         'meta_resource_low',
+        'rumination_high',
+        # relationship (3)
+        'bonding_threshold',
+        'threat_streak_high',
+        'bonding_long_decay',
+        # temporal (4)
         'idle_short',
         'idle_medium',
+        'maintenance_cycle',
+        'time_of_day_change',
     }
 
 
