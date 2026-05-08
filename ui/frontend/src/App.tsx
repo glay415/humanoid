@@ -5,6 +5,8 @@ import { StatePanel } from './components/StatePanel';
 import { MoodTimeline } from './components/MoodTimeline';
 import { DrivesPanel } from './components/DrivesPanel';
 import { MarkersPanel } from './components/MarkersPanel';
+import { EmotionPanel } from './components/EmotionPanel';
+import { ActionBadge } from './components/ActionBadge';
 
 export default function App() {
   const chat = useChat();
@@ -60,6 +62,10 @@ export default function App() {
           />
 
           <MarkersPanel markers={server?.markers ?? []} />
+
+          <EmotionPanel emotion={chat.state.pendingEmotion} />
+
+          <ActionBadge tone={chat.state.pendingTone} />
 
           {server?.self_model && (
             <section className="rounded-lg bg-white border border-ink-200 p-4">
