@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 from core.event_bus import EventBus, Event
 from core.turn import TurnType
-from core.trigger_registry import TriggerRegistry
+from core.trigger_registry import TriggerRegistry, Trigger, TriggerCategory
 from low_level.pipeline import LowLevelPipeline
 from interface.signal_rise import SignalRise
 from interface.experience_descent import ExperienceDescent
@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from high_level.final_judgment import FinalJudgment
     from high_level.output_postprocess import OutputPostprocess
     from high_level.metacognition import Metacognition
+    from high_level.dmn import DMN
     from storage.memory_store import EpisodicMemory
     from storage.self_model import SelfModel
     from storage.other_model import OtherModel
@@ -49,6 +50,7 @@ class Orchestrator:
         final_judgment: 'FinalJudgment | None' = None,
         output_postprocess: 'OutputPostprocess | None' = None,
         metacognition: 'Metacognition | None' = None,
+        dmn: 'DMN | None' = None,
         episodic_memory: 'EpisodicMemory | None' = None,
         self_model: 'SelfModel | None' = None,
         other_model: 'OtherModel | None' = None,
@@ -72,6 +74,7 @@ class Orchestrator:
         self.final_judgment = final_judgment
         self.output_postprocess = output_postprocess
         self.metacognition = metacognition
+        self.dmn = dmn
 
         # 스토리지 — optional.
         self.episodic_memory = episodic_memory
@@ -80,6 +83,14 @@ class Orchestrator:
 
         # 호환: 기존 코드의 storage 단일 핸들 흔적
         self.storage = None
+
+        # 동기화 지점 (spec §1.4) — 진단 용도.
+        # 감정 평가 / 사회인지 / 기억 인출 세 이벤트가 도착해야 후보 생성으로 진행.
+        self.event_bus.create_sync_point(
+            'post_evaluation',
+            wait_for=['emotion_appraised', 'other_model_updated', 'memory_retrieved'],
+            then='candidate_generation',
+        )
 
     def run_low_level_only(self, raw_input: str = "") -> dict:
         """Phase 1 전용: 저수준 파이프라인만 실행 (LLM 없이)."""
@@ -172,15 +183,67 @@ class Orchestrator:
             Event('memory_retrieved', memory_result, 'memory', self.turn_number)
         )
 
-        # ▼ 동기화 지점: 경험 벡터 합성 + 메타인지 검토
+        # ▼ 동기화 지점: 경험 벡터 합성 + 메타인지 검토 + 재평가 루프 (depth limit 3)
+        # spec §1.4 / §2.2 ② — 세 이벤트가 모두 도착했음을 진단 차원에서 확인.
+        sync_point = self.event_bus.get_sync_point('post_evaluation')
+        if sync_point is not None:
+            assert sync_point.ready, (
+                f"post_evaluation sync point not ready: "
+                f"received={list(sync_point.received.keys())}"
+            )
+
         goal_progress = self.metacognition.goal_progress if self.metacognition else None
         experience_vector = self.experience_descent.assemble(
             emotion_result, social_result, goal_progress
         )
 
+        converged = True
+        iterations = 0
         if self.metacognition is not None:
-            # review 는 현재 default no-reappraisal 만 반환. 호환을 위해 호출만 한다.
-            self.metacognition.review(emotion_result, social_result, low_result)
+            while iterations < 3:
+                review = self._invoke_review(
+                    emotion_result, social_result, low_result, iterations
+                )
+                if not review.get('needs_reappraisal'):
+                    converged = True
+                    break
+                # 재평가 시도
+                try:
+                    emotion_result = await self.emotion_appraisal.reappraise(
+                        prev_result=emotion_result,
+                        strategy=review.get('strategy'),
+                        low_result=low_result,
+                        user_input=user_input,
+                    )
+                    iterations = review.get('iterations', iterations + 1)
+                    # 갱신된 감정 결과를 동일 토픽으로 재발행 (다른 구독자 동기화)
+                    await self.event_bus.publish(
+                        Event(
+                            'emotion_appraised',
+                            emotion_result,
+                            'emotion_reappraise',
+                            self.turn_number,
+                        )
+                    )
+                except (LLMError, NotImplementedError, TypeError):
+                    # 재평가 실패 — 현재 결과로 진행
+                    converged = False
+                    break
+            else:
+                # depth 3 도달 — 수렴 실패 표기
+                converged = bool(review.get('converged', False))
+
+            # 갱신된 감정으로 경험 벡터 재합성
+            experience_vector = self.experience_descent.assemble(
+                emotion_result, social_result, goal_progress
+            )
+
+        # 동기화 지점에 진단 데이터 기록 (spec §1.4 — convergence 플래그)
+        if sync_point is not None:
+            sync_point.received['__convergence__'] = {
+                'converged': converged,
+                'iterations': iterations,
+            }
 
         # 다음 턴 저수준 파이프라인이 prev_experience 로 사용
         self.prev_experience = experience_vector
@@ -273,6 +336,178 @@ class Orchestrator:
             'experience_vector': experience_vector,
             'turn_number': self.turn_number,
         }
+
+    def _invoke_review(
+        self,
+        emotion_result: dict,
+        social_result: dict,
+        low_result: dict,
+        iterations: int,
+    ) -> dict:
+        """Metacognition.review 호출 — 시그니처 호환 처리.
+
+        Wave 4 stub (kw 미지원) 와 Wave 7 시그니처 (prev_iterations kwarg) 양쪽을 지원.
+        """
+        review_fn = self.metacognition.review
+        try:
+            return review_fn(
+                emotion_result, social_result, low_result,
+                prev_iterations=iterations,
+            )
+        except TypeError:
+            return review_fn(emotion_result, social_result, low_result)
+
+    # ------------------------------------------------------------------
+    # Phase 5: DMN 턴 (spec §2.4)
+    # ------------------------------------------------------------------
+    async def process_dmn_turn(self) -> dict:
+        """DMN 사이클 1회 실행 (spec §2.4). 유휴 시 호출.
+
+        대화가 도착하면 호출자가 중단 — 본 메서드는 atomic 한 1 사이클만 수행.
+        """
+        self.turn_number += 1
+        self.current_turn_type = TurnType.DMN
+
+        if self.dmn is None:
+            return {
+                'turn_number': self.turn_number,
+                'activity': None,
+                'reason': 'dmn_disabled',
+            }
+
+        # 지연 import — Team O 의 DMNContext 가 아직 머지되지 않았을 수도 있음.
+        try:
+            from high_level.dmn import DMNContext
+        except ImportError:
+            DMNContext = None  # type: ignore[assignment]
+
+        if DMNContext is not None:
+            drives_status = None
+            if self.low_level is not None:
+                drives_status = self.low_level.drives.compute(
+                    self.low_level.internal_state.to_dict()
+                )
+            ctx = DMNContext(
+                episodic=self.episodic_memory,
+                marker_store=getattr(self, 'marker_store', None),
+                self_model=self.self_model,
+                other_model=self.other_model,
+                snapshot_manager=getattr(self, 'snapshot_manager', None),
+                llm=getattr(self.dmn, 'llm', None),
+                drives=drives_status,
+                unappraised_queue=getattr(self.dmn, 'unappraised_queue', None),
+            )
+            result = await self.dmn.run_cycle(ctx)
+        else:
+            # Team O 미머지: 인자 없이 호출 가능한 stub 도 허용.
+            result = await self.dmn.run_cycle()
+
+        return {
+            'turn_number': self.turn_number,
+            'activity': getattr(result, 'activity', None) if result else None,
+            'success': getattr(result, 'success', False) if result else False,
+            'output': getattr(result, 'output', None) if result else None,
+        }
+
+    # ------------------------------------------------------------------
+    # Phase 5: 정비 턴 (spec §9)
+    # ------------------------------------------------------------------
+    async def process_maintenance_turn(self) -> dict:
+        """정비 턴 (spec §9) — LLM 호출 없이 저수준 감쇠 + 메타 자원 회복."""
+        self.turn_number += 1
+        self.current_turn_type = TurnType.MAINTENANCE
+
+        # 저수준 파이프라인을 빈 입력으로 실행 (감쇠/표류 진행)
+        low_result = self.low_level.run('', {}) if self.low_level else None
+
+        # 마커 감쇠 (정비 사이클의 핵심)
+        expired_markers: list[str] = []
+        if self.low_level is not None and self.low_level.markers is not None:
+            expired_markers = self.low_level.markers.decay_all()
+
+        # 메타 자원 회복
+        if self.metacognition is not None:
+            self.metacognition.recover()
+
+        return {
+            'turn_number': self.turn_number,
+            'low_level': low_result,
+            'expired_markers': expired_markers,
+            'meta_resource': (
+                self.metacognition.resource if self.metacognition else None
+            ),
+        }
+
+    # ------------------------------------------------------------------
+    # Phase 5: 트리거 레지스트리 wiring (spec §1.2)
+    # ------------------------------------------------------------------
+    def register_default_triggers(self) -> None:
+        """spec §1.2 의 기본 트리거 5종 등록.
+
+        build_full_orchestrator 인스턴스화 직후 1회 호출.
+        """
+        # Internal: 드라이브 결핍 > 0.6 → DMN 후보
+        self.trigger_registry.register(Trigger(
+            name='drive_deficit_high',
+            category=TriggerCategory.INTERNAL,
+            condition=lambda ctx: ctx.get('max_deficit', 0.0) > 0.6,
+            action='dmn_turn',
+        ))
+        # Internal: 반추 카운터 초과 → 메타인지 개입
+        self.trigger_registry.register(Trigger(
+            name='rumination_high',
+            category=TriggerCategory.INTERNAL,
+            condition=lambda ctx: ctx.get('rumination_count', 0) > 5,
+            action='metacog_break',
+        ))
+        # Internal: 메타 자원 floor → 통제 해제
+        self.trigger_registry.register(Trigger(
+            name='meta_resource_low',
+            category=TriggerCategory.INTERNAL,
+            condition=lambda ctx: ctx.get('meta_resource', 1.0) <= 0.15,
+            action='control_release',
+        ))
+        # Temporal: 짧은 공백 → DMN 턴
+        self.trigger_registry.register(Trigger(
+            name='idle_short',
+            category=TriggerCategory.TEMPORAL,
+            condition=lambda ctx: ctx.get('idle_turns', 0) >= 3,
+            action='dmn_turn',
+        ))
+        # Temporal: 더 긴 공백 → 정비 턴
+        self.trigger_registry.register(Trigger(
+            name='idle_medium',
+            category=TriggerCategory.TEMPORAL,
+            condition=lambda ctx: ctx.get('idle_turns', 0) >= 10,
+            action='maintenance_turn',
+        ))
+
+    def evaluate_triggers(self, idle_turns: int = 0) -> list:
+        """현재 컨텍스트로 트리거 발동 평가. 우선순위 정렬된 리스트 반환.
+
+        호출자는 `fired[0].action` 으로 다음 턴 유형을 결정한다.
+        """
+        if self.low_level is None:
+            return []
+        state_dict = self.low_level.internal_state.to_dict()
+        drive_status = self.low_level.drives.compute(state_dict)
+
+        rumination_count = 0
+        if self.dmn is not None:
+            rum = getattr(self.dmn, 'rumination_counter', None)
+            if rum:
+                try:
+                    rumination_count = max(rum.values())
+                except (ValueError, AttributeError):
+                    rumination_count = 0
+
+        ctx = {
+            'max_deficit': drive_status.get('max_deficit', 0.0),
+            'rumination_count': rumination_count,
+            'meta_resource': self.metacognition.resource if self.metacognition else 1.0,
+            'idle_turns': idle_turns,
+        }
+        return self.trigger_registry.check_all(ctx)
 
     @staticmethod
     def _emotion_fallback(raw_core_affect: dict) -> dict:
