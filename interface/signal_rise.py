@@ -6,6 +6,12 @@ final_core_affect 보정 (meta_resource) 도 여기서 수행.
 
 import numpy as np
 
+from low_level.spec_invariants import SpecViolation
+
+
+# spec §8.6: 자기감지의 정밀도 손실(=해상도) 은 제거할 수 없다.
+# ``resolution`` 은 init 시 temperament yaml 에서 결정되며, 런타임에
+# 더 높은 값으로 바꾸려는 시도는 SpecViolation.
 
 class SignalRise:
     """저수준 숫자 → 고수준 자연어 변환 + meta_resource 보정."""
@@ -16,10 +22,28 @@ class SignalRise:
         5: ['매우 낮음', '낮음', '중간', '높음', '매우 높음'],
     }
 
+    # spec §8.6: ``resolution`` 은 init 후 변경 불가. ``__setattr__`` 가
+    # 첫 할당만 허용하고 그 이후는 차단.
+    _PROTECTED_ATTRS = frozenset({'resolution'})
+
     def __init__(self, resolution: int = 3, meta_beta: float = 0.08):
-        self.resolution = resolution
+        # init 단계 — object.__setattr__ 우회.
+        object.__setattr__(self, 'resolution', resolution)
         self.labels = self.RESOLUTION_LEVELS[resolution]
         self.meta_beta = meta_beta
+
+    def __setattr__(self, name: str, value) -> None:
+        """spec §8.6: ``resolution`` 은 init 이후 immutable.
+
+        이미 set 되어 있으면 SpecViolation. labels / meta_beta 같은 다른 attr
+        은 자유롭게 설정 가능.
+        """
+        if name in SignalRise._PROTECTED_ATTRS and name in self.__dict__:
+            raise SpecViolation(
+                f"spec §8.6 — SignalRise.{name} is frozen after init. "
+                "self-sensing precision loss cannot be bypassed at runtime."
+            )
+        object.__setattr__(self, name, value)
 
     def quantize(self, value: float, param_name: str) -> str:
         """0.0~1.0 → 자연어 라벨 (해상도에 따른 정밀도 손실)."""
