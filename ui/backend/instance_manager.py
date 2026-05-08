@@ -326,6 +326,51 @@ class InstanceManager:
 
     # ------------------------------------------------------------------ hard reset / wipe
 
+    def _release_storage_handles(self, instance_id: str) -> None:
+        """인스턴스의 sqlite/chroma 파일 핸들을 명시적으로 닫는다.
+
+        Windows 에서 PersistentClient/sqlite 가 파일 락을 잡고 있어서
+        rmtree 가 실패하는 케이스를 방지한다. 베스트 에포트 — 실패는 무시.
+        """
+        orch = self._live.get(instance_id)
+        if orch is None:
+            return
+        # ProspectiveQueue 의 sqlite connection.
+        try:
+            prosp = getattr(getattr(orch, 'memory_retrieval', None), 'prospective', None)
+            if prosp is not None:
+                conn = getattr(prosp, '_conn', None)
+                if conn is not None:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        # ChromaDB PersistentClient 핸들 — close() 로 SharedSystem refcount 감소.
+        # 같은 인스턴스 path 를 다시 사용할 거면 (hard_reset) 마지막 ref 가 풀려야
+        # sqlite WAL 파일이 해제된다.
+        try:
+            episodic = getattr(getattr(orch, 'memory_retrieval', None), 'episodic', None)
+            vdb = getattr(episodic, 'vector_db', None) if episodic else None
+            if vdb is not None:
+                client = getattr(vdb, '_client', None)
+                if client is not None:
+                    try:
+                        client.close()
+                    except Exception:
+                        pass
+                try:
+                    vdb.collection = None  # type: ignore[assignment]
+                except Exception:
+                    pass
+                try:
+                    vdb._client = None  # type: ignore[assignment]
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
     def hard_reset(self, instance_id: str) -> InstanceMetadata:
         """페르소나 + jitter_seed 는 보존하면서 인스턴스의 모든 영속 스토리지를
         삭제한 뒤 같은 instance_id 로 결정론적 재스폰.
@@ -353,7 +398,8 @@ class InstanceManager:
         seed = meta.jitter_seed
         created_at = meta.created_at
 
-        # 2. 라이브 오케스트레이터 핸들 정리 — 파일 핸들 release 유도.
+        # 2. 라이브 오케스트레이터의 sqlite/chroma 핸들 명시적 해제.
+        self._release_storage_handles(instance_id)
         self._live.pop(instance_id, None)
         self._meta_cache.pop(instance_id, None)
         import gc
@@ -399,7 +445,9 @@ class InstanceManager:
         legacy /api/turn 등은 이후 첫 호출 시 _default 를 자동 재스폰
         (StateHolder.initialize → MANAGER.get_or_spawn_default).
         """
-        # 1. 라이브 핸들 / 메타 캐시 정리.
+        # 1. 라이브 핸들 / 메타 캐시 정리 — 파일 락 release 유도.
+        for iid in list(self._live.keys()):
+            self._release_storage_handles(iid)
         self._live.clear()
         self._meta_cache.clear()
         # 2. 디렉토리 카운팅.

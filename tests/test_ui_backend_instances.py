@@ -313,3 +313,105 @@ async def test_reset_unknown_instance_returns_404(isolated_manager):
     async with _client(app_module.app) as c:
         r = await c.post('/api/instances/does-not-exist/reset')
     assert r.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# 8. POST /api/instances/{id}/hard-reset
+# ---------------------------------------------------------------------------
+
+
+async def test_hard_reset_route_returns_200_with_card(isolated_manager):
+    """hard-reset 은 200 + InstanceCard 형태 dict 반환."""
+    async with _client(app_module.app) as c:
+        spawn = await c.post('/api/instances', json={
+            'persona_id': 'extrovert_warm', 'jitter': 0.0,
+        })
+        iid = spawn.json()['instance_id']
+        r = await c.post(f'/api/instances/{iid}/hard-reset')
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body['instance_id'] == iid
+    assert body['turn_number'] == 0
+    assert body['persona_id'] == 'extrovert_warm'
+    assert body['last_mood'] == {'valence': 0.0, 'arousal': 0.0}
+
+
+async def test_hard_reset_route_404_for_unknown_id(isolated_manager):
+    async with _client(app_module.app) as c:
+        r = await c.post('/api/instances/does-not-exist/hard-reset')
+    assert r.status_code == 404
+
+
+async def test_hard_reset_after_turn_zeroes_turn_number(isolated_manager):
+    """한 턴 진행 후 hard-reset → turn_number 0 + 기억 wipe."""
+    mgr, clients = isolated_manager
+    async with _client(app_module.app) as c:
+        spawn = await c.post('/api/instances', json={
+            'persona_id': 'extrovert_warm', 'jitter': 0.0,
+        })
+        iid = spawn.json()['instance_id']
+        clients[-1].responses = _full_turn_responses()
+        async with c.stream(
+            'POST', f'/api/instances/{iid}/turn',
+            json={'user_input': '안녕'}
+        ) as resp:
+            async for _ in resp.aiter_bytes():
+                pass
+        assert mgr.get_metadata(iid).turn_number == 1
+        r = await c.post(f'/api/instances/{iid}/hard-reset')
+    assert r.status_code == 200
+    assert mgr.get_metadata(iid).turn_number == 0
+
+
+# ---------------------------------------------------------------------------
+# 9. POST /api/admin/wipe
+# ---------------------------------------------------------------------------
+
+
+async def test_admin_wipe_requires_confirm_token(isolated_manager):
+    async with _client(app_module.app) as c:
+        r = await c.post('/api/admin/wipe', json={'confirm': 'nope'})
+    assert r.status_code == 400
+
+
+async def test_admin_wipe_missing_body_returns_422(isolated_manager):
+    async with _client(app_module.app) as c:
+        r = await c.post('/api/admin/wipe', json={})
+    assert r.status_code == 422
+
+
+async def test_admin_wipe_with_correct_token_clears_all(isolated_manager):
+    mgr, _clients = isolated_manager
+    async with _client(app_module.app) as c:
+        await c.post('/api/instances', json={
+            'persona_id': 'extrovert_warm', 'jitter': 0.0,
+        })
+        await c.post('/api/instances', json={
+            'persona_id': 'introvert_thoughtful', 'jitter': 0.0,
+        })
+        assert len(mgr.list()) == 2
+        r = await c.post('/api/admin/wipe', json={'confirm': 'WIPE'})
+    assert r.status_code == 200
+    body = r.json()
+    assert body['removed'] >= 2
+    # legacy 자동 재스폰이 _default 를 만들 수 있으므로 list 결과는 0 또는 _default 1 개.
+    remaining = mgr.list()
+    assert len(remaining) <= 1
+    for m in remaining:
+        assert m.instance_id == '_default'
+
+
+async def test_admin_wipe_legacy_default_respawns_after_wipe(isolated_manager):
+    """wipe_all → STATE.initialize 재호출로 _default 가 자동 재스폰되어야 한다."""
+    mgr, _clients = isolated_manager
+    async with _client(app_module.app) as c:
+        # 일단 한 인스턴스 만들어 둠.
+        await c.post('/api/instances', json={
+            'persona_id': 'extrovert_warm', 'jitter': 0.0,
+        })
+        r = await c.post('/api/admin/wipe', json={'confirm': 'WIPE'})
+        assert r.status_code == 200
+    # legacy STATE.orchestrator 가 _default 로 재초기화되어야 한다.
+    assert state_module.STATE.orchestrator is not None
+    # MANAGER 에도 _default 가 다시 생겨 있어야 한다.
+    assert mgr.exists('_default')
