@@ -24,6 +24,13 @@ ui = [
     "sse-starlette>=2.0",
     "slowapi>=0.1.9",
 ]
+analyze = [
+    # Wave 14B 오프라인 로그 분석 도구 (`scripts/analyze.py`).
+    # default deps 에는 넣지 않는다 — pandas/matplotlib 설치가 무거워 CLI/UI 만
+    # 쓰는 사용자에게 부담. `uv sync --extra analyze` 로 opt-in.
+    "pandas>=2.0",
+    "matplotlib>=3.8",
+]
 
 [build-system]
 requires = ["setuptools>=68.0"]
