@@ -138,6 +138,46 @@ class TestNegativeValence:
         assert result["valence"] < 0.0
 
 
+# ===== 5b. 전체 범위 매핑 (full-range linear) =====
+
+class TestValenceFullRange:
+    """audit α2 회귀 — positive=1 + stress=1 일 때 음수 클립이 정보를 잃지 않음.
+
+    raw_valence = 2 × (positive - negative + nw) / (1 + nw) - 1.
+    positive=1, stress=1, nw=0.6 → negative=0.6 → 2×1.0/1.6 - 1 = 0.25.
+    이전 식 ((p-n)*2-1) 은 -0.2 를 내고 클립 직전이라 신호가 뭉개졌다.
+    """
+
+    def test_full_positive_with_full_stress_stays_positive(self):
+        eb = EmotionBase(negativity_weight=0.6)
+        result = eb.update_raw_core_affect(
+            _state(reward=1.0, comfort=1.0, bonding=1.0, stress=1.0),
+        )
+        # 옛 식이면 -0.2, 새 식이면 +0.25.
+        assert result["valence"] > 0.0
+
+    def test_zero_state_is_zero_valence(self):
+        eb = EmotionBase(negativity_weight=0.6)
+        result = eb.update_raw_core_affect(_state())
+        # positive=0, negative=0 → 2×0.6/1.6 - 1 = -0.25.
+        # 0 입력에서 0 valence 가 아니라 약한 음수 — 부정 가중이 양수에 비해 비대칭.
+        assert -1.0 <= result["valence"] <= 1.0
+
+    def test_max_positive_reaches_plus_one(self):
+        """positive=1, stress=0 → 2×1.6/1.6 - 1 = +1.0."""
+        eb = EmotionBase(negativity_weight=0.6)
+        result = eb.update_raw_core_affect(
+            _state(reward=1.0, comfort=1.0, bonding=1.0, stress=0.0),
+        )
+        assert result["valence"] == pytest.approx(1.0, abs=1e-9)
+
+    def test_max_negative_reaches_minus_one(self):
+        """positive=0, stress=1, nw=0.6 → 2×0/1.6 - 1 = -1.0."""
+        eb = EmotionBase(negativity_weight=0.6)
+        result = eb.update_raw_core_affect(_state(stress=1.0))
+        assert result["valence"] == pytest.approx(-1.0, abs=1e-9)
+
+
 # ===== 6. negativity_weight 효과 =====
 
 class TestNegativityWeight:

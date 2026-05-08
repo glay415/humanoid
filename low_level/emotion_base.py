@@ -32,7 +32,12 @@ class EmotionBase:
         """내부 상태 9개 + 드라이브 결핍 → raw 코어 어펙트."""
         positive = (state['reward'] + state['comfort'] + state['bonding']) / 3.0
         negative = state['stress'] * self.negativity_weight
-        raw_valence = (positive - negative) * 2.0 - 1.0
+        # Full-range linear mapping. positive ∈ [0,1], negative ∈ [0, nw],
+        # 따라서 (positive - negative) ∈ [-nw, 1]. 분모 (1+nw) 로 정규화 후
+        # [0,1] → [-1,+1] 로 늘려 양 끝까지 정보 손실 없이 매핑.
+        raw_valence = 2.0 * (positive - negative + self.negativity_weight) / (
+            1.0 + self.negativity_weight
+        ) - 1.0
         raw_valence -= self.drive_alpha * max_drive_deficit
 
         raw_arousal = (
