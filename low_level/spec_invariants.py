@@ -48,10 +48,16 @@ _LL_TOKEN = object()
 # 토큰이 아닌 경우의 fallback: caller frame 의 파일경로를 보고 허용 디렉토리에
 # 있으면 통과시킨다. 이는 ``__setattr__`` 처럼 호출자가 인자를 전달하지 못하는
 # 자리(직접 attribute 할당)에서 쓰인다.
+#
+# ``ui/backend/`` 의 일부 모듈(``state_serializer``, ``streaming``)은 인프라
+# 성격으로, 디버그/직렬화 도중에 보호된 attribute 를 잠시 swap 해 introspection
+# 결과를 만든다. 이는 spec §8 위반이 아니고 (LLM/고수준 의지로 mutate 하는 것이
+# 아님) — 이 두 파일에 한정해 허용한다.
 _ALLOWED_PATH_PARTS = (
     os.path.normpath('low_level'),
     os.path.normpath('interface'),
     os.path.normpath('ui/backend/state_serializer'),
+    os.path.normpath('ui/backend/streaming'),
 )
 
 
