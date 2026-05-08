@@ -25,6 +25,9 @@ export type StreamTurnOptions = {
   // If provided, the request is sent to the instance-scoped turn endpoint
   // /api/instances/{instanceId}/turn instead of the legacy /api/turn.
   instanceId?: string;
+  // When true, asks the backend to include the verbose `debug` field on the
+  // low_level SSE event (matrix decomposition, eigenvalues, mood/drift step).
+  debug?: boolean;
 };
 
 // Streams /api/turn server-sent events. Uses fetch-event-source so we can
@@ -37,6 +40,7 @@ export async function streamTurn({
   onClose,
   onError,
   instanceId,
+  debug,
 }: StreamTurnOptions): Promise<void> {
   // Track whether we've fired onClose ourselves so we don't double-call.
   let closed = false;
@@ -58,7 +62,9 @@ export async function streamTurn({
         'Content-Type': 'application/json',
         Accept: 'text/event-stream',
       },
-      body: JSON.stringify({ user_input: userInput }),
+      body: JSON.stringify(
+        debug ? { user_input: userInput, debug: true } : { user_input: userInput },
+      ),
       signal,
       openWhenHidden: true,
       onopen: async (response) => {

@@ -11,6 +11,7 @@ import type {
   EmotionEvent,
   ErrorEvent,
   FinalEvent,
+  LowLevelDebugPayload,
   LowLevelEvent,
   MemoryEvent,
   ServerState,
@@ -46,6 +47,10 @@ export type AppState = {
   pendingFinal: FinalEvent | null;
   pendingTone: ToneEvent | null;
   errors: ErrorEvent[];
+  // Wave14E: 가장 최근 low_level 의 debug 페이로드 (deep mode 용).
+  lastLowLevelDebug: LowLevelDebugPayload | null;
+  // 마지막 N 턴의 drift_delta_norm 트레일 (스파크라인용, 최대 20개).
+  driftDeltaTrail: number[];
 };
 
 type Action =
@@ -74,7 +79,11 @@ const INITIAL_STATE: AppState = {
   pendingFinal: null,
   pendingTone: null,
   errors: [],
+  lastLowLevelDebug: null,
+  driftDeltaTrail: [],
 };
+
+const DRIFT_TRAIL_MAX = 20;
 
 function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
@@ -93,8 +102,23 @@ function reducer(state: AppState, action: Action): AppState {
         errors: [],
         messages: [...state.messages, { role: 'user', text: action.userInput }],
       };
-    case 'EVENT_LOW_LEVEL':
-      return { ...state, currentStage: 'low_level', pendingLowLevel: action.data };
+    case 'EVENT_LOW_LEVEL': {
+      const debug = action.data.debug ?? null;
+      let trail = state.driftDeltaTrail;
+      if (debug) {
+        trail = [...trail, debug.drift_step.drift_delta_norm];
+        if (trail.length > DRIFT_TRAIL_MAX) {
+          trail = trail.slice(trail.length - DRIFT_TRAIL_MAX);
+        }
+      }
+      return {
+        ...state,
+        currentStage: 'low_level',
+        pendingLowLevel: action.data,
+        lastLowLevelDebug: debug ?? state.lastLowLevelDebug,
+        driftDeltaTrail: trail,
+      };
+    }
     case 'EVENT_EMOTION':
       return { ...state, currentStage: 'emotion', pendingEmotion: action.data };
     case 'EVENT_MEMORY':
@@ -137,9 +161,13 @@ function reducer(state: AppState, action: Action): AppState {
   }
 }
 
-export function useChat(instanceId: string | null) {
+export function useChat(instanceId: string | null, deep: boolean = false) {
   const [state, dispatch] = useReducer(reducer, INITIAL_STATE);
   const abortRef = useRef<AbortController | null>(null);
+  // Each in-flight turn captures the `deep` flag at dispatch time via ref so
+  // toggling deep mid-turn doesn't change the request payload retroactively.
+  const deepRef = useRef(deep);
+  deepRef.current = deep;
 
   const refreshState = useCallback(async () => {
     try {
@@ -225,6 +253,7 @@ export function useChat(instanceId: string | null) {
           signal: controller.signal,
           onEvent: handleEvent,
           instanceId,
+          debug: deepRef.current,
           onError: (err) => {
             dispatch({
               type: 'EVENT_ERROR',

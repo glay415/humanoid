@@ -107,12 +107,58 @@ export type WipeResponse = { removed: number };
 
 // Per-event payloads emitted on /api/turn.
 
+// Wave14E: optional verbose debug payload appended to LowLevelEvent when
+// the turn was requested with debug=true. Off by default.
+
+export type ExperienceVectorDims = {
+  reward: number;
+  novelty: number;
+  threat: number;
+  social_reward: number;
+  goal_progress: number;
+};
+
+export type MatrixDecomposition = {
+  // Each term is a 9-param dict (InternalState shape).
+  a_exp_term: InternalState;
+  w_dev_term: InternalState;
+  d_recovery_term: InternalState;
+  delta_clamped: InternalState;
+  exp_vec: ExperienceVectorDims;
+};
+
+export type EigenvalueSpectrum = {
+  real_parts: number[];
+  max_real: number;
+};
+
+export type MoodStepTrace = {
+  before: CoreAffect;
+  raw: CoreAffect;
+  eta_step: CoreAffect;
+  after: CoreAffect;
+};
+
+export type DriftStepTrace = {
+  baseline_ema_before: InternalState;
+  baseline_ema_after: InternalState;
+  drift_delta_norm: number;
+};
+
+export type LowLevelDebugPayload = {
+  matrix_decomp: MatrixDecomposition;
+  eigenvalues: EigenvalueSpectrum;
+  mood_step: MoodStepTrace;
+  drift_step: DriftStepTrace;
+};
+
 export type LowLevelEvent = {
   state: InternalState;
   raw_core_affect: CoreAffect;
   mood: CoreAffect;
   drives: Drives;
   fast_path_triggered: boolean;
+  debug?: LowLevelDebugPayload | null;
 };
 
 export type EmotionEvent = {
