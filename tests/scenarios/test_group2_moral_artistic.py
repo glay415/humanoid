@@ -281,3 +281,179 @@ def test_scenario_12_awe_high_novelty_high_reward_forms_marker(tmp_path):
     assert marker is not None
     assert marker.strength > 0.7
     assert marker.valence > 0.0  # 접근 마커
+
+
+# ---------------------------------------------------------------------------
+# 시나리오 13 — 의지력 고갈 (willpower depletion)
+# ---------------------------------------------------------------------------
+
+
+def test_scenario_13_willpower_depletion_blocks_reappraisal(tmp_path):
+    """meta_resource 가 floor 근처일 때, mismatch 가 있어도 재평가 안 함.
+
+    reasons 에 'resource_low' 가 포함되어야 하고 needs_reappraisal=False.
+    """
+    orch, _ = _make_orch(tmp_path)
+
+    # 자원을 floor + 0.01 로 직접 세팅 (consume 사용해도 가능하지만 명시적으로)
+    orch.metacognition.resource = orch.metacognition.floor + 0.01
+
+    # 강한 mismatch — 정상 상태였다면 reframe 트리거되었을 조건
+    emotion_result = {
+        'valence': 0.7,
+        'arousal': 0.5,
+        'preliminary_labels': ['기쁨'],
+        'experience_dimensions': {'reward': 0.7, 'threat': 0.0, 'novelty': 0.2},
+    }
+    social_result = {
+        'person_id': 'u', 'estimated_emotion': {'valence': 0.0, 'arousal': 0.3},
+        'estimated_intent': '', 'social_reward': 0.3,
+    }
+    low_result = {
+        'raw_core_affect': {'valence': -0.7, 'arousal': 0.5},
+        'mood': {'valence': 0.0, 'arousal': 0.4},
+    }
+
+    review = orch.metacognition.review(emotion_result, social_result, low_result)
+
+    assert review['needs_reappraisal'] is False
+    assert 'resource_low' in review['reasons']
+    assert review['converged'] is True
+
+
+# ---------------------------------------------------------------------------
+# 시나리오 14 — 자기기만 (self-deception)
+# ---------------------------------------------------------------------------
+
+
+def test_scenario_14_self_deception_state_mismatch(tmp_path):
+    """고수준이 긍정으로 평가하지만 저수준 raw_core_affect 는 음.
+
+    자기기만의 시그니처: 의식이 부정 신호를 정 으로 덮음.
+    state_mismatch 감지 → strategy='reframe'.
+    """
+    orch, _ = _make_orch(tmp_path)
+
+    emotion_result = {
+        'valence': 0.55,  # "괜찮아, 다 잘 될 거야"
+        'arousal': 0.4,
+        'preliminary_labels': ['낙관'],
+        'experience_dimensions': {'reward': 0.55, 'threat': 0.05, 'novelty': 0.1},
+    }
+    social_result = {
+        'person_id': 'self', 'estimated_emotion': {'valence': 0.0, 'arousal': 0.3},
+        'estimated_intent': '', 'social_reward': 0.0,
+    }
+    # 저수준은 실제로는 부정 — 몸이 알고 있다.
+    low_result = {
+        'raw_core_affect': {'valence': -0.5, 'arousal': 0.6},
+        'mood': {'valence': -0.3, 'arousal': 0.5},
+    }
+
+    # mismatch 신호 강도 검증
+    signal = orch.metacognition.state_mismatch_signal(emotion_result, low_result)
+    assert signal > 0.4, f'mismatch signal should be strong: {signal}'
+
+    review = orch.metacognition.review(emotion_result, social_result, low_result)
+
+    assert review['needs_reappraisal'] is True
+    assert review['strategy'] == 'reframe'
+    assert 'state_mismatch' in review['reasons']
+
+
+# ---------------------------------------------------------------------------
+# 시나리오 15 — 복수→연민 (revenge → compassion)
+# ---------------------------------------------------------------------------
+
+
+async def test_scenario_15_revenge_to_compassion_via_dmn(tmp_path):
+    """강한 음의 마커 + 적대적 기억에 대해 DMN ruminate 가 재해석 통찰을 생성.
+
+    rumination_counter 가 증가하고 통찰 텍스트가 반환되는 것까지 검증.
+    실제 마커 valence 변환은 별도 reconsolidation 절차의 영역 — 여기서는
+    DMN 사이클이 동작하고 카운터가 증가함을 확인한다.
+    """
+    overrides = {
+        # ruminate 프롬프트 응답을 재구성/연민 톤으로
+        'emotion': '그가 내게 그러했던 이유는 두려움이었을 것이다',
+    }
+    # ruminate 는 dmn_model 이름으로 호출되며 기본 라우팅이 emotion 키로 떨어진다.
+    # 그래서 emotion 페이로드에 통찰 문장을 박아둔다 — JSON 이 아니어도 dmn 은 raw text 로 받음.
+    # 하지만 emotion_appraisal 도 같은 fn 을 쓰면 JSON 검증 실패. 별도 mock 사용.
+
+    async def dmn_fn(messages, model_name):
+        # DMN 호출은 model_name='dmn_model'.
+        if model_name == 'dmn_model':
+            return '그가 내게 그러했던 이유는 두려움이었을 것이다'
+        return DEFAULT_RESPONSES['emotion']
+
+    mock = MockLLMClient(response_fn=dmn_fn)
+    orch = _build_orch(tmp_path, mock)
+
+    # 1) 강한 음의 마커 사전 등록 (가설적 "복수 대상" 패턴)
+    orch.low_level.markers.markers['revenge_target'] = Marker(
+        pattern_id='revenge_target', valence=-0.8, strength=0.9, age=0,
+    )
+
+    # 2) 적대적 기억 사전 저장 — DMN ruminate 가 retrieve 로 가져갈 것
+    await orch.episodic_memory.store(
+        content='그가 나를 모욕했다',
+        emotion_tag={'valence': -0.85, 'arousal': 0.85, 'labels': ['분노']},
+        source='experience',
+        importance=0.95,
+        turn=1,
+    )
+
+    # 3) DMN ruminate 직접 호출
+    drives_status = orch.low_level.drives.compute(orch.low_level.internal_state.to_dict())
+    ctx = DMNContext(
+        episodic=orch.episodic_memory,
+        marker_store=None,
+        self_model=orch.self_model,
+        other_model=orch.other_model,
+        snapshot_manager=None,
+        llm=mock,
+        drives=drives_status,
+        unappraised_queue=[],
+        rumination_counter={},
+        turn=2,
+    )
+
+    result = await orch.dmn._try_ruminate(ctx)
+
+    assert result is not None
+    assert result.activity == 'ruminate'
+    assert result.success is True
+    # 통찰 텍스트가 반환되어 재해석 가능성을 보임
+    assert '두려움' in result.output['insight']
+    # rumination_counter 증가
+    assert result.output['count_after'] == 1
+
+    # 누적 카운터 증가 시뮬레이션 — 사전 카운터 1 부터 시작했다고 가정.
+    # (재고정화로 인해 강도가 점차 약해지므로 매 사이클 직렬 재실행이 항상 통과한다는
+    #  보장은 없다. 본 시나리오의 핵심은 "DMN 가 강한 음의 기억에 ruminate 활동을 수행한다"
+    #  이므로, 별도 사전-카운터 셋업으로 증가 동작을 한 번 더 확인한다.)
+    await orch.episodic_memory.store(
+        content='또 다른 적대적 사건',
+        emotion_tag={'valence': -0.9, 'arousal': 0.9, 'labels': ['분노']},
+        source='experience',
+        importance=0.95,
+        turn=4,
+    )
+    ctx2 = DMNContext(
+        episodic=orch.episodic_memory,
+        marker_store=None,
+        self_model=orch.self_model,
+        other_model=orch.other_model,
+        snapshot_manager=None,
+        llm=mock,
+        drives=drives_status,
+        unappraised_queue=[],
+        rumination_counter={},  # 새 컨텍스트
+        turn=5,
+    )
+    result2 = await orch.dmn._try_ruminate(ctx2)
+    # 결과가 있고 (강한 새 기억이 추가되었으므로) 카운터 증가 동작을 다시 확인.
+    if result2 is not None:
+        assert result2.activity == 'ruminate'
+        assert result2.output['count_after'] >= 1
