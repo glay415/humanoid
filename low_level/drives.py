@@ -7,6 +7,16 @@
 쾌락   = reward
 """
 
+from low_level.spec_invariants import (
+    SpecViolation,
+    _LL_TOKEN,
+    assert_low_level,
+)
+
+
+# spec §8.3: 드라이브를 끌 수 없다. ``disable()`` / ``enable()`` 은
+# 토큰 게이팅. 정상 코드에서는 호출되지 않는다 (현재 API 자체가 없음).
+# 누군가 high-level 에서 disable() 을 호출하려 시도하면 SpecViolation.
 
 class Drives:
     """드라이브 충족도/결핍도 관리."""
@@ -23,6 +33,33 @@ class Drives:
         self.novelty_ema_alpha = novelty_ema_alpha
         # 보존 드라이브는 고수준 의존 — 마지막 알려진 confidence 캐시
         self._preservation_value: float = 0.1  # 초기: 자기 모델 confidence 초기값
+        # spec §8.3 — 활성/비활성 플래그. 항상 True. disable() 은 토큰을 요구하나,
+        # 토큰을 가진 어떤 정상 경로도 disable 호출하지 않는다 (드라이브를 끌
+        # 일이 없음). 명시적으로 SpecViolation 을 raise 한다.
+        self._enabled: bool = True
+
+    def disable(self, token: object = None) -> None:
+        """spec §8.3: 드라이브 비활성화 — 항상 SpecViolation.
+
+        토큰 검사 전에 명시적으로 raise. 토큰이 있어도 (low_level 내부에서
+        호출되어도) spec §8.3 위반이므로 차단. 이 함수의 존재 자체가 invariant
+        를 강제하기 위한 trap 이다.
+        """
+        raise SpecViolation(
+            "spec §8.3 — drives cannot be disabled. "
+            "If a drive's deficit feels overwhelming, lower its ratio in the "
+            "temperament yaml or reduce the input that raises it; do not turn "
+            "the drive off."
+        )
+
+    def enable(self, token: object = None) -> None:
+        """대칭적으로 enable() 도 차단 — 항상 활성 상태가 spec.
+
+        disable 자체가 막혀 있으므로 enable 도 의미가 없다.
+        """
+        raise SpecViolation(
+            "spec §8.3 — drives are always enabled by spec; nothing to enable."
+        )
 
     def update_novelty_ema(self, novelty: float) -> None:
         """novelty EMA 업데이트. 경험 벡터의 novelty 차원을 매 턴 전달."""

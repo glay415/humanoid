@@ -28,6 +28,11 @@ from ui.backend.state_serializer import (
     serialize_orchestrator,
 )
 
+# spec §8 — 이 테스트는 직렬화 round-trip 의 인프라 테스트이므로 토큰을 직접
+# import 해 보호된 attribute 를 set 한다 (정상 high-level 코드는 이 토큰에
+# 접근하지 않는다).
+from low_level.spec_invariants import _LL_TOKEN
+
 
 CONFIG_PATH = Path(__file__).resolve().parent.parent / 'config' / 'temperament_test.yaml'
 
@@ -63,8 +68,11 @@ def test_roundtrip_preserves_internal_state(tmp_path):
     a = _build(tmp_path, '_a')
     b = _build(tmp_path, '_b')
     # mutate a
-    a.low_level.internal_state.state = np.array(
-        [0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1, 0.5, 0.5], dtype=np.float64
+    # spec §8.5 — 직접 ``ist.state = ...`` 는 SpecViolation. 토큰 게이팅 setter
+    # ``set_state(token=_LL_TOKEN)`` 으로 우회 (인프라 테스트 한정).
+    a.low_level.internal_state.set_state(
+        np.array([0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1, 0.5, 0.5], dtype=np.float64),
+        _LL_TOKEN,
     )
     a.turn_number = 7
     snapshot = serialize_orchestrator(a)
@@ -76,8 +84,13 @@ def test_roundtrip_preserves_internal_state(tmp_path):
 def test_roundtrip_preserves_mood_and_raw_core_affect(tmp_path):
     a = _build(tmp_path, '_a')
     b = _build(tmp_path, '_b')
-    a.low_level.emotion_base.mood = {'valence': 0.42, 'arousal': 0.31}
-    a.low_level.emotion_base.raw_core_affect = {'valence': -0.15, 'arousal': 0.7}
+    # spec §8.1, §8.4 — 토큰 게이팅 setter 사용.
+    a.low_level.emotion_base.set_mood(
+        {'valence': 0.42, 'arousal': 0.31}, _LL_TOKEN,
+    )
+    a.low_level.emotion_base.set_raw_core_affect(
+        {'valence': -0.15, 'arousal': 0.7}, _LL_TOKEN,
+    )
     state = serialize_orchestrator(a)
     restore_orchestrator(b, state)
     assert b.low_level.emotion_base.mood == {'valence': 0.42, 'arousal': 0.31}
@@ -128,7 +141,8 @@ def test_double_restore_yields_equal_serialization(tmp_path):
     a = _build(tmp_path, '_a')
     b = _build(tmp_path, '_b')
     a.turn_number = 5
-    a.low_level.emotion_base.mood = {'valence': 0.1, 'arousal': 0.2}
+    # spec §8.1 — 토큰 게이팅 setter.
+    a.low_level.emotion_base.set_mood({'valence': 0.1, 'arousal': 0.2}, _LL_TOKEN)
     a.dialogue_buffer = [{'user': 'x', 'assistant': 'y'}]
 
     s1 = serialize_orchestrator(a)

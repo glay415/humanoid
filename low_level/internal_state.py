@@ -5,6 +5,17 @@ state(t+1) = state(t) + A × exp_vec + W × (state - baseline) + D × (baseline 
 
 import numpy as np
 
+from low_level.spec_invariants import (
+    SpecViolation,
+    _LL_TOKEN,
+    _check_protected_setattr,
+    assert_low_level,
+)
+
+
+# spec §8.5: ``internal_state.state`` 는 고수준이 직접 변경할 수 없다.
+# 직접 attribute 할당은 ``__setattr__`` 훅이 caller 파일을 보고 차단.
+# update() / apply_fast_path() / set_state(token=) 만 허용.
 
 class InternalState:
     """9차원 내부 상태 벡터와 3개 행렬을 관리하는 핵심 수치 엔진."""
@@ -19,9 +30,19 @@ class InternalState:
 
     DELTA_MAX = 0.3  # 단일 턴 최대 변화량
 
+    # spec §8.5: 보호되는 attribute 들. ``__setattr__`` 가 caller 위치를 검사.
+    _PROTECTED_ATTRS = frozenset({'state', 'baselines'})
+
     def __init__(self, baselines: dict[str, float]):
-        self.state = np.array([baselines[p] for p in self.PARAMS], dtype=np.float64)
-        self.baselines = self.state.copy()
+        # __setattr__ 가 _PROTECTED_ATTRS 를 검사하기 때문에, init 단계에서는
+        # ``object.__setattr__`` 로 우회해 초기화한다 (init caller 가 build_low_level
+        # 같은 main.py 일 수 있어 caller 검사를 통과 못함).
+        object.__setattr__(
+            self,
+            'state',
+            np.array([baselines[p] for p in self.PARAMS], dtype=np.float64),
+        )
+        object.__setattr__(self, 'baselines', self.state.copy())
         # cached eigenvalues of J = W - D (lazy). W/D 는 init 후 변하지 않으므로
         # 첫 호출 시 1회 계산해 저장 — debug 페이로드 매 턴 재계산 회피.
         self._cached_eigenvalues: np.ndarray | None = None
@@ -62,6 +83,16 @@ class InternalState:
         # D: 자기 감쇠 대각 행렬. 모든 원소 > 0.
         self.D = np.diag(np.full(9, 0.1, dtype=np.float64))
 
+    def __setattr__(self, name: str, value) -> None:
+        """spec §8.5: ``state`` / ``baselines`` 직접 할당 시 caller 검증.
+
+        허용 caller: ``low_level/``, ``interface/``, ``ui/backend/state_serializer``.
+        그 외에는 SpecViolation. (init 은 ``object.__setattr__`` 로 우회.)
+        """
+        if name in InternalState._PROTECTED_ATTRS:
+            _check_protected_setattr(name, owner='internal_state')
+        object.__setattr__(self, name, value)
+
     def set_baselines(self, baselines: dict[str, float]) -> None:
         """기질 표류 후 기저선 동기화 — Temperament.drift 직후에 호출.
 
@@ -80,6 +111,8 @@ class InternalState:
             + self.D @ (self.baselines - self.state)
         )
         delta = np.clip(delta, -self.DELTA_MAX, self.DELTA_MAX)
+        # __setattr__ 가 caller 를 본다 — 이 라인은 low_level/internal_state.py 에
+        # 있으므로 검사를 통과한다.
         self.state = np.clip(self.state + delta, 0.0, 1.0)
         return self.state
 
@@ -137,7 +170,23 @@ class InternalState:
         for param, delta in state_changes.items():
             idx = self.PARAMS.index(param)
             clamped = np.clip(delta, -self.DELTA_MAX, self.DELTA_MAX)
+            # ndarray 의 __setitem__ 은 __setattr__ 와 무관 — 통과.
             self.state[idx] = np.clip(self.state[idx] + clamped, 0.0, 1.0)
+
+    def set_state(self, new_state: np.ndarray, token: object) -> None:
+        """spec §8.5: token-gated 직접 state 교체.
+
+        직렬화 인프라(상태 복원)에서만 사용. 토큰 없으면 SpecViolation.
+        """
+        assert_low_level(token)
+        # __setattr__ 우회: low_level 모듈 내부 호출이라 자동 통과되지만,
+        # 명시적으로 토큰을 요구해 호출자가 의도를 표현하도록.
+        object.__setattr__(self, 'state', np.asarray(new_state, dtype=np.float64))
+
+    def set_baselines_array(self, new_baselines: np.ndarray, token: object) -> None:
+        """spec §8.5: token-gated baselines 교체 (직렬화 복원 전용)."""
+        assert_low_level(token)
+        object.__setattr__(self, 'baselines', np.asarray(new_baselines, dtype=np.float64))
 
     def validate_stability(self) -> bool:
         """야코비안 J = W - D 의 고유값 실수부 전부 음수인지 확인."""
