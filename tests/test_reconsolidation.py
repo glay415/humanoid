@@ -91,3 +91,39 @@ async def test_labels_preserved_through_reconsolidation(episodic):
     )
     persisted = episodic.vector_db.get(rid)
     assert set(persisted["emotion_tag"]["labels"]) == {"calm", "warm"}
+
+
+# ---------------------------------------------------------------------------
+# audit γ6 — labels=None legacy 메모리 회귀
+# ---------------------------------------------------------------------------
+
+async def test_reconsolidation_with_labels_none(episodic):
+    """legacy 메모리가 labels=None 으로 저장되어도 재고정화/재저장이 성공한다."""
+    # store 는 list 만 받으니 직접 vdb.upsert 로 None 을 흘려넣되,
+    # vector_db._flatten_record 의 방어로직이 [] 로 정규화한다.
+    rec = {
+        "id": "legacy",
+        "content": "라벨 None 인 옛 기억",
+        "emotion_tag": {"valence": 0.4, "arousal": 0.4, "labels": None},
+        "source": "experience",
+        "importance": 0.5,
+        "retrieval_count": 0,
+        "last_retrieved": 0,
+        "reconsolidated": False,
+        "timestamp": 0,
+    }
+    episodic.vector_db.upsert(rec)
+
+    # retrieve → reconsolidate → vector_db.update 흘러갈 때 TypeError 발생 없음.
+    out = await episodic.retrieve(
+        query="라벨 None 인 옛 기억",
+        mood={"valence": 0.0, "arousal": 0.5},
+        core_affect={"valence": 0.0, "arousal": 0.5},
+        k=1,
+    )
+    assert len(out) == 1
+    # 결과에 빈 리스트로 정규화되어 들어와야 한다.
+    assert out[0]["emotion_tag"]["labels"] == []
+
+    persisted = episodic.vector_db.get("legacy")
+    assert persisted["emotion_tag"]["labels"] == []

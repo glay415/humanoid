@@ -24,7 +24,10 @@ def _flatten_record(record: dict) -> dict[str, Any]:
         if key == "emotion_tag" and isinstance(value, dict):
             metadata["emotion_valence"] = float(value.get("valence", 0.0))
             metadata["emotion_arousal"] = float(value.get("arousal", 0.0))
-            metadata["emotion_labels"] = json.dumps(list(value.get("labels", [])))
+            # audit γ6: labels 가 None / 잘못된 타입이면 빈 리스트로 강제.
+            raw_labels = value.get("labels")
+            labels = raw_labels if isinstance(raw_labels, list) else []
+            metadata["emotion_labels"] = json.dumps(labels)
             continue
         # bool 도 chroma 가 허용. 리스트/딕트는 직렬화.
         if isinstance(value, (str, int, float, bool)) or value is None:
