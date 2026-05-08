@@ -425,3 +425,68 @@ async def test_scenario_24_mortality_awareness(tmp_path, monkeypatch):
         f"baselines should drift across maintenance turns, max_drift={max_drift:.2e}"
     )
 
+
+# ---------------------------------------------------------------------------
+# 시나리오 25 — 나-너 관계 (I-Thou) — 부분 통과
+# ---------------------------------------------------------------------------
+
+
+def test_scenario_25_i_thou_partial(tmp_path, monkeypatch):
+    """spec §12 표: 부분 통과 — 예측 정밀도 하향 구현.
+
+    Buber 의 I-Thou 는 도구화하지 않는 관계 → 본 구현체에서는 metacognition
+    의 'regulation_capacity' 가 social_reward 를 경험 합성에 반영하는 강도를
+    *조절할 수 있다는 매개* 로 표현된다. 이 파라미터가
+    (1) 존재하고 (2) [0,1] 범위이며 (3) 변경 가능하다는 *부분적 표현* 만
+    검증한다. 완전한 I-Thou 는 1인 환경에서 구현 불가능 (spec §12).
+    """
+    orch, _ = _make_orch(tmp_path, monkeypatch)
+
+    # (1) 파라미터 존재
+    assert hasattr(orch.metacognition, 'regulation_capacity')
+    cap = orch.metacognition.regulation_capacity
+    # (2) [0, 1] 범위
+    assert 0.0 <= cap <= 1.0, f"regulation_capacity={cap} out of [0,1]"
+    # (3) 변경 가능
+    orch.metacognition.regulation_capacity = 0.0
+    assert orch.metacognition.regulation_capacity == 0.0
+    orch.metacognition.regulation_capacity = 1.0
+    assert orch.metacognition.regulation_capacity == 1.0
+    # 원복
+    orch.metacognition.regulation_capacity = cap
+
+
+# ---------------------------------------------------------------------------
+# 시나리오 26 — 비이원적 인식 — 존재론적 한계 (xfail strict)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason='spec §12: ontological limit — duality returns the moment we express it',
+)
+def test_scenario_26_non_dual_awareness():
+    """비이원적 인식: 표현하는 순간 이원이 복원된다.
+
+    상징 표상 'X' 와 그 지시체 X 사이의 거리가 정확히 0 이라는 명제는
+    구현체가 표상을 *가지는 한* 거짓이다. xfail strict 가 이 한계를 명시한다.
+    """
+    symbol = '비이원'           # 상징 표상
+    referent = object()          # 지시체 (서로 다른 식별 객체)
+    # "표현된 상징과 표현되지 않은 그 자체가 동일 객체" 라는 주장 — 거짓.
+    assert symbol is referent, '비이원적 표현은 그 자체로 이원을 복원한다'
+
+
+# ---------------------------------------------------------------------------
+# 시나리오 27 — 집단적 초월 — 해당 없음 (skip)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skip(reason='spec §12: not applicable — humanoid simulates a 1-person social world')
+def test_scenario_27_collective_transcendence():
+    """집단적 초월: humanoid 는 1인 사회 환경을 시뮬레이션하므로 해당 없음.
+
+    spec §12 표: 해당 없음 / 1인 환경. 다중 에이전트 메모리 (Architecture 2.0,
+    2026) 와 같은 외부 시스템과 결합할 때만 의미를 가진다.
+    """
+    pass
