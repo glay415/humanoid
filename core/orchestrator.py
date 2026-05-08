@@ -175,15 +175,46 @@ class Orchestrator:
             Event('memory_retrieved', memory_result, 'memory', self.turn_number)
         )
 
-        # ▼ 동기화 지점: 경험 벡터 합성 + 메타인지 검토
+        # ▼ 동기화 지점: 경험 벡터 합성 + 메타인지 검토 + 재평가 루프 (depth limit 3)
         goal_progress = self.metacognition.goal_progress if self.metacognition else None
         experience_vector = self.experience_descent.assemble(
             emotion_result, social_result, goal_progress
         )
 
         if self.metacognition is not None:
-            # review 는 현재 default no-reappraisal 만 반환. 호환을 위해 호출만 한다.
-            self.metacognition.review(emotion_result, social_result, low_result)
+            iterations = 0
+            while iterations < 3:
+                review = self._invoke_review(
+                    emotion_result, social_result, low_result, iterations
+                )
+                if not review.get('needs_reappraisal'):
+                    break
+                # 재평가 시도
+                try:
+                    emotion_result = await self.emotion_appraisal.reappraise(
+                        prev_result=emotion_result,
+                        strategy=review.get('strategy'),
+                        low_result=low_result,
+                        user_input=user_input,
+                    )
+                    iterations = review.get('iterations', iterations + 1)
+                    # 갱신된 감정 결과를 동일 토픽으로 재발행 (다른 구독자 동기화)
+                    await self.event_bus.publish(
+                        Event(
+                            'emotion_appraised',
+                            emotion_result,
+                            'emotion_reappraise',
+                            self.turn_number,
+                        )
+                    )
+                except (LLMError, NotImplementedError, TypeError):
+                    # 재평가 실패 — 현재 결과로 진행
+                    break
+
+            # 갱신된 감정으로 경험 벡터 재합성
+            experience_vector = self.experience_descent.assemble(
+                emotion_result, social_result, goal_progress
+            )
 
         # 다음 턴 저수준 파이프라인이 prev_experience 로 사용
         self.prev_experience = experience_vector
@@ -276,6 +307,26 @@ class Orchestrator:
             'experience_vector': experience_vector,
             'turn_number': self.turn_number,
         }
+
+    def _invoke_review(
+        self,
+        emotion_result: dict,
+        social_result: dict,
+        low_result: dict,
+        iterations: int,
+    ) -> dict:
+        """Metacognition.review 호출 — 시그니처 호환 처리.
+
+        Wave 4 stub (kw 미지원) 와 Wave 7 시그니처 (prev_iterations kwarg) 양쪽을 지원.
+        """
+        review_fn = self.metacognition.review
+        try:
+            return review_fn(
+                emotion_result, social_result, low_result,
+                prev_iterations=iterations,
+            )
+        except TypeError:
+            return review_fn(emotion_result, social_result, low_result)
 
     # ------------------------------------------------------------------
     # Phase 5: 트리거 레지스트리 wiring (spec §1.2)
