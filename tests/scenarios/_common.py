@@ -86,26 +86,33 @@ DEFAULT_SOCIAL = {
 
 
 def _stage_for(messages: list[dict]) -> str:
-    """messages[-1].content 의 단서를 보고 어떤 단계인지 라벨링."""
+    """messages[-1].content 의 단서를 보고 어떤 단계인지 라벨링.
+
+    각 단계의 프롬프트에서만 등장하는 고유 토큰을 1차 신호로 사용한다.
+    final_judgment 프롬프트는 `candidates_json` 변수와 후보 배열 양쪽을 박기 때문에
+    style 키워드만으로 라우팅하면 candidates 와 final 이 충돌한다 → 단계별
+    고유 토큰으로 명확히 분리한다.
+    """
     if not messages:
         return 'unknown'
     last = messages[-1].get('content', '') if isinstance(messages[-1], dict) else ''
-    # 후보 생성 프롬프트 — `n_candidates` 변수 또는 style/emotional/restrained 단어가 포함된다.
-    if 'emotional' in last and 'restrained' in last and 'humor' in last:
-        return 'candidates'
-    # 최종 판단 프롬프트
-    if 'selected_index' in last or '최종 판단' in last:
-        return 'final'
-    # 톤 평가/조정
-    if 'response_valence' in last or '톤' in last or 'tone' in last.lower():
-        return 'tone'
-    # 사회인지 — 규범, social_reward 등 키워드
-    if '사회인지' in last or 'social_reward' in last or '규범' in last:
-        return 'social'
-    # 재평가 (reframe/distance/context 전략 + previous_appraisal 박힘)
-    if 'previous_appraisal' in last or '재평가' in last:
+
+    # 재평가 — 직전 결과와 strategy 가 박힘.
+    if 'previous_appraisal' in last or '재평가 프롬프트' in last:
         return 'reappraise'
-    # 기본은 감정 평가
+    # 최종 판단 — '최종 판단' 헤더 또는 'candidates_json' 입력 라벨.
+    if '최종 판단' in last or 'candidates_json' in last:
+        return 'final'
+    # 후보 생성 — '후보 응답 생성' 헤더 또는 '생성할 후보 수'.
+    if '후보 응답 생성' in last or '생성할 후보 수' in last:
+        return 'candidates'
+    # 톤 평가/조정 — '톤 검증' 헤더 또는 응답 valence 변수.
+    if '톤 검증' in last or '톤 평가' in last or '응답 텍스트' in last and '톤' in last:
+        return 'tone'
+    # 사회인지 — 규범 키워드.
+    if '사회인지' in last or '규범(normative' in last:
+        return 'social'
+    # 기본은 감정 평가 (감정 평가 프롬프트가 첫 호출).
     return 'emotion'
 
 
