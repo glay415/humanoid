@@ -35,6 +35,8 @@ testpaths = ["tests"]
 addopts = "-p no:dash"
 markers = [
     "scenario: spec §12 27-scenario integration tests (mock LLM)",
+    "trend: multi-turn integration trend tests (Wave 14C, mock LLM)",
+    "live: tests requiring real LLM API calls (off by default)",
 ]
 
 [tool.uv]
