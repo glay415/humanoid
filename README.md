@@ -141,6 +141,14 @@ tests/        unit + 27 시나리오 + integration e2e
 - [ ] Phase 6 — 실 대화 데이터 기반 W 행렬 미세조정 (sensitivity analysis 까지
       완료, `wave9/w_sensitivity` 브랜치).
 
+## For contributors
+
+- [CLAUDE.md](CLAUDE.md) — 워크플로 규칙 (read-before, update-after).
+- [docs/state-of-the-project.md](docs/state-of-the-project.md) — 현재 진행 상황 (wave / test baseline / 한계).
+- [docs/development.md](docs/development.md) — wave / worktree / commit / 테스트 / 코딩 컨벤션.
+- [docs/api-contract.md](docs/api-contract.md) — backend ↔ frontend 라우트 + SSE 이벤트 정본.
+- [docs/decisions.md](docs/decisions.md) — 아키텍처 결정 로그 (ADRs).
+
 ## 라이선스
 
 `LICENSE` 파일 참조.
