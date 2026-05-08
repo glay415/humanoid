@@ -84,6 +84,14 @@ class Orchestrator:
         # 호환: 기존 코드의 storage 단일 핸들 흔적
         self.storage = None
 
+        # 동기화 지점 (spec §1.4) — 진단 용도.
+        # 감정 평가 / 사회인지 / 기억 인출 세 이벤트가 도착해야 후보 생성으로 진행.
+        self.event_bus.create_sync_point(
+            'post_evaluation',
+            wait_for=['emotion_appraised', 'other_model_updated', 'memory_retrieved'],
+            then='candidate_generation',
+        )
+
     def run_low_level_only(self, raw_input: str = "") -> dict:
         """Phase 1 전용: 저수준 파이프라인만 실행 (LLM 없이)."""
         self.turn_number += 1
@@ -176,18 +184,28 @@ class Orchestrator:
         )
 
         # ▼ 동기화 지점: 경험 벡터 합성 + 메타인지 검토 + 재평가 루프 (depth limit 3)
+        # spec §1.4 / §2.2 ② — 세 이벤트가 모두 도착했음을 진단 차원에서 확인.
+        sync_point = self.event_bus.get_sync_point('post_evaluation')
+        if sync_point is not None:
+            assert sync_point.ready, (
+                f"post_evaluation sync point not ready: "
+                f"received={list(sync_point.received.keys())}"
+            )
+
         goal_progress = self.metacognition.goal_progress if self.metacognition else None
         experience_vector = self.experience_descent.assemble(
             emotion_result, social_result, goal_progress
         )
 
+        converged = True
+        iterations = 0
         if self.metacognition is not None:
-            iterations = 0
             while iterations < 3:
                 review = self._invoke_review(
                     emotion_result, social_result, low_result, iterations
                 )
                 if not review.get('needs_reappraisal'):
+                    converged = True
                     break
                 # 재평가 시도
                 try:
@@ -209,12 +227,23 @@ class Orchestrator:
                     )
                 except (LLMError, NotImplementedError, TypeError):
                     # 재평가 실패 — 현재 결과로 진행
+                    converged = False
                     break
+            else:
+                # depth 3 도달 — 수렴 실패 표기
+                converged = bool(review.get('converged', False))
 
             # 갱신된 감정으로 경험 벡터 재합성
             experience_vector = self.experience_descent.assemble(
                 emotion_result, social_result, goal_progress
             )
+
+        # 동기화 지점에 진단 데이터 기록 (spec §1.4 — convergence 플래그)
+        if sync_point is not None:
+            sync_point.received['__convergence__'] = {
+                'converged': converged,
+                'iterations': iterations,
+            }
 
         # 다음 턴 저수준 파이프라인이 prev_experience 로 사용
         self.prev_experience = experience_vector
@@ -452,6 +481,33 @@ class Orchestrator:
             condition=lambda ctx: ctx.get('idle_turns', 0) >= 10,
             action='maintenance_turn',
         ))
+
+    def evaluate_triggers(self, idle_turns: int = 0) -> list:
+        """현재 컨텍스트로 트리거 발동 평가. 우선순위 정렬된 리스트 반환.
+
+        호출자는 `fired[0].action` 으로 다음 턴 유형을 결정한다.
+        """
+        if self.low_level is None:
+            return []
+        state_dict = self.low_level.internal_state.to_dict()
+        drive_status = self.low_level.drives.compute(state_dict)
+
+        rumination_count = 0
+        if self.dmn is not None:
+            rum = getattr(self.dmn, 'rumination_counter', None)
+            if rum:
+                try:
+                    rumination_count = max(rum.values())
+                except (ValueError, AttributeError):
+                    rumination_count = 0
+
+        ctx = {
+            'max_deficit': drive_status.get('max_deficit', 0.0),
+            'rumination_count': rumination_count,
+            'meta_resource': self.metacognition.resource if self.metacognition else 1.0,
+            'idle_turns': idle_turns,
+        }
+        return self.trigger_registry.check_all(ctx)
 
     @staticmethod
     def _emotion_fallback(raw_core_affect: dict) -> dict:
