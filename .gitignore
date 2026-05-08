@@ -15,6 +15,9 @@ venv/
 env/
 ENV/
 
+# uv (lockfile uv.lock IS tracked — only the cache is ignored)
+.uv/
+
 # Caches
 .mypy_cache/
 .pytest_cache/
