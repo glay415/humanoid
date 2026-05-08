@@ -1,8 +1,11 @@
 import type {
+  DriftLogEntry,
+  EventsLogEntry,
   InstanceCard,
   PersonaInfo,
   ServerState,
   SpawnRequest,
+  TurnsLogEntry,
   WipeResponse,
 } from './types';
 
@@ -96,6 +99,66 @@ export async function hardResetInstance(instanceId: string): Promise<InstanceCar
     );
   }
   return (await res.json()) as InstanceCard;
+}
+
+// --- wave14D: per-instance JSONL log inspection ---
+
+export async function getTurnsLog(
+  instanceId: string,
+  limit = 100,
+  offset = 0,
+): Promise<TurnsLogEntry[]> {
+  const qs = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+  });
+  const res = await fetch(
+    `/api/instances/${encodeURIComponent(instanceId)}/logs/turns?${qs}`,
+  );
+  if (!res.ok) {
+    throw new Error(
+      `GET /api/instances/${instanceId}/logs/turns responded ${res.status}`,
+    );
+  }
+  return (await res.json()) as TurnsLogEntry[];
+}
+
+export async function getEventsLog(
+  instanceId: string,
+  limit = 100,
+  offset = 0,
+  type?: string,
+): Promise<EventsLogEntry[]> {
+  const qs = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+  });
+  if (type) qs.set('type', type);
+  const res = await fetch(
+    `/api/instances/${encodeURIComponent(instanceId)}/logs/events?${qs}`,
+  );
+  if (!res.ok) {
+    throw new Error(
+      `GET /api/instances/${instanceId}/logs/events responded ${res.status}`,
+    );
+  }
+  return (await res.json()) as EventsLogEntry[];
+}
+
+export async function getDriftLog(
+  instanceId: string,
+  limit = 100,
+): Promise<DriftLogEntry[]> {
+  const qs = new URLSearchParams({ limit: String(limit) });
+  const res = await fetch(
+    `/api/instances/${encodeURIComponent(instanceId)}/logs/drift?${qs}`,
+  );
+  if (!res.ok) {
+    throw new Error(
+      `GET /api/instances/${instanceId}/logs/drift responded ${res.status}`,
+    );
+  }
+  return (await res.json()) as DriftLogEntry[];
 }
 
 // Global wipe: deletes ALL instances. Server requires `confirm === "WIPE"`.
