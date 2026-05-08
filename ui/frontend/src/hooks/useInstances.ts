@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   deleteInstance,
+  hardResetInstance,
   listInstances,
   listPersonas,
   spawnInstance,
+  wipeAll,
 } from '../api/client';
 import type { InstanceCard, PersonaInfo, SpawnRequest } from '../api/types';
 
@@ -25,6 +27,8 @@ export type UseInstancesResult = {
   setSelectedId: (id: string | null) => void;
   spawn: (req: SpawnRequest) => Promise<InstanceCard>;
   remove: (id: string) => Promise<void>;
+  hardReset: (id: string) => Promise<InstanceCard>;
+  wipe: () => Promise<void>;
   refresh: () => Promise<void>;
   loading: boolean;
   error: string | null;
@@ -123,6 +127,25 @@ export function useInstances(): UseInstancesResult {
     [],
   );
 
+  // wave12: per-instance hard reset. Persona + jitter_seed preserved on the
+  // server; the card returned has turn_number=0 and zeroed last_mood. We swap
+  // the card in-place so the UI updates instantly.
+  const hardReset = useCallback(async (id: string): Promise<InstanceCard> => {
+    const card = await hardResetInstance(id);
+    setInstances((prev) =>
+      prev.map((c) => (c.instance_id === id ? card : c)),
+    );
+    return card;
+  }, []);
+
+  // wave12: global wipe — destructive. We always send the literal `WIPE` token
+  // (matched by the typed-confirmation modal client-side) and then refresh.
+  const wipe = useCallback(async (): Promise<void> => {
+    await wipeAll('WIPE');
+    setSelectedIdState(null);
+    await refresh();
+  }, [refresh]);
+
   return {
     instances,
     personas,
@@ -130,6 +153,8 @@ export function useInstances(): UseInstancesResult {
     setSelectedId,
     spawn,
     remove,
+    hardReset,
+    wipe,
     refresh,
     loading,
     error,

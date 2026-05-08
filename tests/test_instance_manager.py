@@ -139,3 +139,142 @@ def test_get_after_evict_loads_from_disk(manager):
     assert restored is not orch
     assert restored.turn_number == 5
     assert restored.dialogue_buffer == [{'user': 'a', 'assistant': 'b'}]
+
+
+# ---------------------------------------------------------------------------
+# hard_reset / wipe_all
+# ---------------------------------------------------------------------------
+
+
+def test_hard_reset_clears_chroma_collection(manager):
+    """hard_reset 후 chroma 컬렉션이 비어 있어야 한다."""
+    meta = manager.spawn('extrovert_warm', jitter=0.0, jitter_seed=11)
+    orch = manager.get(meta.instance_id)
+    vdb = orch.memory_retrieval.episodic.vector_db
+    # 직접 upsert (embedding 없이 metadata 만 — embed_function 이 None 인 경우 skip).
+    for i in range(3):
+        vdb.upsert({
+            'id': f'pre-{i}',
+            'content': f'episode-{i}',
+            'emotion_tag': {'valence': 0.4, 'arousal': 0.3, 'labels': []},
+            'source': 'experience',
+            'importance': 0.5,
+            'retrieval_count': 0,
+            'last_retrieved': i,
+            'reconsolidated': False,
+            'timestamp': i,
+        })
+    # 사전 검증: 컬렉션에 3 개.
+    pre_count = vdb.collection.count()
+    assert pre_count >= 3
+
+    # 하드 리셋
+    manager.hard_reset(meta.instance_id)
+
+    # 재조회: 새 오케스트레이터의 빈 컬렉션
+    orch2 = manager.get(meta.instance_id)
+    post_count = orch2.memory_retrieval.episodic.vector_db.collection.count()
+    assert post_count == 0
+
+
+def test_hard_reset_clears_prospective_queue(manager):
+    """hard_reset 후 prospective queue 가 비어야 한다."""
+    meta = manager.spawn('extrovert_warm', jitter=0.0, jitter_seed=22)
+    orch = manager.get(meta.instance_id)
+    prosp = orch.memory_retrieval.prospective
+    prosp.enqueue(content="future-talk", priority=0.5, turn=0)
+    prosp.enqueue(content="future-task", priority=0.7, turn=0)
+    pre = prosp.fetch_top(n=5, consume=False)
+    assert len(pre) == 2
+
+    manager.hard_reset(meta.instance_id)
+
+    orch2 = manager.get(meta.instance_id)
+    post = orch2.memory_retrieval.prospective.fetch_top(n=5, consume=False)
+    assert post == []
+
+
+def test_hard_reset_clears_state_json(manager):
+    """state.json 이 사라지고 turn_number 0 으로 재초기화."""
+    meta = manager.spawn('extrovert_warm', jitter=0.0, jitter_seed=33)
+    orch = manager.get(meta.instance_id)
+    orch.turn_number = 7
+    orch.dialogue_buffer = [{'user': 'x', 'assistant': 'y'}]
+    manager.save_state(meta.instance_id)
+    state_path = manager.instance_dir(meta.instance_id) / 'state.json'
+    assert state_path.exists()
+
+    new_meta = manager.hard_reset(meta.instance_id)
+    assert new_meta.turn_number == 0
+
+    orch2 = manager.get(meta.instance_id)
+    # save_state 가 spawn 끝에서 한 번 호출되므로 state.json 은 다시 생성됐지만
+    # 내용물은 새 baseline 이다.
+    assert orch2.turn_number == 0
+    assert orch2.dialogue_buffer == []
+
+
+def test_hard_reset_preserves_persona_and_jitter_seed(manager):
+    """동일 baseline 으로 재구축 — jitter_seed 가 보존되어야 한다."""
+    meta = manager.spawn('sensitive_empathic', jitter=0.5, jitter_seed=42)
+    orch_before = manager.get(meta.instance_id)
+    base_before = dict(orch_before.low_level.temperament.baselines)
+
+    new_meta = manager.hard_reset(meta.instance_id)
+    assert new_meta.persona_id == 'sensitive_empathic'
+    assert new_meta.jitter_seed == 42
+
+    orch_after = manager.get(meta.instance_id)
+    base_after = dict(orch_after.low_level.temperament.baselines)
+    for k in base_before:
+        assert abs(base_before[k] - base_after[k]) < 1e-9, f"mismatch on {k}"
+
+
+def test_hard_reset_resets_turn_number(manager):
+    """turn_number 가 0 으로 돌아가야 한다."""
+    meta = manager.spawn('extrovert_warm', jitter=0.0, jitter_seed=44)
+    orch = manager.get(meta.instance_id)
+    orch.turn_number = 12
+    manager.update_metadata(meta.instance_id, turn_number=12)
+    manager.save_state(meta.instance_id)
+
+    new_meta = manager.hard_reset(meta.instance_id)
+    assert new_meta.turn_number == 0
+    orch2 = manager.get(meta.instance_id)
+    assert orch2.turn_number == 0
+
+
+def test_hard_reset_keeps_metadata_instance_id_and_created_at(manager):
+    """instance_id 와 created_at 은 유지되어야 한다."""
+    meta = manager.spawn('extrovert_warm', jitter=0.0, jitter_seed=55)
+    iid = meta.instance_id
+    created = meta.created_at
+
+    new_meta = manager.hard_reset(iid)
+    assert new_meta.instance_id == iid
+    assert new_meta.created_at == created
+
+
+def test_wipe_all_removes_every_instance(manager):
+    """wipe_all 후 list 는 빈 배열, removed 카운트는 ≥ 2."""
+    a = manager.spawn('extrovert_warm', jitter=0.0)
+    b = manager.spawn('introvert_thoughtful', jitter=0.0)
+    assert len(manager.list()) == 2
+
+    result = manager.wipe_all()
+    assert result['removed'] >= 2
+    assert manager.list() == []
+    # 캐시도 비어 있어야 한다.
+    assert manager._live == {}
+    assert manager._meta_cache == {}
+    # 디렉토리들 삭제 확인.
+    assert not manager.instance_dir(a.instance_id).exists()
+    assert not manager.instance_dir(b.instance_id).exists()
+
+
+def test_wipe_all_recreates_root_for_subsequent_spawns(manager):
+    """wipe 후에도 새로 spawn 가능해야 한다."""
+    manager.spawn('extrovert_warm', jitter=0.0)
+    manager.wipe_all()
+    new = manager.spawn('playful_companion', jitter=0.0)
+    assert manager.exists(new.instance_id)

@@ -1,4 +1,4 @@
-import { Plus } from 'lucide-react';
+import { AlertTriangle, Plus } from 'lucide-react';
 import type { InstanceCard as InstanceCardData } from '../api/types';
 import { InstanceCard } from './InstanceCard';
 
@@ -9,6 +9,8 @@ type GalleryProps = {
   onSelect: (id: string | null) => void;
   onOpenSpawn: () => void;
   onDelete: (id: string) => void | Promise<void>;
+  onHardReset: (id: string) => void | Promise<unknown>;
+  onOpenWipe: () => void;
 };
 
 export function Gallery({
@@ -18,6 +20,8 @@ export function Gallery({
   onSelect,
   onOpenSpawn,
   onDelete,
+  onHardReset,
+  onOpenWipe,
 }: GalleryProps) {
   return (
     <div className="flex flex-col h-full bg-zinc-50 dark:bg-zinc-950 border-r border-ink-200 dark:border-zinc-800">
@@ -60,9 +64,22 @@ export function Gallery({
             selected={card.instance_id === selectedId}
             onSelect={onSelect}
             onDelete={onDelete}
+            onHardReset={onHardReset}
           />
         ))}
       </div>
+
+      <footer className="px-3 py-2 border-t border-ink-200 dark:border-zinc-800">
+        <button
+          type="button"
+          onClick={onOpenWipe}
+          className="w-full inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-medium border bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 border-rose-200 dark:border-rose-900 hover:bg-rose-100 dark:hover:bg-rose-950/60 transition-colors"
+          aria-label="모든 캐릭터 영구 삭제"
+        >
+          <AlertTriangle size={12} />
+          전체 초기화
+        </button>
+      </footer>
     </div>
   );
 }

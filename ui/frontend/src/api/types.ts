@@ -101,6 +101,10 @@ export type SpawnRequest = {
   jitter?: number; // 0..1
 };
 
+// Wave 12: hard reset (per-instance) + global wipe (admin) operations.
+export type WipeRequest = { confirm: string };
+export type WipeResponse = { removed: number };
+
 // Per-event payloads emitted on /api/turn.
 
 export type LowLevelEvent = {

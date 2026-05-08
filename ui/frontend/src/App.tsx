@@ -12,12 +12,14 @@ import { ActionBadge } from './components/ActionBadge';
 import { ThemeToggle } from './components/ThemeToggle';
 import { Gallery } from './components/Gallery';
 import { SpawnModal } from './components/SpawnModal';
+import { WipeConfirmModal } from './components/WipeConfirmModal';
 
 export default function App() {
   const inst = useInstances();
   const chat = useChat(inst.selectedId);
   const { theme, toggle } = useTheme();
   const [spawnOpen, setSpawnOpen] = useState(false);
+  const [wipeOpen, setWipeOpen] = useState(false);
 
   const server = chat.state.serverState;
   const isInFlight =
@@ -42,6 +44,8 @@ export default function App() {
             onSelect={inst.setSelectedId}
             onOpenSpawn={() => setSpawnOpen(true)}
             onDelete={inst.remove}
+            onHardReset={inst.hardReset}
+            onOpenWipe={() => setWipeOpen(true)}
           />
         </section>
 
@@ -135,6 +139,12 @@ export default function App() {
         personas={inst.personas}
         onClose={() => setSpawnOpen(false)}
         onSpawn={inst.spawn}
+      />
+
+      <WipeConfirmModal
+        open={wipeOpen}
+        onClose={() => setWipeOpen(false)}
+        onConfirm={inst.wipe}
       />
     </div>
   );

@@ -10,7 +10,13 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
-(empty — Wave 11 promoted to v0.2.0)
+### Added
+- **Per-instance hard reset** (`POST /api/instances/{id}/hard-reset`): wipes ChromaDB / SQLite (prospective queue) / `state.json` for one character; preserves persona + jitter_seed (deterministic respawn) and `instance_id` + `created_at`. UI: kebab menu on each instance card with confirmation overlay. (`ui/backend/instance_manager.py::hard_reset`, `ui/frontend/src/components/InstanceCard.tsx`)
+- **Global wipe** (`POST /api/admin/wipe`, body `{confirm: "WIPE"}`): deletes all instance directories and clears in-memory caches; legacy `/api/turn` auto-respawns `_default`. UI: gallery footer "전체 초기화" → `WipeConfirmModal` requires the typed token `WIPE` before the destructive button enables. (`ui/backend/instance_manager.py::wipe_all`, `ui/frontend/src/components/WipeConfirmModal.tsx`)
+- **`InstanceManager._release_storage_handles`**: explicit close of ProspectiveQueue sqlite + ChromaDB PersistentClient before `rmtree` to avoid Windows file-lock leaks during destructive ops.
+
+### Tests
+- 513 → **528 passed** (+15) + 1 skipped + 1 xfailed. New tests in `tests/test_instance_manager.py` (chroma/prospective/state wipe semantics, persona+seed preservation, wipe_all dir removal + respawn) and `tests/test_ui_backend_instances.py` (route 200/404/400, post-turn zero, legacy `_default` auto-respawn after wipe).
 
 ---
 

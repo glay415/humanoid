@@ -2,10 +2,10 @@
 
 > Living document. Wave 머지 / 중요 결정 / baseline 변동 시마다 갱신한다. 규칙은 [`CLAUDE.md`](../CLAUDE.md) 참조.
 
-## Current baseline (as of 2026-05-08, Wave 11 merged)
+## Current baseline (as of 2026-05-08, Wave 12 merged)
 
-- Tests: **513 passed + 1 skipped + 1 xfailed** (`pytest tests/ -q`, ~136s)
-- Branch: `main` at commit `87501cd` (Wave 11 docs_handoff merge head)
+- Tests: **528 passed + 1 skipped + 1 xfailed** (`pytest tests/ -q`, ~110s)
+- Branch: `main` at commit `87501cd` (Wave 11 docs_handoff merge head; Wave 12 머지 직후 갱신 예정)
 - Release: `release` branch at `v0.1.0` (pre-Wave-11). v0.2.0 promotion 예정.
 - LLM tier: `small` / `large` / `dmn` 모두 `gpt-5.5` (2026-04-23 출시, 4o 시리즈는 legacy)
 - Repo: https://github.com/glay415/humanoid
@@ -24,6 +24,7 @@ Phase 단위는 spec §13 implementation roadmap 기준. Wave 는 실제 작업 
 - [x] FastAPI 백엔드 (`/api/turn` SSE, `/api/state`, `/api/reset`, `/api/health`) + React 프론트엔드 (Vite + TS + Tailwind + Recharts, dark mode).
 - [x] W 행렬 sensitivity analysis (±20% / ±50% perturbation, 1000-turn long-run lifecycle).
 - [x] **Wave 11** — instance management + persona catalog + frontend gallery + docs handoff. 5 default 페르소나, 인스턴스별 `./instances/<uuid>/` 격리, 신규 `/api/personas` / `/api/instances*` 라우트, frontend gallery + spawn modal + switcher.
+- [x] **Wave 12** — destructive operations: 인스턴스별 hard reset (`/api/instances/{id}/hard-reset`, 페르소나 + jitter_seed 보존, chroma/sqlite/state 삭제) + 전체 wipe (`/api/admin/wipe`, body `{confirm:"WIPE"}`). UI: 카드별 kebab 메뉴 + 갤러리 footer `WipeConfirmModal` (typed token).
 - [ ] Phase 6 — 실 대화 데이터 기반 W 행렬 미세조정.
 - [ ] DMN.unappraised_queue orchestrator 자동 push 통합.
 
@@ -44,16 +45,18 @@ Phase 단위는 spec §13 implementation roadmap 기준. Wave 는 실제 작업 
 | W9 | `wave9/phase5_e2e` (e77b175) + `wave9/docs` (b89a8b2) | 2026-05-04 | Phase 5 멀티턴 e2e (대화/정비/DMN 시퀀스, 마커 신호 변화, 트리거 평가, 재평가 수렴). README + getting-started + architecture 1차 문서. W matrix invariants + sensitivity, 1000-turn lifecycle long-run, sensitivity helper script. |
 | W10 | `wave10/dark_mode` (b2babf6) | 2026-05-06 | Tailwind class-based dark mode + ThemeToggle, useTheme + localStorage, 전 패널 dark variant, mood timeline theme-aware. Humanize 작업 (layered identity + dialogue_buffer) 같은 시기에 main 직커밋 (6e9bb61, e7a19f5). gpt-5.5 전환 (ddeb718). |
 | W11 | `wave11/backend_instances` (034b6c4) + `wave11/frontend_gallery` (aa1df17) + `wave11/docs_handoff` (87501cd) | 2026-05-08 | InstanceManager + 5 default 페르소나 (`config/personas/*.yaml`) + jitter (`storage/jitter.py`) + state serializer + 신규 `/api/personas` / `/api/instances*` 라우트. Frontend Gallery / InstanceCard / PersonaPicker / SpawnModal / useInstances hook + useChat instance-scoped 라우팅. CLAUDE.md + state-of-the-project + development + api-contract + decisions docs. **+33 tests** (480 → 513). |
+| W12 | `wave12/hard_reset` | 2026-05-08 | Destructive ops — `InstanceManager.hard_reset` (chroma/prospective/state.json wipe, persona+seed 보존, Windows file-lock 대비 `_release_storage_handles` 헬퍼) + `wipe_all` ({removed:int}, legacy `_default` 자동 재스폰). 라우트 `POST /api/instances/{id}/hard-reset` (200 + InstanceCard) / `POST /api/admin/wipe` (body `{confirm:"WIPE"}`, 400 on mismatch). UI: 카드별 kebab 메뉴 (`MoreVertical`) + Gallery footer + `WipeConfirmModal` (typed-token confirm). **+15 tests** (513 → 528). |
 
 테스트 카운트 변동의 대표적 마일스톤:
 - Wave 5 끝: ~250 (정확치 git 로그에 명시 안 됨, 테스트 부스트 광범위).
 - Wave 9 README 시점: 454 + 1 skip + 1 xfail.
 - Wave 10 끝: 480 + 1 skip + 1 xfail.
-- Wave 11 끝 (2026-05-08): **513 + 1 skip + 1 xfail**.
+- Wave 11 끝 (2026-05-08): 513 + 1 skip + 1 xfail.
+- Wave 12 끝 (2026-05-08): **528 + 1 skip + 1 xfail**.
 
 ## Active work
 
-(없음 — Wave 11 머지 완료. 다음 wave 계획 시 여기 갱신.)
+(없음 — Wave 12 머지 완료. 다음 wave 계획 시 여기 갱신.)
 
 ## Next candidates
 
