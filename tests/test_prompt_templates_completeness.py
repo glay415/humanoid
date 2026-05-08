@@ -50,6 +50,7 @@ TONE_VARS: dict = {
 
 SOCIAL_VARS: dict = {
     'user_input': '어제 일 미안해',
+    'emotion_summary': 'valence=0.10, arousal=0.40, 라벨=[미안]',
     'other_model_summary': '상대는 친밀, 신뢰 0.6',
 }
 
@@ -145,9 +146,11 @@ def test_social_cognition_contains_rendered_vars():
     tpl = load_prompt('social_cognition')
     out = tpl.render(
         user_input='MARKER_USER_INPUT',
+        emotion_summary='MARKER_EMOTION',
         other_model_summary='MARKER_OTHER_MODEL',
     )
     assert 'MARKER_USER_INPUT' in out
+    assert 'MARKER_EMOTION' in out
     assert 'MARKER_OTHER_MODEL' in out
 
 

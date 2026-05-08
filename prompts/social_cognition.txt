@@ -1,4 +1,48 @@
-# TODO Phase 3: social cognition prompt — ToM / other-model 갱신
-User said: {user_input}
-Other-model summary so far: {other_model_summary}
-Return JSON {{"updated_summary": str, "inferred_intent": str, "trust_delta": float}}.
+# 사회인지 프롬프트 — Scherer CPM 4단계 중 **규범(normative significance)** 만 판단
+#
+# 본 프롬프트는 단일 user 메시지로 렌더링된다.
+# 호출부에서 system 메시지(역할 지시 + JSON-only 강제)를 주입하므로, 여기는 입력/출력만 정의.
+# Python str.format 사용 → JSON 예시의 모든 중괄호는 {{ }} 로 이스케이프.
+
+[입력]
+- 사용자 발화: {user_input}
+- 감정 평가 요약(상위 ① 모듈의 결과 — 코어어펙트와 다를 수 있음): {emotion_summary}
+- 현재 타자모델 요약: {other_model_summary}
+
+[과제]
+당신은 Scherer CPM 4단계 중 **규범(normative significance)** 만 담당한다.
+관련성/함의는 감정 평가가, 대처(coping)는 메타인지가 처리하므로 그 판단은 절대 하지 마라.
+
+다음 세 가지를 종합적으로 판단한다:
+1) 사회 규범 부합도 — 이 발화가 우리(자기)와 상대 사이의 사회·문화적 규범에 얼마나 부합하는가?
+   비난/공격/경계 위반은 규범 위반이고, 호의/공감/존중은 부합이다.
+2) 상대의 감정·의도 추정 — 발화·맥락·이전 상호작용으로부터 상대의 valence/arousal 와
+   짧은 한국어 의도 요약을 추정한다. 단정 짓지 말고 가장 그럴듯한 추정을 사용한다.
+3) social_reward — 우리(자기) 입장에서 이 사회적 사건이 보상적인가?
+   규범 부합 + 친밀/지지 신호 → 높음. 규범 위반 + 적대 → 낮음.
+   0.0 (전혀 보상 없음) ~ 1.0 (강한 사회적 보상).
+
+[출력 — 반드시 아래 JSON 스키마와 동일하게]
+- person_id: 화자 식별자. 별도 정보 없으면 "default" 사용.
+- estimated_emotion:
+    - valence: -1.0 ~ 1.0 (상대의 정서가 추정)
+    - arousal: 0.0 ~ 1.0 (상대의 각성도 추정)
+- estimated_intent: 한 줄 한국어 요약 (예: "공감 요청", "사과", "도발").
+- social_reward: 0.0 ~ 1.0 (우리 입장의 사회적 보상성).
+
+[규칙]
+- 응답은 **오직 JSON 한 객체**. 마크다운 코드펜스(```), 자연어 설명, 추가 키 금지.
+- 모든 수치는 명시 범위를 절대 벗어나지 않는다. 범위를 넘으면 잘라낸다.
+- estimated_intent 는 비어 있지 않게 한다. 정보가 부족하면 "불명확" 사용.
+- 타자모델이 비어 있으면(초면 등) general prior 로 중립 추정한다 (valence≈0, arousal≈0.3).
+
+[JSON 예시(형식 참조용; 값은 복사하지 말 것)]
+{{
+  "person_id": "default",
+  "estimated_emotion": {{
+    "valence": 0.25,
+    "arousal": 0.45
+  }},
+  "estimated_intent": "공감 요청",
+  "social_reward": 0.65
+}}
