@@ -12,8 +12,11 @@ Scherer CPM 4단계 중 관련성/함의를 담당. 대처(메타인지)·규범
     3) 템플릿 본문은 실제 데이터 평가에 집중하도록 user 로 둔다.
 - 스키마 검증은 LLMClient.complete_json 이 EmotionAppraised 로 처리한다.
 - 실패 시 LLMError 가 그대로 전파됨 → 오케스트레이터의 _emotion_fallback 이 받는다.
+- reappraise 는 메타인지가 트리거하는 2차 평가. 동일 스키마(EmotionAppraised) 로 응답.
 """
 from __future__ import annotations
+
+import json
 
 from interface.schemas import EmotionAppraised
 from llm.client import LLMClient
@@ -30,12 +33,25 @@ _SYSTEM_MESSAGE = (
 )
 
 
+_REAPPRAISAL_SYSTEM_MESSAGE = (
+    "당신은 인지 아키텍처의 '감정 재평가(emotion reappraisal)' 모듈이다. "
+    "메타인지가 직전 평가에 문제가 있다고 판단해 다시 호출했다. "
+    "전략(reframe/distance/context)에 맞춰 같은 입력을 다른 프레임으로 다시 평가하라. "
+    "출력 스키마는 EmotionAppraised 와 동일하며 오직 JSON 한 객체만 반환한다. "
+    "마크다운 코드펜스·자연어 설명·추가 키는 금지. 모든 수치 범위를 반드시 지킨다."
+)
+
+
+_VALID_STRATEGIES = frozenset({'reframe', 'distance', 'context'})
+
+
 class EmotionAppraisal:
     """감정 평가 모듈 (작은 모델)."""
 
     def __init__(self, llm_client: LLMClient | None = None):
         self.llm = llm_client or LLMClient()
         self.template = load_prompt('emotion_appraisal')
+        self.reappraisal_template = load_prompt('emotion_reappraisal')
 
     async def evaluate(
         self,
@@ -70,6 +86,49 @@ class EmotionAppraisal:
         self,
         prev_result: dict,
         strategy: str,
+        low_result: dict | None = None,
+        user_input: str = '',
     ) -> dict:
-        """재평가 (메타인지 요청 시). 동기화 지점 내에서 수행."""
-        raise NotImplementedError("Phase 5")
+        """재평가 (메타인지 요청 시).
+
+        Args:
+            prev_result: 직전 EmotionAppraised dict. 선택적으로 '_reasons' 키를 들고 있을 수 있음.
+            strategy: 'reframe' | 'distance' | 'context' 중 하나.
+            low_result: 저수준 결과 (raw_core_affect 추출용). None 이면 0.0 으로 폴백.
+            user_input: 원 사용자 발화.
+
+        Returns:
+            EmotionAppraised 스키마와 동일한 dict.
+
+        Raises:
+            ValueError: strategy 가 유효하지 않을 때.
+            LLMError: LLM 호출 실패 또는 스키마 검증 실패.
+        """
+        if strategy not in _VALID_STRATEGIES:
+            raise ValueError(f'unknown strategy: {strategy}')
+
+        reasons_str = ''
+        if isinstance(prev_result, dict):
+            reasons = prev_result.get('_reasons', [])
+            if isinstance(reasons, list):
+                reasons_str = ', '.join(str(r) for r in reasons)
+
+        rca = (low_result or {}).get('raw_core_affect', {}) if low_result else {}
+
+        rendered = self.reappraisal_template.render(
+            user_input=user_input,
+            previous_appraisal=json.dumps(prev_result, ensure_ascii=False),
+            strategy=strategy,
+            reasons=reasons_str,
+            raw_valence=rca.get('valence', 0.0),
+            raw_arousal=rca.get('arousal', 0.0),
+        )
+        messages = [
+            {"role": "system", "content": _REAPPRAISAL_SYSTEM_MESSAGE},
+            {"role": "user", "content": rendered},
+        ]
+        return await self.llm.complete_json(
+            messages,
+            schema=EmotionAppraised,
+            model_name='small_model',
+        )
