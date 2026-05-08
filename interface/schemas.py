@@ -28,6 +28,18 @@ class OtherModelUpdated(BaseModel):
     social_reward: float = Field(ge=0.0, le=1.0)
 
 
+class SocialCognitionResult(BaseModel):
+    """사회인지 LLM 출력 — Scherer CPM stage 4 (규범) 평가 결과.
+
+    OtherModelUpdated 와 모양은 동일하지만, LLM 출력의 범위 검증을 강제한다.
+    이벤트 버스 호환을 위해 OtherModelUpdated 는 그대로 둔다.
+    """
+    person_id: str
+    estimated_emotion: dict  # {valence, arousal}
+    estimated_intent: str
+    social_reward: float = Field(ge=0.0, le=1.0)
+
+
 class MemoryItem(BaseModel):
     id: str
     content: str
