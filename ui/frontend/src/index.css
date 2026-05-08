@@ -2,6 +2,15 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+  .dark {
+    color-scheme: dark;
+  }
+}
+
 html,
 body,
 #root {
@@ -9,7 +18,7 @@ body,
 }
 
 body {
-  @apply bg-ink-50 text-ink-900 antialiased;
+  @apply bg-ink-50 text-ink-900 antialiased dark:bg-zinc-950 dark:text-zinc-100;
   font-feature-settings: 'cv11', 'ss01';
 }
 
@@ -19,7 +28,7 @@ body {
   height: 6px;
 }
 .scroll-thin::-webkit-scrollbar-thumb {
-  @apply bg-ink-300 rounded;
+  @apply bg-ink-300 rounded dark:bg-zinc-700;
 }
 .scroll-thin::-webkit-scrollbar-track {
   background: transparent;
