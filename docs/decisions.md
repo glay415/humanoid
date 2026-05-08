@@ -101,6 +101,29 @@
 
 ---
 
+## ADR-009 (2026-05-08): Destructive-operation safety — typed token + per-instance vs global scope
+
+**Context**: Wave 12 에 두 종류의 파괴적 연산을 추가했다 — 인스턴스별 hard reset (한 캐릭터의 기억/스토리지 wipe) 과 전체 wipe (모든 인스턴스 삭제). 기존 soft `/reset` (turn_number / dialogue_buffer 만 클리어) 와 의미가 다르고, 잘못 호출되면 복구 불가능한 데이터 손실이 발생한다. 단순 confirm 다이얼로그 / 더블클릭은 실수 방지에 부족하다.
+
+**Decision**:
+1. **두 단계 reset 의미를 분리한다**.
+   - `POST /api/instances/{id}/reset` (기존, soft): in-memory `turn_number=0`, `dialogue_buffer=[]`. 페르소나/기억 모두 보존. 빠른 재시작용.
+   - `POST /api/instances/{id}/hard-reset` (신규): 디스크 영속 영역 (`chroma_db`, `prospective.db`, `state.json`, `markers.db`, `storage_data`) 모두 삭제 후 동일 `instance_id` + `persona_id` + `jitter_seed` 로 결정론적 재스폰. **페르소나 정체성은 유지하되 기억만 wipe**.
+   - `POST /api/admin/wipe` (신규, global): 모든 인스턴스 디렉터리 + 캐시 삭제. legacy `_default` 만 자동 재생.
+2. **전체 wipe 는 typed-token 으로 강제 확인**한다. body 가 정확히 `{confirm: "WIPE"}` 일 때만 200, 그 외 400. 클라이언트에서 사용자가 텍스트 박스에 `WIPE` 를 입력해야 destructive 버튼이 enable 된다 (`WipeConfirmModal`). 단순 클릭 한 번으로는 절대 발동되지 않는다.
+3. **per-instance hard reset 은 inline 확인**으로 충분 — scope 가 명확하고 (특정 카드), persona 가 보존되어 복구 비용이 상대적으로 낮음. 카드 위 모달로 "기억 초기화" 라벨 + 페르소나 보존 사실 명시.
+4. **Windows 파일 락 방어**: ChromaDB PersistentClient + ProspectiveQueue sqlite 의 핸들이 잡혀있는 상태에서 `shutil.rmtree` 가 실패하는 케이스 — `_release_storage_handles` 헬퍼로 명시적 `client.close()` + `conn.close()` 후 GC, 그래도 실패하면 `ignore_errors=True` 로 두 번째 시도.
+
+**Consequences**:
+- destructive UI 액션은 항상 (a) scope 명시, (b) 보존되는 항목 명시, (c) 토큰 입력 (전체 wipe 한정) 의 세 단계를 거친다.
+- 두 reset 의미의 분리 덕분에 "기억은 지우고 싶지만 캐릭터는 유지" 와 "캐릭터 자체를 새로 시작" 이 같은 라우트에 섞이지 않는다. 추후 prospective queue 만 / markers 만 같이 더 세분화된 wipe API 가 추가되어도 패턴은 유지된다 (모두 hard 계열로 분류, soft 는 in-memory only).
+- `wipe_all` 후 legacy `_default` 자동 재스폰은 backward-compat 비용 — 100% wipe 가 아님을 사용자가 인지해야 하므로 모달 본문에 명시적으로 적지는 않으나 docs 에 기재한다 (`docs/api-contract.md`).
+- 단점: 토큰 문자열 (`WIPE`) 이 영어라 한국어 사용자에게 lookup 부담이 있을 수 있음 — 모달 본문에 굵은 글씨 + 코드 블록으로 명시. 첫 번째 적용에서 UX 마찰을 모니터링 후 ADR 보완.
+
+**Status**: accepted. 첫 적용: Wave 12 (`wave12/hard_reset`). 향후 destructive API (예: `/api/admin/reset-personas`, `/api/instances/{id}/forget-recent`) 도 동일 패턴 (typed-token if global, inline-confirm if per-instance) 따른다.
+
+---
+
 ## Future ADRs (placeholder)
 
 다음과 같은 결정이 일어나면 ADR 를 append:

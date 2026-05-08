@@ -256,6 +256,47 @@ Array<{
 
 해당 인스턴스 reset (디스크 chroma 는 유지). 204.
 
+### `POST /api/instances/{id}/hard-reset`
+
+해당 인스턴스의 영속 스토리지 (`chroma_db/`, `prospective.db`, `state.json`, 있다면 `markers.db` / `storage_data/`) 를 모두 삭제한 뒤 동일 `instance_id` + `persona_id` + `jitter_seed` 로 결정론적으로 재스폰. `created_at` 은 보존, `turn_number=0`, `last_mood={valence:0, arousal:0}`.
+
+soft `/reset` 과의 차이: hard-reset 은 **디스크 영속 영역까지** 비운다 (기억·마커·전망기억 모두 제거). 같은 baselines 로 재구성되므로 캐릭터 정체성은 유지된다.
+
+```ts
+// 200 OK — 갱신된 InstanceCard
+{
+  instance_id: string,
+  display_name: string,
+  persona_id: string,
+  persona_display_name: string,
+  turn_number: 0,
+  last_mood: { valence: 0, arousal: 0 },
+  last_active: string,  // ISO 8601 — 재스폰 시각
+  created_at: string,   // 원본 보존
+}
+// 404 — id 미존재
+```
+
+### `POST /api/admin/wipe`
+
+모든 인스턴스를 영구 삭제. body 에 정확히 `"WIPE"` 토큰을 담아야 한다.
+
+```ts
+// Request
+{ confirm: "WIPE" }
+
+// 200 OK
+{ removed: number }   // 삭제된 인스턴스 디렉터리 수
+
+// 400 — confirm 토큰 불일치 ("confirmation token mismatch")
+// 422 — body 누락 / 형식 오류 (FastAPI 기본 검증)
+```
+
+성공 후:
+- `MANAGER._live` 와 `MANAGER._meta_cache` 가 비워지고 `instances/` 루트 디렉터리는 빈 상태로 재생성된다.
+- legacy `/api/turn` 첫 호출 시 `STATE.initialize()` → `MANAGER.get_or_spawn_default()` 가 `_default` 인스턴스를 자동 재스폰한다.
+- `app._instance_mood_history` 도 함께 클리어된다.
+
 ## Pydantic schemas (cross-reference)
 
 | 파일 | 모델 | 용도 |
