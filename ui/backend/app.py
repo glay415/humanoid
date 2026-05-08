@@ -28,16 +28,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
+from ui.backend import auth as _auth
 from ui.backend import personas as _personas
 from ui.backend.state_holder import MANAGER, STATE
 from ui.backend.streaming import stream_turn
-
-
-# CORS 허용 origin — Vite dev/preview 만.
-_CORS_ORIGINS = [
-    "http://localhost:5173",
-    "http://localhost:4173",
-]
 
 
 # 인스턴스별 mood history — 단순 in-memory dict. 영속이 필요해지면 메타로 옮긴다.
@@ -46,7 +40,9 @@ _instance_mood_history: dict[str, list[dict]] = defaultdict(list)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """앱 시작 시 STATE.initialize() — _default 인스턴스 자동 spawn."""
+    """앱 시작 시 production invariants 검증 + STATE.initialize()."""
+    # production 모드라면 ALLOWED_ORIGINS 검증.
+    _auth.enforce_production_invariants()
     if STATE.orchestrator is None:
         # 테스트가 미리 STATE.initialize() 한 경우는 건드리지 않는다.
         STATE.initialize()
@@ -55,12 +51,14 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="humanoid v12 backend", version="0.2.0", lifespan=lifespan)
 
+# CORS — env 기반 origin 화이트리스트. production 에서 ALLOWED_ORIGINS 미설정
+# 시 lifespan 가드가 raise 하므로 여기까진 도달하지 않는다.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_CORS_ORIGINS,
+    allow_origins=_auth.resolve_cors_origins(),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=_auth.cors_methods(),
+    allow_headers=_auth.cors_headers(),
 )
 
 
