@@ -590,6 +590,8 @@ async def test_full_conversation_turn_emits_response_field_after_phase5_changes(
     expected_keys = {
         'response', 'action', 'tone_eval', 'recommended_delay_ms',
         'low_level', 'emotion', 'experience_vector', 'turn_number',
+        # β13 (audit): regenerate cycle 발생 여부.
+        'regenerated',
     }
     assert set(result.keys()) == expected_keys
     assert isinstance(result['response'], str) and result['response']
