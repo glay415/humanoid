@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 from core.event_bus import EventBus, Event
 from core.turn import TurnType
-from core.trigger_registry import TriggerRegistry
+from core.trigger_registry import TriggerRegistry, Trigger, TriggerCategory
 from low_level.pipeline import LowLevelPipeline
 from interface.signal_rise import SignalRise
 from interface.experience_descent import ExperienceDescent
@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from high_level.final_judgment import FinalJudgment
     from high_level.output_postprocess import OutputPostprocess
     from high_level.metacognition import Metacognition
+    from high_level.dmn import DMN
     from storage.memory_store import EpisodicMemory
     from storage.self_model import SelfModel
     from storage.other_model import OtherModel
@@ -49,6 +50,7 @@ class Orchestrator:
         final_judgment: 'FinalJudgment | None' = None,
         output_postprocess: 'OutputPostprocess | None' = None,
         metacognition: 'Metacognition | None' = None,
+        dmn: 'DMN | None' = None,
         episodic_memory: 'EpisodicMemory | None' = None,
         self_model: 'SelfModel | None' = None,
         other_model: 'OtherModel | None' = None,
@@ -72,6 +74,7 @@ class Orchestrator:
         self.final_judgment = final_judgment
         self.output_postprocess = output_postprocess
         self.metacognition = metacognition
+        self.dmn = dmn
 
         # 스토리지 — optional.
         self.episodic_memory = episodic_memory
@@ -273,6 +276,50 @@ class Orchestrator:
             'experience_vector': experience_vector,
             'turn_number': self.turn_number,
         }
+
+    # ------------------------------------------------------------------
+    # Phase 5: 트리거 레지스트리 wiring (spec §1.2)
+    # ------------------------------------------------------------------
+    def register_default_triggers(self) -> None:
+        """spec §1.2 의 기본 트리거 5종 등록.
+
+        build_full_orchestrator 인스턴스화 직후 1회 호출.
+        """
+        # Internal: 드라이브 결핍 > 0.6 → DMN 후보
+        self.trigger_registry.register(Trigger(
+            name='drive_deficit_high',
+            category=TriggerCategory.INTERNAL,
+            condition=lambda ctx: ctx.get('max_deficit', 0.0) > 0.6,
+            action='dmn_turn',
+        ))
+        # Internal: 반추 카운터 초과 → 메타인지 개입
+        self.trigger_registry.register(Trigger(
+            name='rumination_high',
+            category=TriggerCategory.INTERNAL,
+            condition=lambda ctx: ctx.get('rumination_count', 0) > 5,
+            action='metacog_break',
+        ))
+        # Internal: 메타 자원 floor → 통제 해제
+        self.trigger_registry.register(Trigger(
+            name='meta_resource_low',
+            category=TriggerCategory.INTERNAL,
+            condition=lambda ctx: ctx.get('meta_resource', 1.0) <= 0.15,
+            action='control_release',
+        ))
+        # Temporal: 짧은 공백 → DMN 턴
+        self.trigger_registry.register(Trigger(
+            name='idle_short',
+            category=TriggerCategory.TEMPORAL,
+            condition=lambda ctx: ctx.get('idle_turns', 0) >= 3,
+            action='dmn_turn',
+        ))
+        # Temporal: 더 긴 공백 → 정비 턴
+        self.trigger_registry.register(Trigger(
+            name='idle_medium',
+            category=TriggerCategory.TEMPORAL,
+            condition=lambda ctx: ctx.get('idle_turns', 0) >= 10,
+            action='maintenance_turn',
+        ))
 
     @staticmethod
     def _emotion_fallback(raw_core_affect: dict) -> dict:
