@@ -14,9 +14,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import IntEnum
+from typing import Callable
 
 from llm.client import LLMError
 from llm.prompts import load_prompt
+
+
+def _noop_commit_sink(key: str, value: object) -> None:
+    """기본 commit sink — 아무것도 하지 않는다 (Wave 7 호환)."""
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -46,6 +52,11 @@ class DMNContext:
     unappraised_queue: list = field(default_factory=list)
     rumination_counter: dict = field(default_factory=dict)
     turn: int = 0
+    # audit β6: 트랜잭션 commit 의 실제 영속화 sink.
+    # SnapshotManager.commit(commit_sink) 가 stage 된 (key, value) 쌍 각각에 대해
+    # 호출. None 또는 미설정 → 기본 no-op (Wave 7 동작 그대로).
+    # 실제 영속화 백엔드 (예: 파일 기반 K-V 스토어) 를 hook 으로 주입할 때 사용.
+    commit_sink: Callable[[str, object], None] | None = None
 
 
 @dataclass
@@ -260,7 +271,10 @@ class DMN:
                     'count': counter[mem_id],
                     'insight': insight,
                 })
-                sm.commit(lambda k, v: None)  # Wave 7: in-memory only.
+                # audit β6: ctx.commit_sink 가 있으면 그 hook 으로 영속화.
+                # 없으면 no-op (Wave 7 호환). SnapshotManager.commit 는
+                # stage 된 (key, value) 각각에 대해 sink 를 호출한다.
+                sm.commit(ctx.commit_sink or _noop_commit_sink)
                 committed = True
             except Exception:
                 try:
@@ -333,7 +347,8 @@ class DMN:
                     'pattern_id': chosen.get('pattern_id'),
                     'rule_summary': rule,
                 })
-                sm.commit(lambda k, v: None)
+                # audit β6: ctx.commit_sink 가 있으면 그 hook 으로 영속화.
+                sm.commit(ctx.commit_sink or _noop_commit_sink)
                 committed = True
             except Exception:
                 try:
@@ -420,7 +435,8 @@ class DMN:
                     'memory_id': mem_id,
                     'narrative_delta': delta,
                 })
-                sm.commit(lambda k, v: None)
+                # audit β6: ctx.commit_sink 가 있으면 그 hook 으로 영속화.
+                sm.commit(ctx.commit_sink or _noop_commit_sink)
                 committed = True
             except Exception:
                 try:
@@ -499,7 +515,8 @@ class DMN:
                     'drive': chosen_drive,
                     'reflection': reflection,
                 })
-                sm.commit(lambda k, v: None)
+                # audit β6: ctx.commit_sink 가 있으면 그 hook 으로 영속화.
+                sm.commit(ctx.commit_sink or _noop_commit_sink)
                 committed = True
             except Exception:
                 try:
