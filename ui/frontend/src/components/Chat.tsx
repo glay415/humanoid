@@ -33,6 +33,12 @@ type ChatProps = {
   onSend: (text: string) => void | Promise<void>;
   onReset: () => void | Promise<void>;
   disabled?: boolean;
+  // True when there is no selected instance — disables composer + reset and
+  // shows the empty placeholder in the message list.
+  noInstance?: boolean;
+  placeholder?: string;
+  emptyMessage?: string;
+  subtitle?: string;
   headerExtra?: ReactNode;
 };
 
@@ -44,6 +50,10 @@ export function Chat({
   onSend,
   onReset,
   disabled,
+  noInstance,
+  placeholder,
+  emptyMessage,
+  subtitle,
   headerExtra,
 }: ChatProps) {
   const [draft, setDraft] = useState('');
@@ -57,8 +67,10 @@ export function Chat({
     el.scrollTop = el.scrollHeight;
   }, [messages, currentStage, pendingFinal]);
 
+  const composerDisabled = disabled || noInstance;
+
   const submit = () => {
-    if (disabled) return;
+    if (composerDisabled) return;
     const text = draft.trim();
     if (!text) return;
     void onSend(text);
@@ -83,16 +95,21 @@ export function Chat({
   return (
     <div className="flex flex-col h-full">
       <header className="flex items-center justify-between px-6 py-4 border-b border-ink-200 dark:border-zinc-800">
-        <div className="flex items-baseline gap-3">
-          <h1 className="font-semibold tracking-tight text-lg dark:text-zinc-100">humanoid</h1>
-          <span className="text-xs font-mono text-ink-400 dark:text-zinc-500">v12 cognitive architecture</span>
+        <div className="flex items-baseline gap-3 min-w-0">
+          <h1 className="font-semibold tracking-tight text-lg dark:text-zinc-100 truncate">
+            humanoid
+          </h1>
+          <span className="text-xs font-mono text-ink-400 dark:text-zinc-500 truncate">
+            {subtitle ?? 'v12 cognitive architecture'}
+          </span>
         </div>
         <div className="flex items-center gap-1">
           {headerExtra}
           <button
             type="button"
             onClick={() => void onReset()}
-            className="inline-flex items-center gap-1.5 text-xs font-mono text-ink-500 hover:text-ink-900 dark:text-zinc-400 dark:hover:text-zinc-100 px-2.5 py-1.5 rounded-md hover:bg-ink-100 dark:hover:bg-zinc-800 transition-colors"
+            disabled={noInstance}
+            className="inline-flex items-center gap-1.5 text-xs font-mono text-ink-500 hover:text-ink-900 dark:text-zinc-400 dark:hover:text-zinc-100 px-2.5 py-1.5 rounded-md hover:bg-ink-100 dark:hover:bg-zinc-800 transition-colors disabled:opacity-40 disabled:hover:bg-transparent disabled:cursor-not-allowed"
             aria-label="대화 초기화"
           >
             <RotateCcw size={14} />
@@ -104,7 +121,8 @@ export function Chat({
       <div ref={listRef} className="flex-1 overflow-y-auto scroll-thin px-6 py-6 space-y-4">
         {messages.length === 0 && (
           <div className="text-sm text-ink-400 dark:text-zinc-500 font-mono">
-            메시지를 입력해 대화를 시작하세요. (Enter 전송 / Shift+Enter 줄바꿈)
+            {emptyMessage ??
+              '메시지를 입력해 대화를 시작하세요. (Enter 전송 / Shift+Enter 줄바꿈)'}
           </div>
         )}
 
@@ -154,16 +172,16 @@ export function Chat({
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={onKey}
             rows={1}
-            placeholder="메시지를 입력하세요..."
-            disabled={disabled}
-            className="flex-1 resize-none bg-transparent outline-none text-sm leading-6 max-h-40 font-sans placeholder:text-ink-400 dark:placeholder:text-zinc-500 dark:text-zinc-100"
+            placeholder={placeholder ?? '메시지를 입력하세요...'}
+            disabled={composerDisabled}
+            className="flex-1 resize-none bg-transparent outline-none text-sm leading-6 max-h-40 font-sans placeholder:text-ink-400 dark:placeholder:text-zinc-500 dark:text-zinc-100 disabled:cursor-not-allowed"
           />
           <button
             type="submit"
-            disabled={disabled || draft.trim().length === 0}
+            disabled={composerDisabled || draft.trim().length === 0}
             className={cn(
               'inline-flex items-center justify-center w-9 h-9 rounded-lg transition-colors',
-              disabled || draft.trim().length === 0
+              composerDisabled || draft.trim().length === 0
                 ? 'bg-ink-200 text-ink-400 cursor-not-allowed dark:bg-zinc-800 dark:text-zinc-600'
                 : 'bg-ink-900 text-white hover:bg-ink-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white',
             )}

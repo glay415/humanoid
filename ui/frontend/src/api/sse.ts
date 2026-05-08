@@ -22,16 +22,21 @@ export type StreamTurnOptions = {
   onEvent: (event: TurnEvent) => void;
   onClose?: () => void;
   onError?: (err: unknown) => void;
+  // If provided, the request is sent to the instance-scoped turn endpoint
+  // /api/instances/{instanceId}/turn instead of the legacy /api/turn.
+  instanceId?: string;
 };
 
 // Streams /api/turn server-sent events. Uses fetch-event-source so we can
-// POST a JSON body (native EventSource is GET-only).
+// POST a JSON body (native EventSource is GET-only). When `instanceId` is
+// supplied, targets /api/instances/{instanceId}/turn.
 export async function streamTurn({
   userInput,
   signal,
   onEvent,
   onClose,
   onError,
+  instanceId,
 }: StreamTurnOptions): Promise<void> {
   // Track whether we've fired onClose ourselves so we don't double-call.
   let closed = false;
@@ -42,8 +47,12 @@ export async function streamTurn({
     }
   };
 
+  const url = instanceId
+    ? `/api/instances/${encodeURIComponent(instanceId)}/turn`
+    : '/api/turn';
+
   try {
-    await fetchEventSource('/api/turn', {
+    await fetchEventSource(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -54,11 +63,11 @@ export async function streamTurn({
       openWhenHidden: true,
       onopen: async (response) => {
         if (!response.ok) {
-          throw new Error(`/api/turn responded ${response.status}`);
+          throw new Error(`${url} responded ${response.status}`);
         }
         const ct = response.headers.get('content-type') ?? '';
         if (!ct.includes('text/event-stream')) {
-          throw new Error(`/api/turn unexpected content-type: ${ct || '(none)'}`);
+          throw new Error(`${url} unexpected content-type: ${ct || '(none)'}`);
         }
       },
       onmessage: (msg) => {
