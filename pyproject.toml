@@ -2,7 +2,7 @@
 name = "humanoid"
 version = "0.1.0"
 description = "인지 아키텍처 v12 — 이벤트 드리븐 이중계층 시뮬레이션"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.13"
 dependencies = [
     "numpy>=1.26",
     "pydantic>=2.0",
@@ -36,3 +36,10 @@ addopts = "-p no:dash"
 markers = [
     "scenario: spec §12 27-scenario integration tests (mock LLM)",
 ]
+
+[tool.uv]
+# uv (https://docs.astral.sh/uv/) — fast Python package + venv manager.
+# Run `./scripts/setup.sh` (or `scripts\setup.ps1`) for one-shot setup,
+# or directly: `uv sync --extra dev --extra ui`.
+# Dev / UI extras are declared under [project.optional-dependencies] above
+# and consumed via `--extra` flags; no separate dev-dependencies block needed.
