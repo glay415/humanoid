@@ -1,0 +1,196 @@
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
+import { RotateCcw, Send } from 'lucide-react';
+import { cn } from '../lib/cn';
+import type { Stage, ChatMessage } from '../hooks/useChat';
+import type { ErrorEvent, FinalEvent } from '../api/types';
+
+const STAGE_LABEL: Record<Stage, string> = {
+  idle: '대기',
+  low_level: '저수준 처리 중',
+  emotion: '감정 평가 중',
+  memory: '기억 인출 중',
+  candidates: '후보 생성 중',
+  final: '최종 판단 중',
+  tone: '톤 검증 중',
+  done: '완료',
+  error: '오류',
+};
+
+const ACTIVE_STAGES: ReadonlySet<Stage> = new Set([
+  'low_level',
+  'emotion',
+  'memory',
+  'candidates',
+  'final',
+  'tone',
+]);
+
+type ChatProps = {
+  messages: ChatMessage[];
+  currentStage: Stage;
+  errors: ErrorEvent[];
+  pendingFinal: FinalEvent | null;
+  onSend: (text: string) => void | Promise<void>;
+  onReset: () => void | Promise<void>;
+  disabled?: boolean;
+};
+
+export function Chat({
+  messages,
+  currentStage,
+  errors,
+  pendingFinal,
+  onSend,
+  onReset,
+  disabled,
+}: ChatProps) {
+  const [draft, setDraft] = useState('');
+  const listRef = useRef<HTMLDivElement>(null);
+  const taRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-scroll on new content.
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [messages, currentStage, pendingFinal]);
+
+  const submit = () => {
+    if (disabled) return;
+    const text = draft.trim();
+    if (!text) return;
+    void onSend(text);
+    setDraft('');
+    taRef.current?.focus();
+  };
+
+  const onSubmit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    submit();
+  };
+
+  const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      submit();
+    }
+  };
+
+  const isActive = ACTIVE_STAGES.has(currentStage);
+
+  return (
+    <div className="flex flex-col h-full">
+      <header className="flex items-center justify-between px-6 py-4 border-b border-ink-200">
+        <div className="flex items-baseline gap-3">
+          <h1 className="font-semibold tracking-tight text-lg">humanoid</h1>
+          <span className="text-xs font-mono text-ink-400">v12 cognitive architecture</span>
+        </div>
+        <button
+          type="button"
+          onClick={() => void onReset()}
+          className="inline-flex items-center gap-1.5 text-xs font-mono text-ink-500 hover:text-ink-900 px-2.5 py-1.5 rounded-md hover:bg-ink-100 transition-colors"
+          aria-label="대화 초기화"
+        >
+          <RotateCcw size={14} />
+          reset
+        </button>
+      </header>
+
+      <div ref={listRef} className="flex-1 overflow-y-auto scroll-thin px-6 py-6 space-y-4">
+        {messages.length === 0 && (
+          <div className="text-sm text-ink-400 font-mono">
+            메시지를 입력해 대화를 시작하세요. (Enter 전송 / Shift+Enter 줄바꿈)
+          </div>
+        )}
+
+        {messages.map((m, i) => (
+          <Bubble key={i} message={m} />
+        ))}
+
+        {/* Live preview of the in-progress assistant turn */}
+        {isActive && pendingFinal && (
+          <div className="flex justify-start">
+            <div className="max-w-[80%] rounded-2xl px-4 py-3 bg-ink-100 text-ink-700 border border-dashed border-ink-300">
+              <div className="text-xs font-mono text-ink-500 mb-1">초안</div>
+              <div className="whitespace-pre-wrap text-sm">{pendingFinal.text}</div>
+            </div>
+          </div>
+        )}
+
+        {isActive && (
+          <div className="flex items-center gap-2 text-xs font-mono text-ink-500">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+            </span>
+            {STAGE_LABEL[currentStage]}
+          </div>
+        )}
+
+        {errors.length > 0 && (
+          <div className="rounded-md border border-red-300 bg-red-50 text-red-700 text-xs font-mono px-3 py-2 space-y-1">
+            {errors.slice(-3).map((e, i) => (
+              <div key={i}>
+                <span className="font-semibold">[{e.stage}]</span> {e.message}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <form
+        onSubmit={onSubmit}
+        className="border-t border-ink-200 px-4 py-3 bg-white"
+      >
+        <div className="flex items-end gap-2 rounded-xl border border-ink-200 focus-within:border-ink-400 transition-colors px-3 py-2 bg-white">
+          <textarea
+            ref={taRef}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={onKey}
+            rows={1}
+            placeholder="메시지를 입력하세요..."
+            disabled={disabled}
+            className="flex-1 resize-none bg-transparent outline-none text-sm leading-6 max-h-40 font-sans placeholder:text-ink-400"
+          />
+          <button
+            type="submit"
+            disabled={disabled || draft.trim().length === 0}
+            className={cn(
+              'inline-flex items-center justify-center w-9 h-9 rounded-lg transition-colors',
+              disabled || draft.trim().length === 0
+                ? 'bg-ink-200 text-ink-400 cursor-not-allowed'
+                : 'bg-ink-900 text-white hover:bg-ink-700',
+            )}
+            aria-label="전송"
+          >
+            <Send size={16} />
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function Bubble({ message }: { message: ChatMessage }) {
+  const isUser = message.role === 'user';
+  return (
+    <div className={cn('flex', isUser ? 'justify-end' : 'justify-start')}>
+      <div
+        className={cn(
+          'max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap',
+          isUser
+            ? 'bg-ink-900 text-white rounded-br-sm'
+            : 'bg-white border border-ink-200 text-ink-900 rounded-bl-sm',
+        )}
+      >
+        {message.text}
+        {message.turn !== undefined && (
+          <div className={cn('mt-1 text-[10px] font-mono', isUser ? 'text-ink-300' : 'text-ink-400')}>
+            turn {message.turn}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
