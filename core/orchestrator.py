@@ -329,6 +329,58 @@ class Orchestrator:
             return review_fn(emotion_result, social_result, low_result)
 
     # ------------------------------------------------------------------
+    # Phase 5: DMN 턴 (spec §2.4)
+    # ------------------------------------------------------------------
+    async def process_dmn_turn(self) -> dict:
+        """DMN 사이클 1회 실행 (spec §2.4). 유휴 시 호출.
+
+        대화가 도착하면 호출자가 중단 — 본 메서드는 atomic 한 1 사이클만 수행.
+        """
+        self.turn_number += 1
+        self.current_turn_type = TurnType.DMN
+
+        if self.dmn is None:
+            return {
+                'turn_number': self.turn_number,
+                'activity': None,
+                'reason': 'dmn_disabled',
+            }
+
+        # 지연 import — Team O 의 DMNContext 가 아직 머지되지 않았을 수도 있음.
+        try:
+            from high_level.dmn import DMNContext
+        except ImportError:
+            DMNContext = None  # type: ignore[assignment]
+
+        if DMNContext is not None:
+            drives_status = None
+            if self.low_level is not None:
+                drives_status = self.low_level.drives.compute(
+                    self.low_level.internal_state.to_dict()
+                )
+            ctx = DMNContext(
+                episodic=self.episodic_memory,
+                marker_store=getattr(self, 'marker_store', None),
+                self_model=self.self_model,
+                other_model=self.other_model,
+                snapshot_manager=getattr(self, 'snapshot_manager', None),
+                llm=getattr(self.dmn, 'llm', None),
+                drives=drives_status,
+                unappraised_queue=getattr(self.dmn, 'unappraised_queue', None),
+            )
+            result = await self.dmn.run_cycle(ctx)
+        else:
+            # Team O 미머지: 인자 없이 호출 가능한 stub 도 허용.
+            result = await self.dmn.run_cycle()
+
+        return {
+            'turn_number': self.turn_number,
+            'activity': getattr(result, 'activity', None) if result else None,
+            'success': getattr(result, 'success', False) if result else False,
+            'output': getattr(result, 'output', None) if result else None,
+        }
+
+    # ------------------------------------------------------------------
     # Phase 5: 트리거 레지스트리 wiring (spec §1.2)
     # ------------------------------------------------------------------
     def register_default_triggers(self) -> None:
