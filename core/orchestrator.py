@@ -263,7 +263,10 @@ class Orchestrator:
                         low_result=low_result,
                         user_input=user_input,
                     )
-                    iterations = review.get('iterations', iterations + 1)
+                    # β1: depth invariant 는 review 의 반환 컨트랙트가 아니라
+                    # 로컬 카운터에 묶는다. review 가 'iterations' 키를 안 주거나
+                    # None / 고정값을 반환해도 루프는 정확히 3회로 제한된다.
+                    iterations += 1
                     if self.logger is not None:
                         self._log_event_safe('reappraisal', {
                             'strategy': review.get('strategy'),
@@ -279,12 +282,21 @@ class Orchestrator:
                             self.turn_number,
                         )
                     )
-                except (LLMError, NotImplementedError, TypeError) as exc:
-                    # 재평가 실패 — 현재 결과로 진행
+                except (
+                    LLMError,
+                    NotImplementedError,
+                    TypeError,
+                    AttributeError,
+                    KeyError,
+                    asyncio.TimeoutError,
+                ) as exc:
+                    # β2: AttributeError/KeyError (잘못된 dict 접근) 와
+                    # asyncio.TimeoutError (상위 타임아웃) 도 graceful 종료.
+                    # 일반 Exception 은 잡지 않는다 — 진짜 버그를 가린다.
                     converged = False
-                    if self.logger is not None and isinstance(exc, LLMError):
+                    if self.logger is not None:
                         self._log_event_safe('llm_error', {
-                            'stage': 'reappraise',
+                            'stage': 'reappraisal',
                             'message': str(exc),
                         })
                     break
@@ -374,6 +386,7 @@ class Orchestrator:
             low_result['raw_core_affect'], meta_resource
         )
 
+        regenerated = False
         if self.output_postprocess is not None:
             try:
                 post = await self.output_postprocess.process(final, final_core_affect)
@@ -382,6 +395,7 @@ class Orchestrator:
                 tone_eval = post['tone_eval']
                 delay_ms = post['recommended_delay_ms']
             except LLMError as exc:
+                post = None
                 response_text = final['text']
                 action = 'pass'
                 tone_eval = {}
@@ -391,6 +405,79 @@ class Orchestrator:
                         'stage': 'output_postprocess',
                         'message': str(exc),
                     })
+
+            # β13: action='regenerate' 가 떨어지면 candidate_generation +
+            # final_judgment 를 한 번 더 돌리고 postprocess 를 재실행한다.
+            # 사이클 1회로 캡 — regenerate-again 이 떨어져도 무시한다.
+            if (
+                post is not None
+                and action == 'regenerate'
+                and not regenerated
+                and self.candidate_generation is not None
+                and self.final_judgment is not None
+            ):
+                regenerated = True
+                if self.logger is not None:
+                    self._log_event_safe('regenerate_cycle', {
+                        'reason': 'tone_polarity_mismatch',
+                    })
+                try:
+                    candidates = await self.candidate_generation.generate(
+                        emotion_result=emotion_result,
+                        social_result=social_result,
+                        memory_result=memory_result,
+                        self_model=self_model_dict,
+                        mood=low_result['mood'],
+                        marker_signal=marker_signal,
+                        user_input=user_input,
+                        recent_dialogue=list(self.dialogue_buffer),
+                    )
+                except LLMError as exc:
+                    if self.logger is not None:
+                        self._log_event_safe('llm_error', {
+                            'stage': 'candidate_generation_regen',
+                            'message': str(exc),
+                        })
+                    candidates = candidates or [
+                        {'style': 'restrained', 'text': final['text']}
+                    ]
+                if candidates:
+                    try:
+                        final = await self.final_judgment.select(
+                            candidates, marker_signal, confidence, user_input
+                        )
+                    except LLMError as exc:
+                        if self.logger is not None:
+                            self._log_event_safe('llm_error', {
+                                'stage': 'final_judgment_regen',
+                                'message': str(exc),
+                            })
+                        final = {
+                            'selected_index': 0,
+                            'text': candidates[0]['text'],
+                            'rationale': 'regen_fallback',
+                            'marker_match': 'none',
+                        }
+                # 재계산된 final 로 postprocess 다시 — 단, 결과 action 이 또
+                # regenerate 라도 추가 사이클은 돌지 않는다 (1회 캡).
+                try:
+                    post = await self.output_postprocess.process(
+                        final, final_core_affect
+                    )
+                    response_text = post['text']
+                    action = post['action']
+                    tone_eval = post['tone_eval']
+                    delay_ms = post['recommended_delay_ms']
+                except LLMError as exc:
+                    response_text = final['text']
+                    action = 'pass'
+                    tone_eval = {}
+                    delay_ms = 0
+                    if self.logger is not None:
+                        self._log_event_safe('llm_error', {
+                            'stage': 'output_postprocess_regen',
+                            'message': str(exc),
+                        })
         else:
             response_text = final['text']
             action = 'pass'
@@ -400,6 +487,18 @@ class Orchestrator:
         # 메타인지 자원 소모 (대화 턴 1회당 작은 양; recover 는 정비 사이클에서)
         if self.metacognition is not None:
             self.metacognition.consume(0.05)
+
+        # β12: 메타인지 confidence 를 self_model 로 동기화. 현재 metacognition
+        # 측 confidence 는 mutate 되지 않으므로 wiring 만 두는 contract.
+        # Phase 5 에서 confidence 갱신 로직이 들어오면 자동으로 흐른다.
+        if self.metacognition is not None and self.self_model is not None:
+            try:
+                self.self_model.update(
+                    {'confidence': float(self.metacognition.confidence)}
+                )
+            except Exception:
+                # self_model.update 실패는 turn 흐름을 막지 않는다.
+                pass
 
         # 단기 대화 버퍼 갱신 — 다음 턴 candidate_generation 컨텍스트.
         self.dialogue_buffer.append({'user': user_input, 'assistant': response_text})
@@ -434,6 +533,7 @@ class Orchestrator:
             'emotion': emotion_result,
             'experience_vector': experience_vector,
             'turn_number': self.turn_number,
+            'regenerated': regenerated,
         }
 
     def _invoke_review(

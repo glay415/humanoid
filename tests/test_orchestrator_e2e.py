@@ -153,11 +153,14 @@ async def test_full_turn_happy_path(mocked_orchestrator):
     expected_keys = {
         'response', 'action', 'tone_eval', 'recommended_delay_ms',
         'low_level', 'emotion', 'experience_vector', 'turn_number',
+        # β13 (audit): regenerate cycle 발생 여부 플래그.
+        'regenerated',
     }
     assert set(result.keys()) == expected_keys
     assert isinstance(result['response'], str) and result['response']
     assert result['action'] in {'pass', 'tone_adjust', 'regenerate'}
     assert isinstance(result['recommended_delay_ms'], int)
+    assert isinstance(result['regenerated'], bool)
     assert result['turn_number'] == 1
 
     # 저수준 상태가 turn 실행 후 변화했음 — prev_experience 가 적용되었다는 뜻
@@ -304,9 +307,10 @@ async def test_marker_signal_renders_when_low_level_has_markers(mocked_orchestra
 
 
 async def test_postprocess_action_propagates(mocked_orchestrator):
-    """OutputPostprocess 가 'regenerate' 를 결정하면 result['action'] 에 그대로 전파.
+    """OutputPostprocess 가 'regenerate' 를 결정하면 한 사이클 재생성 후 결과 전파.
 
-    Wave 4 에서는 실제 재생성을 돌리지 않는다 — 신호만 올라가는지만 확인.
+    Wave 13C audit β13: 이제 orchestrator 가 candidate+final 을 한 번 더 돌린다.
+    regenerated=True 플래그가 올라오고, 두 번째 사이클의 결과로 응답이 갱신된다.
     """
     orch, mock = mocked_orchestrator
     # 강한 보상 prev_experience 를 사전에 누적시켜 raw_core_affect.valence > 0 으로 만든다.
@@ -320,20 +324,24 @@ async def test_postprocess_action_propagates(mocked_orchestrator):
         orch.prev_experience = {'reward': 0.95, 'novelty': 0.1, 'threat': 0.0,
                                 'social_reward': 0.7, 'goal_progress': 0.5}
 
+    # 1차 사이클: emotion / candidates / final / tone(=regenerate).
+    # 2차 사이클: candidates / final / tone(=pass).
     mock.responses = [
         _emotion_payload(valence=0.7, arousal=0.5),
         _candidates_payload(),
         _final_payload(text="너무 안 좋아"),
-        _tone_payload(response_valence=-0.7),
+        _tone_payload(response_valence=-0.7),  # regenerate trigger
+        # ↓ regenerate 사이클
+        _candidates_payload(),
+        _final_payload(text="다시 생성된 응답"),
+        _tone_payload(response_valence=0.5),  # 같은 극성, |Δ| 작음 → pass
     ]
 
     result = await orch.process_conversation_turn("기뻐!")
 
-    # regenerate 로 분류되었어야 함 — state >0, response < -0.5, 반대 극성, |Δ| > 0.5.
-    # 만약 그래도 't pass' 면 action 분류 로직이 변한 것.
-    assert result['action'] == 'regenerate', (
-        f"action={result['action']}, tone_eval={result['tone_eval']}, "
-        f"raw_core_affect={result['low_level']['raw_core_affect']}"
-    )
-    # 텍스트는 유지 (재생성은 wave 4 범위 밖)
-    assert result['response'] == "너무 안 좋아"
+    # β13: regenerate 사이클이 1회 돌았음.
+    assert result['regenerated'] is True
+    # 두 번째 사이클의 응답으로 갱신.
+    assert result['response'] == "다시 생성된 응답"
+    # 두 번째 postprocess 의 action 이 최종.
+    assert result['action'] == 'pass'
