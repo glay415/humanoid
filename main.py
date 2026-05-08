@@ -89,14 +89,17 @@ def build_orchestrator(
 def build_full_orchestrator(
     config_path: Path | str | None = None,
     llm_client=None,
+    storage_root: Path | str | None = None,
 ) -> Orchestrator:
     """Phase 4: 모든 고수준 모듈 + 스토리지를 조립한 오케스트레이터.
 
     config_path: 기질 YAML. None 이면 default.
     llm_client: 테스트에서 MockLLMClient 주입용. None 이면 LLMClient() 생성.
-
-    스토리지 경로: 기질 이름별로 분리 → ./chroma_db/humanoid_<name>,
-    ./storage_data/<name>/ 하위에 sqlite DB 생성.
+    storage_root: 인스턴스별 디스크 격리용. 주어지면 ChromaDB / SQLite 가
+        모두 storage_root 하위로 들어간다.
+        - chroma_dir = storage_root / 'chroma_db'
+        - prospective_db = storage_root / 'prospective.db'
+        None 이면 기존 동작 — 기질 이름별 글로벌 디렉토리.
     """
     # 지연 import — 모듈 임포트 시점에 chroma/litellm 로드를 강제하지 않는다.
     from llm.client import LLMClient
@@ -122,11 +125,18 @@ def build_full_orchestrator(
     if llm_client is None:
         llm_client = LLMClient()
 
-    # 스토리지 경로: 기질별 분리
-    chroma_dir = f"./chroma_db/humanoid_{name}"
-    storage_dir = Path(f"./storage_data/{name}")
-    storage_dir.mkdir(parents=True, exist_ok=True)
-    prospective_db = str(storage_dir / "prospective.db")
+    # 스토리지 경로 결정
+    if storage_root is not None:
+        root = Path(storage_root)
+        root.mkdir(parents=True, exist_ok=True)
+        chroma_dir = str(root / 'chroma_db')
+        prospective_db = str(root / 'prospective.db')
+    else:
+        # 기존 동작: 기질 이름별 글로벌 분리
+        chroma_dir = f"./chroma_db/humanoid_{name}"
+        storage_dir = Path(f"./storage_data/{name}")
+        storage_dir.mkdir(parents=True, exist_ok=True)
+        prospective_db = str(storage_dir / "prospective.db")
 
     vector_db = VectorDB(
         collection_name=f"episodic_{name}",
