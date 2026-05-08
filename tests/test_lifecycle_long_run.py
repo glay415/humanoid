@@ -124,14 +124,17 @@ class TestRecoveryDrift:
         peak_drift = float(np.linalg.norm(peak_b - initial_b))
         assert peak_drift > 0.0, "baseline never drifted under EXP_POSITIVE"
 
-        # phase B: 500턴 무입력 — EMA 가 state(→baseline 회귀)를 따라잡아
-        # current_baseline 이 다시 initial 쪽으로 이동한다.
-        _run_turns(pipe, EXP_EMPTY, 500)
+        # phase B: 무입력만으로는 자동 회귀하지 않음 (audit α1 이후 사양).
+        # D 행렬이 drift 된 baseline 으로 끌어가 state 가 그대로 유지되고, EMA 도
+        # drift 된 baseline 근방에 머물러 baseline 이 더 이상 움직일 동기가 없다.
+        # 회귀를 유도하려면 반대 방향의 명시적 경험 입력이 필요. 여기서는 EXP_NEGATIVE
+        # 를 주어 state 를 끌어내리고, 그 결과 EMA 와 baseline 이 함께 내려옴을 본다.
+        _run_turns(pipe, EXP_NEGATIVE, 500)
         rec_b = _baseline_array(pipe)
         rec_drift = float(np.linalg.norm(rec_b - initial_b))
 
         assert rec_drift < peak_drift, (
-            f"drift did not recover: peak={peak_drift:.4f}, "
+            f"drift did not recover under counter-experience: peak={peak_drift:.4f}, "
             f"recovered={rec_drift:.4f} (expected lower)"
         )
 
