@@ -66,6 +66,12 @@ class Orchestrator:
         self.prev_experience: dict = {}
         self.current_turn_type: TurnType = TurnType.CONVERSATION
 
+        # 단기 대화 버퍼 — 직전 N턴의 (user, assistant) 쌍 보존.
+        # spec 의 long-term episodic_memory 와 별개로, working memory 역할.
+        # candidate_generation 호출 시 recent_dialogue 변수로 주입.
+        self.dialogue_buffer: list[dict[str, str]] = []
+        self.dialogue_buffer_max: int = 5
+
         # 고수준 모듈 — 모두 optional. None 이면 stub/fallback 경로.
         self.emotion_appraisal = emotion_appraisal
         self.social_cognition = social_cognition
@@ -270,6 +276,7 @@ class Orchestrator:
                     mood=low_result['mood'],
                     marker_signal=marker_signal,
                     user_input=user_input,
+                    recent_dialogue=list(self.dialogue_buffer),
                 )
             except LLMError:
                 candidates = [{'style': 'restrained', 'text': '...'}]
@@ -325,6 +332,11 @@ class Orchestrator:
         # 메타인지 자원 소모 (대화 턴 1회당 작은 양; recover 는 정비 사이클에서)
         if self.metacognition is not None:
             self.metacognition.consume(0.05)
+
+        # 단기 대화 버퍼 갱신 — 다음 턴 candidate_generation 컨텍스트.
+        self.dialogue_buffer.append({'user': user_input, 'assistant': response_text})
+        if len(self.dialogue_buffer) > self.dialogue_buffer_max:
+            self.dialogue_buffer = self.dialogue_buffer[-self.dialogue_buffer_max:]
 
         return {
             'response': response_text,

@@ -92,6 +92,23 @@ def _fmt_mood(mood: dict | None) -> str:
     return ", ".join(parts) if parts else "(기분 정보 없음)"
 
 
+def _fmt_recent_dialogue(recent_dialogue: list | None) -> str:
+    """직전 N턴 대화 → 사람:/나: 형식의 짧은 transcript. 빈 입력은 '(첫 대화 턴)'."""
+    if not recent_dialogue:
+        return "(첫 대화 턴 — 직전 대화 없음)"
+    lines: list[str] = []
+    for entry in recent_dialogue:
+        if not isinstance(entry, dict):
+            continue
+        u = entry.get('user', '').strip()
+        a = entry.get('assistant', '').strip()
+        if u:
+            lines.append(f"사람: {u}")
+        if a:
+            lines.append(f"나: {a}")
+    return "\n".join(lines) if lines else "(첫 대화 턴 — 직전 대화 없음)"
+
+
 class CandidateGeneration:
     """후보 응답 생성 모듈 (큰 모델)."""
 
@@ -109,10 +126,14 @@ class CandidateGeneration:
         mood: dict,
         marker_signal: str,
         user_input: str,
+        recent_dialogue: list | None = None,
     ) -> list[dict]:
         """후보 N개 생성. 반환: [{'style': str, 'text': str}, ...].
 
-        LLM이 truncate 등으로 N개 미만을 반환할 수 있다 — 오케스트레이터가 결정.
+        Args:
+            recent_dialogue: 직전 N턴의 [{'user': str, 'assistant': str}, ...].
+                None/빈 리스트면 "(첫 대화 턴)" 으로 렌더링.
+
         Raises:
             LLMError: LLM 호출 실패 또는 스키마 검증 실패. 호출부에서 fallback 처리.
         """
@@ -121,6 +142,7 @@ class CandidateGeneration:
         memory_summary = _fmt_memory(memory_result)
         mood_text = _fmt_mood(mood)
         self_narrative = (self_model or {}).get('narrative', '') if isinstance(self_model, dict) else ''
+        recent_dialogue_text = _fmt_recent_dialogue(recent_dialogue)
 
         rendered = self.template.render(
             user_input=user_input,
@@ -131,6 +153,7 @@ class CandidateGeneration:
             mood_text=mood_text,
             marker_signal=marker_signal,
             n_candidates=self.n_candidates,
+            recent_dialogue=recent_dialogue_text,
         )
         messages = [
             {"role": "system", "content": _SYSTEM_MESSAGE},
