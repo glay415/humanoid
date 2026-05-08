@@ -10,6 +10,13 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+_(empty — populated as new changes land on `main`)_
+
+
+---
+
+## [0.3.0] — 2026-05-08
+
 Phase 1 audit-fix + observability wave (will become v0.3.0). Currently in progress on `main`; not yet promoted to `release`.
 
 ### Added
@@ -40,6 +47,7 @@ Phase 1 audit-fix + observability wave (will become v0.3.0). Currently in progre
 
 ### Notes
 - This is an audit-driven release: 12 critical / 13 high-major / 12 medium findings from a 5-team red-team audit, of which the data-integrity (α1, α2, γ*) and concurrency (δ3, δ4, β10) and security baseline (δ1, δ2, δ8) fixes landed in this Phase. Phase 2 (β1, β2, β12, β13 orchestrator) and 1.5 (matrix-decomposition deep-mode UI) and 3 (§8 enforcement, analyze.py, logs UI tab) are still in flight.
+
 
 ---
 
