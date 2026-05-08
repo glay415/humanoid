@@ -569,3 +569,303 @@ async def test_process_conversation_turn_still_works_after_phase5_changes(
     assert result['turn_number'] == 1
     assert 'emotion' in result
     assert 'experience_vector' in result
+
+
+# ---------------------------------------------------------------------------
+# 13. audit ε1 — 신규 트리거 7종 회귀 테스트
+# ---------------------------------------------------------------------------
+
+
+def test_pattern_matched_trigger_is_implicit_only(orch):
+    """spec §1.2 외부: 패턴 매칭은 low_level.fast_path 가 직접 발동 →
+    evaluate_triggers 에서는 절대 발동되지 않아야 함."""
+    orch.register_default_triggers()
+    fired = orch.evaluate_triggers(idle_turns=0)
+    fired_names = [t.name for t in fired]
+    assert 'pattern_matched' not in fired_names
+
+
+def test_time_of_day_change_trigger_is_implicit_only(orch):
+    """spec §1.2 시간: 시간대 변화는 low_level.self_sensing implicit."""
+    orch.register_default_triggers()
+    # idle 을 매우 큰 값으로 줘도 implicit 트리거는 발동 X.
+    fired = orch.evaluate_triggers(idle_turns=1000)
+    fired_names = [t.name for t in fired]
+    assert 'time_of_day_change' not in fired_names
+
+
+def test_maintenance_cycle_trigger_fires_at_30_idle(orch):
+    """spec §1.2 시간: 정비 주기 — idle_turns >= 30."""
+    orch.register_default_triggers()
+    fired_names = [t.name for t in orch.evaluate_triggers(idle_turns=29)]
+    assert 'maintenance_cycle' not in fired_names
+    fired_names_30 = [t.name for t in orch.evaluate_triggers(idle_turns=30)]
+    assert 'maintenance_cycle' in fired_names_30
+    fired_30 = next(
+        t for t in orch.evaluate_triggers(idle_turns=30)
+        if t.name == 'maintenance_cycle'
+    )
+    assert fired_30.action == 'maintenance_turn'
+    assert fired_30.category == TriggerCategory.TEMPORAL
+
+
+def test_mood_extreme_trigger_fires_on_high_valence(orch):
+    """spec §1.2 내부: 기분 극단값 |valence| > 0.85 → 긴급 정비."""
+    orch.register_default_triggers()
+    # 기본 mood = 0.0 → 발동 안 함.
+    assert 'mood_extreme' not in [t.name for t in orch.evaluate_triggers()]
+    # mood.valence 를 극단값으로 직접 세팅 (emotion_base 우회).
+    orch.low_level.emotion_base.mood['valence'] = 0.9
+    fired = orch.evaluate_triggers()
+    fired_names = [t.name for t in fired]
+    assert 'mood_extreme' in fired_names
+    fired_t = next(t for t in fired if t.name == 'mood_extreme')
+    assert fired_t.action == 'emergency_maintenance'
+
+    # 음수 극단도 발동.
+    orch.low_level.emotion_base.mood['valence'] = -0.9
+    fired_neg = [t.name for t in orch.evaluate_triggers()]
+    assert 'mood_extreme' in fired_neg
+
+    # boundary 0.85 는 strict > 이므로 미발동.
+    orch.low_level.emotion_base.mood['valence'] = 0.85
+    assert 'mood_extreme' not in [t.name for t in orch.evaluate_triggers()]
+
+
+def test_bonding_threshold_trigger_fires_above_07(orch):
+    """spec §1.2 관계: bonding > 0.7 → 관계 단계 상승."""
+    orch.register_default_triggers()
+    # 기본 bonding_state = 0.0 → 발동 X.
+    assert 'bonding_threshold' not in [t.name for t in orch.evaluate_triggers()]
+    orch.other_model.data['bonding_state'] = 0.75
+    fired = orch.evaluate_triggers()
+    fired_names = [t.name for t in fired]
+    assert 'bonding_threshold' in fired_names
+    fired_t = next(t for t in fired if t.name == 'bonding_threshold')
+    assert fired_t.action == 'relationship_up'
+    assert fired_t.category == TriggerCategory.RELATIONSHIP
+
+
+def test_threat_streak_high_trigger_fires_at_3(orch):
+    """spec §1.2 관계: threat_streak >= 3 → 관계 단계 하강."""
+    orch.register_default_triggers()
+    # 기본 threat_streak = 0 → 미발동.
+    assert 'threat_streak_high' not in [t.name for t in orch.evaluate_triggers()]
+    orch.other_model.data['threat_streak'] = 2
+    assert 'threat_streak_high' not in [t.name for t in orch.evaluate_triggers()]
+    orch.other_model.data['threat_streak'] = 3
+    fired_names = [t.name for t in orch.evaluate_triggers()]
+    assert 'threat_streak_high' in fired_names
+
+
+def test_bonding_long_decay_requires_low_bonding_and_long_idle(orch):
+    """spec §1.2 관계: bonding < 0.15 AND idle > 50 → 관계 점진 하강.
+
+    단일 조건만으로는 발동 안 됨 (AND 조건).
+    """
+    orch.register_default_triggers()
+    # bonding 만 낮음 — idle=0.
+    orch.other_model.data['bonding_state'] = 0.1
+    assert 'bonding_long_decay' not in [t.name for t in orch.evaluate_triggers(idle_turns=0)]
+    # idle 만 길음 — bonding=0.5.
+    orch.other_model.data['bonding_state'] = 0.5
+    assert 'bonding_long_decay' not in [t.name for t in orch.evaluate_triggers(idle_turns=100)]
+    # 둘 다 만족 → 발동.
+    orch.other_model.data['bonding_state'] = 0.1
+    fired_names = [t.name for t in orch.evaluate_triggers(idle_turns=100)]
+    assert 'bonding_long_decay' in fired_names
+
+
+# ---------------------------------------------------------------------------
+# 14. audit ε3 — DMN 2-activity 회귀 (process_dmn_turn 결과 정규화)
+# ---------------------------------------------------------------------------
+
+
+async def test_process_dmn_turn_handles_list_with_two_activities(tmp_path, mock_llm):
+    """spec §2.4 — run_cycle 가 list[result] 를 반환할 때 process_dmn_turn 가
+    primary + activities (0~2) 를 정상 노출."""
+    r1 = SimpleNamespace(
+        activity='unappraised_reprocess', success=True, output={'item': 'x'},
+    )
+    r2 = SimpleNamespace(
+        activity='ruminate', success=True, output={'memory_id': 'm'},
+    )
+    fake_dmn = MagicMock()
+    fake_dmn.run_cycle = AsyncMock(return_value=[r1, r2])
+    fake_dmn.llm = None
+    fake_dmn.unappraised_queue = None
+    fake_dmn.rumination_counter = {}
+
+    orch = _build_orch(tmp_path, mock_llm, dmn=fake_dmn)
+    out = await orch.process_dmn_turn()
+
+    assert out['activity'] == 'unappraised_reprocess'
+    assert out['secondary_activity'] == 'ruminate'
+    assert len(out['activities']) == 2
+    assert out['activities'][0]['activity'] == 'unappraised_reprocess'
+    assert out['activities'][1]['activity'] == 'ruminate'
+
+
+async def test_process_dmn_turn_empty_list_when_nothing_eligible(tmp_path, mock_llm):
+    """run_cycle 가 빈 리스트 → activity 는 None, activities 도 비어있음."""
+    fake_dmn = MagicMock()
+    fake_dmn.run_cycle = AsyncMock(return_value=[])
+    fake_dmn.llm = None
+    fake_dmn.unappraised_queue = None
+    fake_dmn.rumination_counter = {}
+
+    orch = _build_orch(tmp_path, mock_llm, dmn=fake_dmn)
+    out = await orch.process_dmn_turn()
+
+    assert out['activity'] is None
+    assert out['secondary_activity'] is None
+    assert out['activities'] == []
+    assert out['success'] is False
+
+
+async def test_process_dmn_turn_back_compat_single_result(tmp_path, mock_llm):
+    """run_cycle 가 단일 결과를 반환하는 구버전 stub 도 정상 정규화."""
+    single = SimpleNamespace(activity='contemplate', success=True, output={'drive': 'd'})
+    fake_dmn = MagicMock()
+    fake_dmn.run_cycle = AsyncMock(return_value=single)
+    fake_dmn.llm = None
+    fake_dmn.unappraised_queue = None
+    fake_dmn.rumination_counter = {}
+
+    orch = _build_orch(tmp_path, mock_llm, dmn=fake_dmn)
+    out = await orch.process_dmn_turn()
+
+    assert out['activity'] == 'contemplate'
+    assert out['secondary_activity'] is None
+    assert len(out['activities']) == 1
+
+
+async def test_dmn_run_cycle_caps_at_2_when_3_eligible():
+    """audit ε3: 활동 3개가 자격 있어도 정확히 2개만 반환."""
+    # 직접 DMN 인스턴스 + ctx 로 검증. unappraised, ruminate, contemplate 셋 자격.
+    from high_level.dmn import DMN, DMNContext
+    from llm import MockLLMClient
+
+    async def fn(messages, model_name):
+        return '한 줄'
+
+    llm = MockLLMClient(response_fn=fn)
+
+    class _EpisodicStub:
+        async def retrieve(self, query, mood, core_affect, k=5):
+            return [
+                {
+                    'id': 'm_strong',
+                    'content': '강한 기억',
+                    'emotion_tag': {'valence': 0.9, 'arousal': 0.9, 'labels': []},
+                    'importance': 0.9,
+                    'source': 'experience',
+                }
+            ]
+
+    dmn = DMN()
+    ctx = DMNContext(
+        unappraised_queue=[{'user_input': '재처리'}],
+        episodic=_EpisodicStub(),
+        drives={'fulfillment': {'safety': 0.1, 'novelty': 0.5,
+                                'bonding': 0.5, 'meaning': 0.5, 'autonomy': 0.5}},
+        llm=llm,
+    )
+    results = await dmn.run_cycle(ctx, max_activities=2)
+    # 자격: unappraised + ruminate + contemplate = 3개. cap = 2.
+    assert len(results) == 2
+    activities = [r.activity for r in results]
+    # 우선순위: unappraised 가 첫번째.
+    assert activities[0] == 'unappraised_reprocess'
+    # 둘째는 ruminate (case_promote, internalize 는 자격 없음).
+    assert activities[1] == 'ruminate'
+
+
+async def test_dmn_run_cycle_max_activities_param_respected():
+    """max_activities=1 이면 첫 활동만 반환 (Wave 7 호환 모드 흉내)."""
+    from high_level.dmn import DMN, DMNContext
+
+    dmn = DMN()
+    ctx = DMNContext(unappraised_queue=[{'user_input': 'x'}, {'user_input': 'y'}])
+    results = await dmn.run_cycle(ctx, max_activities=1)
+    # 자격: unappraised. cap=1 이므로 정확히 1개.
+    assert len(results) == 1
+
+
+# ---------------------------------------------------------------------------
+# 15. audit β6 — DMNContext.commit_sink 이 실제로 호출되는지
+# ---------------------------------------------------------------------------
+
+
+async def test_dmn_context_commit_sink_called_when_provided():
+    """audit β6: commit_sink 를 주입하면 SnapshotManager.commit 이 그 hook
+    으로 stage 된 (key, value) 를 흘려준다."""
+    from high_level.dmn import DMN, DMNContext
+    from llm import MockLLMClient
+    from storage.snapshot import SnapshotManager
+
+    async def fn(messages, model_name):
+        return '한 줄 통찰'
+
+    sink_calls: list[tuple[str, object]] = []
+
+    def my_sink(key: str, value: object) -> None:
+        sink_calls.append((key, value))
+
+    class _EpisodicStub:
+        async def retrieve(self, query, mood, core_affect, k=5):
+            return [{
+                'id': 'm1',
+                'content': '강한 기억',
+                'emotion_tag': {'valence': 0.9, 'arousal': 0.9, 'labels': []},
+                'importance': 0.9,
+                'source': 'experience',
+            }]
+
+    dmn = DMN()
+    sm = SnapshotManager()
+    ctx = DMNContext(
+        episodic=_EpisodicStub(),
+        snapshot_manager=sm,
+        llm=MockLLMClient(response_fn=fn),
+        commit_sink=my_sink,
+    )
+    results = await dmn.run_cycle(ctx, max_activities=1)
+    assert len(results) == 1 and results[0].activity == 'ruminate'
+    assert results[0].committed is True
+    # sink 가 ruminate stage 키로 호출되어야 한다.
+    assert len(sink_calls) >= 1
+    assert any(k.startswith('rumination:') for k, _ in sink_calls)
+
+
+async def test_dmn_context_commit_sink_default_is_noop():
+    """commit_sink 미설정 시 기본 no-op — 기존 Wave 7 동작 유지."""
+    from high_level.dmn import DMN, DMNContext
+    from llm import MockLLMClient
+    from storage.snapshot import SnapshotManager
+
+    async def fn(messages, model_name):
+        return '한 줄'
+
+    class _EpisodicStub:
+        async def retrieve(self, query, mood, core_affect, k=5):
+            return [{
+                'id': 'm1',
+                'content': '강한 기억',
+                'emotion_tag': {'valence': 0.9, 'arousal': 0.9, 'labels': []},
+                'importance': 0.9,
+                'source': 'experience',
+            }]
+
+    dmn = DMN()
+    sm = SnapshotManager()
+    ctx = DMNContext(
+        episodic=_EpisodicStub(),
+        snapshot_manager=sm,
+        llm=MockLLMClient(response_fn=fn),
+        # commit_sink 미설정.
+    )
+    results = await dmn.run_cycle(ctx, max_activities=1)
+    assert len(results) == 1
+    # commit 은 일어나지만 영속화는 하지 않았음 (no-op sink).
+    assert results[0].committed is True
