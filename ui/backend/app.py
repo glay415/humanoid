@@ -23,30 +23,36 @@ from collections import defaultdict
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from slowapi import Limiter
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 from sse_starlette.sse import EventSourceResponse
+from starlette.responses import JSONResponse
 
+from ui.backend import auth as _auth
 from ui.backend import personas as _personas
 from ui.backend.state_holder import MANAGER, STATE
 from ui.backend.streaming import stream_turn
-
-
-# CORS 허용 origin — Vite dev/preview 만.
-_CORS_ORIGINS = [
-    "http://localhost:5173",
-    "http://localhost:4173",
-]
 
 
 # 인스턴스별 mood history — 단순 in-memory dict. 영속이 필요해지면 메타로 옮긴다.
 _instance_mood_history: dict[str, list[dict]] = defaultdict(list)
 
 
+# slowapi limiter — IP 기반. test 환경(httpx ASGITransport) 도 client.host 가
+# "127.0.0.1" 류로 잡혀 동작한다. tests/conftest.py 가 매 테스트마다
+# limiter.reset() 호출해서 카운터 누수를 막는다.
+limiter = Limiter(key_func=get_remote_address)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """앱 시작 시 STATE.initialize() — _default 인스턴스 자동 spawn."""
+    """앱 시작 시 production invariants 검증 + STATE.initialize()."""
+    # production 모드라면 ALLOWED_ORIGINS / ADMIN_TOKEN 검증.
+    _auth.enforce_production_invariants()
     if STATE.orchestrator is None:
         # 테스트가 미리 STATE.initialize() 한 경우는 건드리지 않는다.
         STATE.initialize()
@@ -55,13 +61,47 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="humanoid v12 backend", version="0.2.0", lifespan=lifespan)
 
+# slowapi limiter 등록 — exception handler 는 직접 등록.
+app.state.limiter = limiter
+
+
+@app.exception_handler(RateLimitExceeded)
+async def _rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    """RateLimitExceeded → 429 JSON. slowapi 기본 핸들러 대신 명시."""
+    return JSONResponse(
+        status_code=429,
+        content={"detail": f"rate limit exceeded: {exc.detail}"},
+    )
+
+
+# CORS — env 기반 origin 화이트리스트. production 에서 ALLOWED_ORIGINS 미설정
+# 시 lifespan 가드가 raise 하므로 여기까진 도달하지 않는다.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_CORS_ORIGINS,
+    allow_origins=_auth.resolve_cors_origins(),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=_auth.cors_methods(),
+    allow_headers=_auth.cors_headers(),
 )
+
+
+# ---------------------------------------------------------------------------
+# 보안 의존성 — admin token 헤더 검사
+# ---------------------------------------------------------------------------
+
+
+def _require_admin_token(
+    x_admin_token: str | None = Header(default=None, alias=_auth.ADMIN_TOKEN_HEADER),
+) -> None:
+    """destructive 라우트용 admin token 게이트.
+
+    `HUMANOID_ADMIN_TOKEN` 미설정 → no-op (dev 자유 모드).
+    설정됨 + 헤더 일치 → 통과. 그 외 → 401.
+    """
+    if not _auth.admin_token_required():
+        return
+    if not _auth.verify_admin_token(x_admin_token):
+        raise HTTPException(status_code=401, detail="admin token required")
 
 
 # ---------------------------------------------------------------------------
@@ -182,8 +222,9 @@ async def get_state() -> dict:
 
 
 @app.post("/api/turn")
-async def post_turn(req: TurnRequest):
-    """SSE — _default 인스턴스 한 턴 (legacy)."""
+@limiter.limit("10/minute")
+async def post_turn(request: Request, req: TurnRequest):
+    """SSE — _default 인스턴스 한 턴 (legacy). per-IP 10/min."""
     if STATE.orchestrator is None:
         raise HTTPException(status_code=503, detail="orchestrator not initialized")
 
@@ -250,7 +291,12 @@ async def get_instance_state(instance_id: str) -> dict:
 
 
 @app.delete("/api/instances/{instance_id}", status_code=204)
-async def delete_instance(instance_id: str) -> Response:
+@limiter.limit("5/minute")
+async def delete_instance(
+    request: Request,
+    instance_id: str,
+    _admin: None = Depends(_require_admin_token),
+) -> Response:
     if not MANAGER.exists(instance_id):
         raise HTTPException(status_code=404, detail=f"instance not found: {instance_id}")
     MANAGER.delete(instance_id)
@@ -259,8 +305,9 @@ async def delete_instance(instance_id: str) -> Response:
 
 
 @app.post("/api/instances/{instance_id}/turn")
-async def turn_for_instance(instance_id: str, body: TurnRequest):
-    """인스턴스별 SSE 한 턴."""
+@limiter.limit("10/minute")
+async def turn_for_instance(request: Request, instance_id: str, body: TurnRequest):
+    """인스턴스별 SSE 한 턴. per-IP 10/min."""
     try:
         orch = MANAGER.get(instance_id)
     except KeyError:
@@ -312,7 +359,12 @@ async def reset_instance(instance_id: str) -> Response:
 
 
 @app.post("/api/instances/{instance_id}/hard-reset", status_code=200)
-async def hard_reset_instance(instance_id: str) -> dict:
+@limiter.limit("5/minute")
+async def hard_reset_instance(
+    request: Request,
+    instance_id: str,
+    _admin: None = Depends(_require_admin_token),
+) -> dict:
     """페르소나 + jitter_seed 보존 / 영속 스토리지 (chroma·sqlite·state) 삭제.
 
     soft `/reset` 와의 차이: hard reset 은 디스크 영속 영역 (ChromaDB,
@@ -330,7 +382,12 @@ async def hard_reset_instance(instance_id: str) -> dict:
 
 
 @app.post("/api/admin/wipe", status_code=200)
-async def admin_wipe_all(body: WipeRequest) -> dict:
+@limiter.limit("5/minute")
+async def admin_wipe_all(
+    request: Request,
+    body: WipeRequest,
+    _admin: None = Depends(_require_admin_token),
+) -> dict:
     """모든 인스턴스를 영구 삭제. body.confirm 은 정확히 'WIPE' 여야 한다.
 
     토큰 불일치 시 400. 성공 시 {removed: int} 반환. legacy /api/turn 은
