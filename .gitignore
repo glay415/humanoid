@@ -46,3 +46,10 @@ storage_data/
 .env
 .env.local
 *.key
+
+# Node / frontend
+node_modules/
+ui/frontend/dist/
+ui/frontend/*.tsbuildinfo
+ui/frontend/vite.config.d.ts
+ui/frontend/vite.config.js
