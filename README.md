@@ -91,21 +91,51 @@ npm install
 npm run dev                  # http://localhost:5173
 ```
 
-브라우저에서 http://localhost:5173 — 채팅 패널 + 실시간 내부 상태/기분
-타임라인/드라이브/마커/감정 평가/톤 검증 결과 시각화. SSE 로 단계별 이벤트
+브라우저에서 http://localhost:5173 — 좌측 갤러리(스폰된 인스턴스 카드 +
+"+ 스폰" 버튼) + 가운데 채팅 패널 + 우측 실시간 내부 상태/기분 타임라인/
+드라이브/마커/감정 평가/톤 검증 결과 시각화. SSE 로 단계별 이벤트
 (`low_level` → `emotion` → `memory` → `candidates` → `final` → `tone` → `done`)
-가 스트리밍된다.
+가 스트리밍된다. 다크 모드 토글 (헤더 우측 Sun/Moon 아이콘),
+인스턴스별 하드 리셋 (카드 케밥 메뉴), 전체 wipe (갤러리 footer →
+'WIPE' 토큰 입력 모달).
+
+### 인스턴스 / 페르소나
+
+각 인스턴스 = 한 캐릭터 = `./instances/<uuid>/{chroma_db, storage_data,
+state.json, metadata.json, turns.jsonl, events.jsonl, drift.jsonl}` 격리.
+스폰 시 5 개 default 페르소나 (`introvert_thoughtful` / `extrovert_warm` /
+`sensitive_empathic` / `steady_analytical` / `playful_companion`) 중 선택 +
+지터 슬라이더로 baseline ±0.03 ~ ±0.1 무작위 변동 (재현 가능 — seed 가
+metadata 에 보존). 같은 페르소나 두 명 스폰해도 서로 미묘하게 다른 캐릭터.
+
+`./instances/<uuid>/turns.jsonl` 등은 git 으로 추적되어 (`_default` 만
+ignore) 키운 캐릭터를 백업/공유/pandas 분석할 수 있다. `chroma_db/index/`
+같은 임베딩 binary cache 만 ignore.
 
 ### 테스트
 
 ```bash
-pytest tests/ -q              # 전체 (~70초, 454 pass + 1 skip + 1 xfail)
-pytest tests/scenarios/ -q    # 27 시나리오만 (mock LLM, ~17초)
+pytest tests/ -q              # 전체 (~3분, 596 pass + 2 skip + 1 xfail)
+pytest tests/scenarios/ -q    # 27 시나리오 (mock LLM, ~17초)
 pytest -m scenario -q         # 동일
+pytest -m trend -q            # Wave 14C 다중-턴 트렌드 invariant
 ```
 
 전체 테스트는 실제 LLM API 를 호출하지 않는다 (모든 LLM 호출은
 `MockLLMClient` 로 stub).
+
+### 배포 / 보안
+
+기본은 localhost 전용. public 배포 시 환경변수:
+
+- `HUMANOID_ENV=production` — 켜면 startup 시 `HUMANOID_ALLOWED_ORIGINS`
+  (콤마 구분) 와 `HUMANOID_ADMIN_TOKEN` 미설정 시 RuntimeError.
+- `HUMANOID_ALLOWED_ORIGINS=https://yourapp.example` — production CORS 허용.
+- `HUMANOID_ADMIN_TOKEN=<random>` — DELETE / hard-reset / wipe 라우트가
+  `X-Admin-Token` 헤더 요구.
+
+rate limit 은 SlowAPI 미들웨어가 자동 적용 (`/turn` 10/min, destructive
+5/min, 초과 시 429).
 
 ## 기술 스택
 
@@ -113,12 +143,14 @@ pytest -m scenario -q         # 동일
 |---|---|
 | 수치 연산 | NumPy (9 차원 상태 + A/W/D 행렬, 마이크로초 단위) |
 | 벡터 스토리지 | ChromaDB (로컬, 일화기억) |
-| 일반 스토리지 | SQLite (마커, 전망기억) |
-| LLM | LiteLLM 래퍼 → OpenAI gpt-4o (large), gpt-4o-mini (small/dmn) |
-| 백엔드 | FastAPI + uvicorn + sse-starlette |
-| 프론트 | React 18 + Vite + TypeScript + Tailwind + Recharts |
-| 비동기 | asyncio (사회인지 ‖ 기억 인출 병렬) |
-| 설정 | YAML (기질, 모델) + dotenv (.env) |
+| 일반 스토리지 | SQLite (마커 + 전망기억 + 인스턴스별 격리) |
+| LLM | LiteLLM 래퍼 → OpenAI **gpt-5.5** (small/large/dmn 모두; gpt-5.5 는 `temperature=1.0` 만 지원) |
+| 백엔드 | FastAPI + uvicorn + sse-starlette + SlowAPI (rate limit) |
+| 프론트 | React 18 + Vite + TypeScript + Tailwind + Recharts + 다크 모드 |
+| 비동기 | asyncio (사회인지 ‖ 기억 인출 병렬, per-instance Lock) |
+| 로깅 | append-only JSONL (turns / events / drift) per instance |
+| 설정 | YAML (기질 + 페르소나 + 모델) + dotenv (.env) |
+| 의존성 | uv (lockfile + setup 스크립트) — pip 도 지원 |
 | 테스트 | pytest + pytest-asyncio + MockLLMClient |
 
 ## 모듈 구조
@@ -130,20 +162,38 @@ high_level/   emotion appraisal, social cognition, memory retrieval,
               metacognition, DMN
 storage/      VectorDB(ChromaDB), EpisodicMemory(재고정화),
               MarkerStore(SQLite), ProspectiveQueue, SelfModel,
-              OtherModel, SnapshotManager
+              OtherModel, SnapshotManager, jitter, logger(JSONL)
 core/         Orchestrator, EventBus + SyncPoint, TriggerRegistry,
               turn types
 interface/    SignalRise (정밀도 손실 ↑), ExperienceDescent (경험벡터 ↓),
               pydantic schemas
 llm/          LLMClient (litellm 래퍼), MockLLMClient, prompt loader
-ui/           backend (FastAPI + SSE) + frontend (Vite + React)
-config/       temperament_default.yaml, temperament_test.yaml, models.yaml
+ui/backend/   FastAPI app, instance_manager (spawn/list/get/delete/
+              hard_reset/wipe), state_holder, streaming(SSE), auth
+ui/frontend/  Vite + React + TS + Tailwind + Recharts; Gallery /
+              InstanceCard / SpawnModal / WipeConfirmModal /
+              DeepModeToggle / dark mode
+config/       temperament_default.yaml, temperament_test.yaml, models.yaml,
+              personas/{introvert_thoughtful,extrovert_warm,
+              sensitive_empathic,steady_analytical,playful_companion}.yaml
 prompts/      production 5 + reappraisal + DMN 4 = 10 텍스트 프롬프트
-docs/         v12 spec, implementation spec, evolution history
-tests/        unit + 27 시나리오 + integration e2e
+instances/    runtime — 인스턴스별 격리 (chroma_db, storage_data,
+              state.json, metadata.json, turns/events/drift.jsonl).
+              `_default` 만 gitignore, 사용자 캐릭터는 git 추적.
+scripts/      setup.{sh,ps1}, release.py (CHANGELOG promote + tag),
+              sensitivity_report (W 행렬 robustness)
+docs/         v12 spec, implementation spec, getting-started, architecture,
+              state-of-the-project, development, api-contract, decisions
+.release-notes/ vX.Y.Z.md (git tag 의 -F 메시지 source)
+tests/        unit + 27 시나리오 + e2e_trends + integration e2e + lifecycle
+              long-run + W matrix invariants/sensitivity
 ```
 
 ## 구현 상태
+
+**현재 stable**: `release` 브랜치 = `v0.2.1` (2026-05-08). `main` 은 v0.3.0
+후보 (Phase 1 audit-fix + observability 누적 중). 전체 변경 이력은
+[CHANGELOG.md](CHANGELOG.md), 릴리스별 본문은 `.release-notes/vX.Y.Z.md`.
 
 - [x] Phase 1 — 저수준 파이프라인 (InternalState, Drives, Markers, FastPath,
       Temperament, EmotionBase, SelfSensing). W-D 안정성 검증 (J 의 고유값
@@ -155,21 +205,65 @@ tests/        unit + 27 시나리오 + integration e2e
       final, tone).
 - [x] Phase 5 — 사회인지/메타인지/DMN/오케스트레이터 통합. 동기화 지점,
       재평가 루프 (depth=3), DMN 사이클, 정비 턴, 트리거 레지스트리 5 종.
-- [x] 27 spec 시나리오 통합 테스트 (mock LLM, `pytest -m scenario`)
-      — 24 통과 + 1 부분(나-너 관계) + 1 xfail(비이원적 인식, 표현 시 이원
-      복원) + 1 skip(집단적 초월, 1 인 환경).
-- [x] FastAPI 백엔드 (`/api/turn` SSE, `/api/state`, `/api/reset`) + React
-      프론트엔드 (실시간 시각화).
-- [ ] Phase 6 — 실 대화 데이터 기반 W 행렬 미세조정 (sensitivity analysis 까지
-      완료, `wave9/w_sensitivity` 브랜치).
+- [x] 27 spec 시나리오 통합 테스트 (mock LLM) — 24 통과 + 1 부분(나-너
+      관계) + 1 xfail(비이원적 인식) + 1 skip(집단적 초월).
+- [x] FastAPI 백엔드 (`/api/instances/*` + 라우트, SSE) + React 프론트엔드
+      (인스턴스 갤러리, 다크 모드).
+- [x] **Wave 11** — 다중 인스턴스 매니저 + 5 페르소나 카탈로그 + jitter +
+      state serializer + frontend gallery (v0.2.0).
+- [x] **Wave 12** — 인스턴스별 hard reset + 전역 wipe + Windows file handle
+      해제 (v0.2.1).
+- [x] **Audit** — 5-team red-team audit (α/β/γ/δ/ε); 37 critical/major
+      findings 트리아지.
+- [x] **Phase 1 patch (v0.3.0 후보)** — α1 baseline desync 수정, α2 valence
+      math 선형화, γ\* storage 무결성 (parameter poisoning, prospective race,
+      NaN guard, labels=None, snapshot freeze guard), δ\* 동시성/보안
+      (per-instance Lock, SSE cancel, EventBus 격리, production CORS,
+      slowapi rate limit, admin token), 14A 영속 JSONL 로깅 (turns/events/
+      drift), 14C e2e trend 테스트, 14F uv setup, 페르소나 narrative 자유화.
+- [ ] **Phase 2 (in progress)** — 13C orchestrator 결함 (β1 depth fragility,
+      β2 broader exception, β13 실제 regenerate 루프, β12 self_model
+      confidence sync), 13E spec 트리거 12 종 + DMN 1~2 활동.
+- [ ] **Phase 1.5 (in progress)** — 14E 시각화 deep mode (행렬 분해 + 고유값
+      + 기질 표류 그래프).
+- [ ] **Phase 3** — §8 enforcement (고수준이 못 하는 7 가지 runtime guard) +
+      14B `analyze.py` (pandas 기반 turns/events 분석) + 14D logs UI 탭.
+- [ ] Phase 6 — 실 대화 데이터 기반 W 행렬 미세조정.
+
+테스트 baseline: **596 pass + 2 skip + 1 xfail** (현재 `main`).
+
+## 릴리스 / 버전
+
+[SemVer 2.0.0](https://semver.org). pre-1.0 기간엔 MINOR 도 breaking 가능
+(CHANGELOG 에 명시). 두 트랙:
+
+- `main` = 작업 트렁크 (모든 wave 머지). 항상 `pytest -q` 그린 유지.
+- `release` = 안정 트랙 (검증된 commit 만 fast-forward + 태그).
+
+릴리스 절차:
+
+```bash
+# main 에 [Unreleased] 항목 다 누적된 상태에서:
+python scripts/release.py 0.3.0   # CHANGELOG promote + .release-notes/v0.3.0.md
+                                   # + commit + ff release + annotated tag
+git push origin main release v0.3.0
+# (옵션) GitHub Releases 페이지에 정식 publish — gh CLI 또는 web UI:
+#   gh release create v0.3.0 -F .release-notes/v0.3.0.md
+#   # 또는 https://github.com/glay415/humanoid/releases/new?tag=v0.3.0
+```
+
+태그의 annotated message 자체는 `git push --tags` 만으로 GitHub의 Tags
+페이지에 표시되지만, "Releases" 페이지에 정식 entry 로 등록하려면 위 마지막
+단계 (gh CLI 혹은 web UI) 가 필요하다.
 
 ## For contributors
 
 - [CLAUDE.md](CLAUDE.md) — 워크플로 규칙 (read-before, update-after).
 - [docs/state-of-the-project.md](docs/state-of-the-project.md) — 현재 진행 상황 (wave / test baseline / 한계).
-- [docs/development.md](docs/development.md) — wave / worktree / commit / 테스트 / 코딩 컨벤션.
+- [docs/development.md](docs/development.md) — wave / worktree / commit / 테스트 / 코딩 컨벤션 / 릴리스.
 - [docs/api-contract.md](docs/api-contract.md) — backend ↔ frontend 라우트 + SSE 이벤트 정본.
-- [docs/decisions.md](docs/decisions.md) — 아키텍처 결정 로그 (ADRs).
+- [docs/decisions.md](docs/decisions.md) — 아키텍처 결정 로그 (ADRs, 1~9).
+- [CHANGELOG.md](CHANGELOG.md) — Keep a Changelog 형식 누적 변경.
 
 ## 라이선스
 
