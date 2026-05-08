@@ -149,7 +149,12 @@ cd ui/frontend && npm run dev
 
 # Sensitivity report
 python scripts/run_sensitivity_report.py
+
+# Offline log analysis (Wave 14B; needs `--extra analyze` for pandas/matplotlib)
+python scripts/analyze.py <instance_id> --charts ./reports/<instance_id>
 ```
+
+`analyze` extra 는 `uv sync --extra analyze` (또는 `pip install -e .[analyze]`) 로 opt-in. default deps 에는 들어가지 않는다 — pandas/matplotlib 가 무거워 UI/CLI 만 쓰는 사용자에게 부담.
 
 ## Coding conventions
 
