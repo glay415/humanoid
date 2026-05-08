@@ -47,7 +47,11 @@ storage_data/
 .env.local
 *.key
 
-# Frontend build artifacts (parallel team — ui/frontend/)
+# Node / frontend
+node_modules/
 ui/frontend/node_modules/
 ui/frontend/dist/
 ui/frontend/.vite/
+ui/frontend/*.tsbuildinfo
+ui/frontend/vite.config.d.ts
+ui/frontend/vite.config.js
