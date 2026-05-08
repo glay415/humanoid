@@ -8,6 +8,10 @@ import {
   wipeAll,
 } from '../api/client';
 import type { InstanceCard, PersonaInfo, SpawnRequest } from '../api/types';
+// chat history localStorage helper. Used to clear keyed entries on
+// hard_reset / delete / wipe so stale dialogue doesn't leak into a
+// freshly-respawned character. F5 복원과 짝.
+import { clearChatStorage } from './useChat';
 
 const SELECTED_KEY = 'humanoid-selected-instance';
 
@@ -121,6 +125,7 @@ export function useInstances(): UseInstancesResult {
   const remove = useCallback(
     async (id: string) => {
       await deleteInstance(id);
+      clearChatStorage(id);
       setInstances((prev) => prev.filter((c) => c.instance_id !== id));
       setSelectedIdState((prev) => (prev === id ? null : prev));
     },
@@ -135,6 +140,9 @@ export function useInstances(): UseInstancesResult {
   // 토글해서 useChat 이 messages 초기화 + refreshState 하도록 강제한다.
   const hardReset = useCallback(async (id: string): Promise<InstanceCard> => {
     const card = await hardResetInstance(id);
+    // Clear localStorage chat for this instance — server-side memory + dialogue
+    // history is wiped, frontend persistence should follow.
+    clearChatStorage(id);
     setInstances((prev) =>
       prev.map((c) => (c.instance_id === id ? card : c)),
     );
@@ -152,10 +160,13 @@ export function useInstances(): UseInstancesResult {
   // wave12: global wipe — destructive. We always send the literal `WIPE` token
   // (matched by the typed-confirmation modal client-side) and then refresh.
   const wipe = useCallback(async (): Promise<void> => {
+    // Snapshot existing instance ids to clear their chat localStorage.
+    const existingIds = instances.map((c) => c.instance_id);
     await wipeAll('WIPE');
+    for (const id of existingIds) clearChatStorage(id);
     setSelectedIdState(null);
     await refresh();
-  }, [refresh]);
+  }, [refresh, instances]);
 
   return {
     instances,

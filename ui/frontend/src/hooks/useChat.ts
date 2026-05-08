@@ -61,7 +61,49 @@ type Action =
   | { type: 'EVENT_ERROR'; data: ErrorEvent }
   | { type: 'TURN_ABORTED' }
   | { type: 'RESET' }
-  | { type: 'INSTANCE_SWITCHED' };
+  | { type: 'INSTANCE_SWITCHED' }
+  | { type: 'MESSAGES_RESTORED'; messages: ChatMessage[] };
+
+const MESSAGES_KEY_PREFIX = 'humanoid-chat-messages:';
+const MESSAGES_LIMIT = 200;   // keep last N entries in localStorage per instance
+
+function chatStorageKey(instanceId: string): string {
+  return `${MESSAGES_KEY_PREFIX}${instanceId}`;
+}
+
+function loadMessagesFromStorage(instanceId: string): ChatMessage[] {
+  try {
+    const raw = localStorage.getItem(chatStorageKey(instanceId));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (m): m is ChatMessage =>
+        m && typeof m === 'object' &&
+        (m.role === 'user' || m.role === 'assistant') &&
+        typeof m.text === 'string',
+    );
+  } catch {
+    return [];
+  }
+}
+
+function saveMessagesToStorage(instanceId: string, messages: ChatMessage[]): void {
+  try {
+    const trimmed = messages.slice(-MESSAGES_LIMIT);
+    localStorage.setItem(chatStorageKey(instanceId), JSON.stringify(trimmed));
+  } catch {
+    // Quota exceeded or disabled — silently skip.
+  }
+}
+
+export function clearChatStorage(instanceId: string): void {
+  try {
+    localStorage.removeItem(chatStorageKey(instanceId));
+  } catch {
+    // ignore
+  }
+}
 
 const INITIAL_STATE: AppState = {
   serverState: null,
@@ -132,6 +174,8 @@ function reducer(state: AppState, action: Action): AppState {
       // Switching instances clears the local message buffer (each instance
       // owns its own dialogue history server-side) and any in-flight UI.
       return { ...INITIAL_STATE };
+    case 'MESSAGES_RESTORED':
+      return { ...state, messages: action.messages };
     default:
       return state;
   }
@@ -158,8 +202,9 @@ export function useChat(instanceId: string | null) {
   }, [instanceId]);
 
   // When the selected instance changes, reset local message history and
-  // refetch authoritative state for the new instance. If no instance is
-  // selected, just clear local buffers.
+  // refetch authoritative state for the new instance. Then restore the
+  // last-known chat history from localStorage (per-instance keyed) so F5
+  // doesn't lose context.
   useEffect(() => {
     // Cancel any in-flight turn from a previous instance.
     if (abortRef.current) {
@@ -168,10 +213,21 @@ export function useChat(instanceId: string | null) {
     }
     dispatch({ type: 'INSTANCE_SWITCHED' });
     if (instanceId) {
+      const restored = loadMessagesFromStorage(instanceId);
+      if (restored.length > 0) {
+        dispatch({ type: 'MESSAGES_RESTORED', messages: restored });
+      }
       void refreshState();
     }
     // refreshState is stable per instanceId via useCallback above.
   }, [instanceId, refreshState]);
+
+  // Persist messages to localStorage on every change, keyed by instance.
+  useEffect(() => {
+    if (!instanceId) return;
+    if (state.messages.length === 0) return;   // don't clobber when freshly switching
+    saveMessagesToStorage(instanceId, state.messages);
+  }, [instanceId, state.messages]);
 
   const sendMessage = useCallback(
     async (userInput: string) => {
