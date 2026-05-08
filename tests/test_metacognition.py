@@ -73,13 +73,158 @@ class TestRecover:
         assert m.resource == pytest.approx(0.75)
 
 
-# ===== 8. review stub =====
+# ===== 8. review — 의사결정 트리 =====
 
-class TestReviewStub:
-    def test_stub_returns_expected_shape(self):
+
+def _emotion(valence=0.3, arousal=0.4, labels=None, threat=0.1, reward=0.4, novelty=0.2):
+    """테스트 헬퍼 — EmotionAppraised 모양의 dict."""
+    return {
+        'valence': valence,
+        'arousal': arousal,
+        'preliminary_labels': labels if labels is not None else ['중립'],
+        'experience_dimensions': {
+            'reward': reward,
+            'threat': threat,
+            'novelty': novelty,
+        },
+    }
+
+
+def _low(valence=0.3, arousal=0.4):
+    return {'raw_core_affect': {'valence': valence, 'arousal': arousal}}
+
+
+def _social(reward=0.3):
+    return {'social_reward': reward}
+
+
+class TestReviewDecisionTree:
+    def test_review_no_issues_returns_no_reappraisal(self):
+        """행복 경로 — mismatch 없음, labels 있음, 충돌 없음 → 재평가 불필요."""
         m = Metacognition()
-        out = m.review(emotion_result={}, social_result={}, low_result={})
-        assert out == {'needs_reappraisal': False, 'iterations': 0, 'strategy': None}
+        out = m.review(
+            emotion_result=_emotion(valence=0.3),
+            social_result=_social(reward=0.3),
+            low_result=_low(valence=0.2),
+        )
+        assert out['needs_reappraisal'] is False
+        assert out['strategy'] is None
+        assert out['converged'] is True
+        assert out['iterations'] == 0
+        assert out['reasons'] == []
+
+    def test_review_state_mismatch_triggers_reframe(self):
+        m = Metacognition()
+        out = m.review(
+            emotion_result=_emotion(valence=0.5),
+            social_result=_social(),
+            low_result=_low(valence=-0.5),
+        )
+        assert out['needs_reappraisal'] is True
+        assert out['strategy'] == 'reframe'
+        assert 'state_mismatch' in out['reasons']
+        assert out['converged'] is False
+
+    def test_review_empty_labels_triggers_context(self):
+        m = Metacognition()
+        out = m.review(
+            emotion_result=_emotion(valence=0.2, labels=[]),
+            social_result=_social(),
+            low_result=_low(valence=0.2),
+        )
+        assert out['needs_reappraisal'] is True
+        assert out['strategy'] == 'context'
+        assert 'uncertainty_low_labels' in out['reasons']
+
+    def test_review_social_threat_conflict_triggers_distance(self):
+        m = Metacognition()
+        out = m.review(
+            emotion_result=_emotion(valence=0.2, threat=0.7),
+            social_result=_social(reward=0.7),
+            low_result=_low(valence=0.2),
+        )
+        assert out['needs_reappraisal'] is True
+        assert out['strategy'] == 'distance'
+        assert 'social_threat_conflict' in out['reasons']
+
+    def test_review_depth_limit_returns_converged(self):
+        m = Metacognition()
+        out = m.review(
+            emotion_result=_emotion(valence=0.5),
+            social_result=_social(),
+            low_result=_low(valence=-0.5),
+            prev_iterations=3,
+        )
+        assert out['needs_reappraisal'] is False
+        assert out['converged'] is True
+        assert out['reasons'] == ['depth_limit']
+        assert out['strategy'] is None
+        assert out['iterations'] == 3
+
+    def test_review_resource_floor_suppresses_reappraisal(self):
+        m = Metacognition()  # floor=0.1
+        m.resource = m.floor + 0.01  # 0.11 — floor + 0.05 이하
+        out = m.review(
+            emotion_result=_emotion(valence=0.5),
+            social_result=_social(),
+            low_result=_low(valence=-0.5),
+        )
+        assert out['needs_reappraisal'] is False
+        assert 'resource_low' in out['reasons']
+        assert out['converged'] is True
+        assert out['strategy'] is None
+
+    def test_review_consumes_resource_when_reappraising(self):
+        m = Metacognition()
+        assert m.resource == pytest.approx(1.0)
+        out = m.review(
+            emotion_result=_emotion(valence=0.5),
+            social_result=_social(),
+            low_result=_low(valence=-0.5),
+        )
+        assert out['needs_reappraisal'] is True
+        assert m.resource == pytest.approx(0.95)
+
+    def test_review_iterations_increments_on_need(self):
+        m = Metacognition()
+        out = m.review(
+            emotion_result=_emotion(valence=0.5),
+            social_result=_social(),
+            low_result=_low(valence=-0.5),
+            prev_iterations=0,
+        )
+        assert out['iterations'] == 1
+
+    def test_review_iterations_stay_when_no_need(self):
+        m = Metacognition()
+        out = m.review(
+            emotion_result=_emotion(valence=0.3),
+            social_result=_social(),
+            low_result=_low(valence=0.2),
+            prev_iterations=2,
+        )
+        assert out['iterations'] == 2
+
+
+class TestStateMismatchSignal:
+    def test_state_mismatch_signal_magnitude(self):
+        sig = Metacognition.state_mismatch_signal(
+            emotion_result=_emotion(valence=0.4),
+            low_result=_low(valence=-0.3),
+        )
+        assert sig == pytest.approx(0.7)
+
+    def test_state_mismatch_signal_zero_when_equal(self):
+        sig = Metacognition.state_mismatch_signal(
+            emotion_result=_emotion(valence=0.2),
+            low_result=_low(valence=0.2),
+        )
+        assert sig == pytest.approx(0.0)
+
+    def test_state_mismatch_signal_handles_missing(self):
+        # 빈 dict 도 KeyError 없이 0.0 을 반환해야 함
+        sig = Metacognition.state_mismatch_signal({}, {})
+        assert sig == pytest.approx(0.0)
 
 
 # ===== 9. floor enforcement custom =====

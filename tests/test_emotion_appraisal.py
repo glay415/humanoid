@@ -185,12 +185,107 @@ async def test_evaluate_propagates_llm_error_on_schema_violation():
 
 
 # ---------------------------------------------------------------------------
-# reappraise — 스텁 회귀
+# reappraise — 메타인지 트리거 2차 평가
 # ---------------------------------------------------------------------------
 
 
-async def test_reappraise_still_raises_not_implemented():
+_PREV_PAYLOAD = {
+    "valence": -0.4,
+    "arousal": 0.65,
+    "preliminary_labels": ["불안"],
+    "experience_dimensions": {
+        "reward": 0.1,
+        "threat": 0.7,
+        "novelty": 0.3,
+    },
+}
+
+
+_REAPPRAISED_PAYLOAD = {
+    "valence": 0.1,
+    "arousal": 0.45,
+    "preliminary_labels": ["수용", "관찰"],
+    "experience_dimensions": {
+        "reward": 0.4,
+        "threat": 0.25,
+        "novelty": 0.2,
+    },
+}
+
+
+async def test_reappraise_with_valid_strategy_returns_emotion_appraised_shape():
+    mock = MockLLMClient(responses=[json.dumps(_REAPPRAISED_PAYLOAD, ensure_ascii=False)])
+    module = _make_module(mock)
+
+    result = await module.reappraise(
+        prev_result=_PREV_PAYLOAD,
+        strategy='reframe',
+        low_result={'raw_core_affect': {'valence': -0.2, 'arousal': 0.5}},
+        user_input='상사가 갑자기 회의 잡았어',
+    )
+
+    assert set(result.keys()) == {"valence", "arousal", "preliminary_labels", "experience_dimensions"}
+    assert -1.0 <= result["valence"] <= 1.0
+    assert 0.0 <= result["arousal"] <= 1.0
+    dims = result["experience_dimensions"]
+    assert set(dims.keys()) == {"reward", "threat", "novelty"}
+    assert result["valence"] == _REAPPRAISED_PAYLOAD["valence"]
+
+
+async def test_reappraise_invalid_strategy_raises_value_error():
     mock = MockLLMClient()
     module = _make_module(mock)
-    with pytest.raises(NotImplementedError):
-        await module.reappraise({"valence": 0.0}, strategy="reframe")
+    with pytest.raises(ValueError):
+        await module.reappraise(
+            prev_result=_PREV_PAYLOAD,
+            strategy='invalid',
+        )
+
+
+async def test_reappraise_passes_strategy_into_rendered_message():
+    mock = MockLLMClient(responses=[json.dumps(_REAPPRAISED_PAYLOAD, ensure_ascii=False)])
+    module = _make_module(mock)
+
+    await module.reappraise(
+        prev_result=_PREV_PAYLOAD,
+        strategy='reframe',
+        user_input='hi',
+    )
+    user_content = mock.call_log[0]['messages'][-1]['content']
+    assert 'reframe' in user_content
+
+
+async def test_reappraise_passes_previous_appraisal_json_into_message():
+    mock = MockLLMClient(responses=[json.dumps(_REAPPRAISED_PAYLOAD, ensure_ascii=False)])
+    module = _make_module(mock)
+
+    await module.reappraise(
+        prev_result=_PREV_PAYLOAD,
+        strategy='distance',
+        user_input='test',
+    )
+    user_content = mock.call_log[0]['messages'][-1]['content']
+    # 직전 평가 valence/arousal 숫자가 그대로 박혀야 함
+    assert "-0.4" in user_content
+    assert "0.65" in user_content
+
+
+async def test_reappraise_uses_small_model():
+    mock = MockLLMClient(responses=[json.dumps(_REAPPRAISED_PAYLOAD, ensure_ascii=False)])
+    module = _make_module(mock)
+
+    await module.reappraise(
+        prev_result=_PREV_PAYLOAD,
+        strategy='context',
+    )
+    assert mock.call_log[0]['model_name'] == 'small_model'
+
+
+async def test_reappraise_propagates_llm_error_on_invalid_json():
+    mock = MockLLMClient(responses=["not json"])
+    module = _make_module(mock)
+    with pytest.raises(LLMError):
+        await module.reappraise(
+            prev_result=_PREV_PAYLOAD,
+            strategy='reframe',
+        )
