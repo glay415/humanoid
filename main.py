@@ -107,6 +107,7 @@ def build_full_orchestrator(
     from high_level.final_judgment import FinalJudgment
     from high_level.output_postprocess import OutputPostprocess
     from high_level.metacognition import Metacognition
+    from high_level.dmn import DMN
     from storage.vector_db import VectorDB
     from storage.memory_store import EpisodicMemory
     from storage.prospective import ProspectiveQueue
@@ -154,10 +155,19 @@ def build_full_orchestrator(
         regulation_capacity=cfg.get('emotion_regulation_capacity', 0.5),
     )
 
+    # DMN — 시그니처는 Team O 가 확정. 방어적으로 base_activity 만 전달.
+    dmn = DMN(base_activity=cfg.get('dmn_base_activity', 0.5))
+    # LLM 핸들 부착 — Team O 의 run_cycle 이 ctx.llm 으로도 받지만 호환을 위해.
+    if not hasattr(dmn, 'llm') or getattr(dmn, 'llm', None) is None:
+        try:
+            dmn.llm = llm_client
+        except AttributeError:
+            pass
+
     self_model = SelfModel()
     other_model = OtherModel()
 
-    return Orchestrator(
+    orch = Orchestrator(
         low_level=low_level,
         event_bus=EventBus(),
         trigger_registry=TriggerRegistry(),
@@ -174,10 +184,13 @@ def build_full_orchestrator(
         final_judgment=final_judgment,
         output_postprocess=output_postprocess,
         metacognition=metacognition,
+        dmn=dmn,
         episodic_memory=episodic,
         self_model=self_model,
         other_model=other_model,
     )
+    orch.register_default_triggers()
+    return orch
 
 
 def main():
