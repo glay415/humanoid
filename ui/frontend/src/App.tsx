@@ -1,6 +1,10 @@
 import { useEffect } from 'react';
 import { useChat } from './hooks/useChat';
 import { Chat } from './components/Chat';
+import { StatePanel } from './components/StatePanel';
+import { MoodTimeline } from './components/MoodTimeline';
+import { DrivesPanel } from './components/DrivesPanel';
+import { MarkersPanel } from './components/MarkersPanel';
 
 export default function App() {
   const chat = useChat();
@@ -29,7 +33,7 @@ export default function App() {
           />
         </section>
 
-        <aside className="bg-ink-100 px-5 py-5 space-y-5 overflow-y-auto scroll-thin">
+        <aside className="bg-ink-100 px-5 py-5 space-y-5 overflow-y-auto scroll-thin lg:max-h-screen">
           <header className="flex items-center justify-between">
             <h2 className="text-xs uppercase tracking-widest font-mono text-ink-500">
               cognitive state
@@ -38,7 +42,39 @@ export default function App() {
               turn {server?.turn_number ?? 0}
             </span>
           </header>
-          <p className="text-xs font-mono text-ink-400">사이드바 패널은 곧 추가됩니다.</p>
+
+          <StatePanel
+            internalState={server?.internal_state ?? null}
+            baselines={server?.baselines ?? null}
+            pendingLowLevel={chat.state.pendingLowLevel}
+          />
+
+          <MoodTimeline
+            history={server?.mood_history ?? []}
+            pending={chat.state.pendingLowLevel?.mood}
+          />
+
+          <DrivesPanel
+            drives={server?.drives ?? null}
+            pending={chat.state.pendingLowLevel?.drives}
+          />
+
+          <MarkersPanel markers={server?.markers ?? []} />
+
+          {server?.self_model && (
+            <section className="rounded-lg bg-white border border-ink-200 p-4">
+              <h3 className="text-xs uppercase tracking-widest font-mono text-ink-500 mb-2">
+                self model
+              </h3>
+              <p className="text-sm text-ink-700 leading-relaxed">
+                {server.self_model.narrative || '(아직 형성된 자아 서사 없음)'}
+              </p>
+              <div className="mt-2 text-xs font-mono text-ink-500 tabular-nums">
+                confidence {server.self_model.confidence.toFixed(2)} · meta{' '}
+                {server.meta_resource.toFixed(2)}
+              </div>
+            </section>
+          )}
         </aside>
       </main>
     </div>
