@@ -386,6 +386,73 @@ async def hard_reset_instance(
     return _card_dict(meta)
 
 
+# ---------------------------------------------------------------------------
+# Wave 14D — JSONL log inspection routes (read-only)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/instances/{instance_id}/logs/turns")
+async def get_turns_log(
+    instance_id: str,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[dict]:
+    """turns.jsonl 항목들을 reverse-chronological (최신 우선) 로 반환.
+
+    limit/offset 페이지네이션. logger 가 없거나 파일이 비었으면 [].
+    """
+    if not MANAGER.exists(instance_id):
+        raise HTTPException(status_code=404, detail=f"instance not found: {instance_id}")
+    orch = MANAGER.get(instance_id)
+    if getattr(orch, 'logger', None) is None:
+        return []
+    # 디스크에서 마지막 (limit + offset) 개를 읽어 reverse 후 offset 만큼 건너뛴다.
+    # 파일이 클 때도 tail-N 이면 메모리 부담이 작다.
+    take = max(0, int(limit)) + max(0, int(offset))
+    if take == 0:
+        return []
+    entries = orch.logger.read_turns(limit=take)
+    entries.reverse()
+    start = max(0, int(offset))
+    end = start + max(0, int(limit))
+    return entries[start:end]
+
+
+@app.get("/api/instances/{instance_id}/logs/events")
+async def get_events_log(
+    instance_id: str,
+    limit: int = 100,
+    offset: int = 0,
+    type: str | None = None,
+) -> list[dict]:
+    """events.jsonl 항목들. 선택적 type 필터 + reverse-chrono 페이지네이션."""
+    if not MANAGER.exists(instance_id):
+        raise HTTPException(status_code=404, detail=f"instance not found: {instance_id}")
+    orch = MANAGER.get(instance_id)
+    if getattr(orch, 'logger', None) is None:
+        return []
+    # type 필터는 reader 안쪽에서 적용. 페이지네이션은 reverse 후.
+    rows = orch.logger.read_events(type_filter=type, limit=None)
+    rows.reverse()
+    start = max(0, int(offset))
+    end = start + max(0, int(limit))
+    return rows[start:end]
+
+
+@app.get("/api/instances/{instance_id}/logs/drift")
+async def get_drift_log(
+    instance_id: str,
+    limit: int = 100,
+) -> list[dict]:
+    """drift.jsonl 항목들. 시계열 분석 친화적이라 chronological (오래된 → 최신) 유지."""
+    if not MANAGER.exists(instance_id):
+        raise HTTPException(status_code=404, detail=f"instance not found: {instance_id}")
+    orch = MANAGER.get(instance_id)
+    if getattr(orch, 'logger', None) is None:
+        return []
+    return orch.logger.read_drift(limit=max(0, int(limit)))
+
+
 @app.post("/api/admin/wipe", status_code=200)
 @limiter.limit("5/minute")
 async def admin_wipe_all(
