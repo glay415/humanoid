@@ -1,23 +1,35 @@
 """FastAPI 앱 — v12 인지 아키텍처를 SSE 로 노출.
 
-Endpoints:
-  POST /api/turn   — body: {user_input}, 반환: text/event-stream (sse_starlette)
+Legacy endpoints (단일 _default 인스턴스로 위임):
+  POST /api/turn   — body: {user_input}, 반환: text/event-stream
   GET  /api/state  — 현재 turn_number / internal_state / mood_history / drives ...
-  POST /api/reset  — 오케스트레이터 재조립 (새 인스턴스), 204
+  POST /api/reset  — 오케스트레이터 재조립, 204
   GET  /api/health — liveness, {ok, turn_number}
+
+Multi-instance endpoints:
+  GET  /api/personas
+  POST /api/instances
+  GET  /api/instances
+  GET  /api/instances/{id}
+  DELETE /api/instances/{id}
+  POST /api/instances/{id}/turn
+  POST /api/instances/{id}/reset
 
 CORS: Vite dev (5173) + preview (4173).
 """
 from __future__ import annotations
 
+from collections import defaultdict
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
-from ui.backend.state_holder import STATE
+from ui.backend import personas as _personas
+from ui.backend.state_holder import MANAGER, STATE
 from ui.backend.streaming import stream_turn
 
 
@@ -28,16 +40,20 @@ _CORS_ORIGINS = [
 ]
 
 
+# 인스턴스별 mood history — 단순 in-memory dict. 영속이 필요해지면 메타로 옮긴다.
+_instance_mood_history: dict[str, list[dict]] = defaultdict(list)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """앱 시작 시 STATE.initialize() — temperament_default.yaml 로 풀 모드 부팅."""
+    """앱 시작 시 STATE.initialize() — _default 인스턴스 자동 spawn."""
     if STATE.orchestrator is None:
         # 테스트가 미리 STATE.initialize() 한 경우는 건드리지 않는다.
         STATE.initialize()
     yield
 
 
-app = FastAPI(title="humanoid v12 backend", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="humanoid v12 backend", version="0.2.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -49,7 +65,7 @@ app.add_middleware(
 
 
 # ---------------------------------------------------------------------------
-# Request models
+# Request / Response models
 # ---------------------------------------------------------------------------
 
 
@@ -57,34 +73,36 @@ class TurnRequest(BaseModel):
     user_input: str
 
 
+class SpawnRequest(BaseModel):
+    persona_id: str
+    display_name: str | None = None
+    jitter: float = 0.3
+
+
+class InstanceCardModel(BaseModel):
+    instance_id: str
+    display_name: str
+    persona_id: str
+    persona_display_name: str
+    turn_number: int
+    last_mood: dict
+    last_active: str
+    created_at: str
+
+
 # ---------------------------------------------------------------------------
-# Routes
+# Helpers
 # ---------------------------------------------------------------------------
 
 
-@app.get("/api/health")
-async def health() -> dict:
-    """liveness 체크용. 프론트엔드 polling 에 사용."""
-    turn_number = (
-        STATE.orchestrator.turn_number if STATE.orchestrator is not None else 0
-    )
-    return {"ok": True, "turn_number": turn_number}
-
-
-@app.get("/api/state")
-async def get_state() -> dict:
-    """전체 상태 스냅샷 — 프론트엔드 mood/drives 차트용."""
-    if STATE.orchestrator is None:
-        raise HTTPException(status_code=503, detail="orchestrator not initialized")
-    orch = STATE.orchestrator
-
+def _state_payload(orch, mood_history: list[dict]) -> dict:
+    """공통 state snapshot — legacy /api/state 와 /api/instances/{id} 가 공유."""
     internal_state = orch.low_level.internal_state.to_dict()
     baselines = dict(zip(
         orch.low_level.internal_state.PARAMS,
         orch.low_level.internal_state.baselines.tolist(),
     ))
 
-    # raw_core_affect / drives — emotion_base 가 직전 턴까지 누적한 결과.
     eb = orch.low_level.emotion_base
     eb_rca = getattr(eb, 'raw_core_affect', {}) or {}
     raw_core_affect = {
@@ -93,7 +111,6 @@ async def get_state() -> dict:
     }
     drives_state = orch.low_level.drives.compute(internal_state)
 
-    # markers — Marker dataclass → dict.
     markers_payload: list[dict] = []
     for m in orch.low_level.markers.markers.values():
         markers_payload.append({
@@ -110,7 +127,7 @@ async def get_state() -> dict:
         'turn_number': orch.turn_number,
         'internal_state': internal_state,
         'baselines': baselines,
-        'mood_history': list(STATE.mood_history),
+        'mood_history': list(mood_history),
         'drives': drives_state,
         'raw_core_affect': raw_core_affect,
         'markers': markers_payload,
@@ -119,12 +136,49 @@ async def get_state() -> dict:
     }
 
 
+def _card_dict(meta) -> dict:
+    """InstanceMetadata + 페르소나 display_name → 카드 dict."""
+    try:
+        persona_display = _personas.get_persona(meta.persona_id).display_name
+    except KeyError:
+        persona_display = meta.persona_id
+    return {
+        'instance_id': meta.instance_id,
+        'display_name': meta.display_name,
+        'persona_id': meta.persona_id,
+        'persona_display_name': persona_display,
+        'turn_number': int(meta.turn_number),
+        'last_mood': dict(meta.last_mood),
+        'last_active': meta.last_active,
+        'created_at': meta.created_at,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Legacy single-instance routes
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/health")
+async def health() -> dict:
+    """liveness 체크용."""
+    turn_number = (
+        STATE.orchestrator.turn_number if STATE.orchestrator is not None else 0
+    )
+    return {"ok": True, "turn_number": turn_number}
+
+
+@app.get("/api/state")
+async def get_state() -> dict:
+    """전체 상태 스냅샷 — _default 인스턴스 (legacy)."""
+    if STATE.orchestrator is None:
+        raise HTTPException(status_code=503, detail="orchestrator not initialized")
+    return _state_payload(STATE.orchestrator, STATE.mood_history)
+
+
 @app.post("/api/turn")
 async def post_turn(req: TurnRequest):
-    """SSE 스트림으로 한 턴 실행. event 시퀀스:
-    low_level → emotion → memory → candidates → final → tone → done.
-    중간 stage 가 LLMError 면 error 이벤트가 추가로 emit 된다.
-    """
+    """SSE — _default 인스턴스 한 턴 (legacy)."""
     if STATE.orchestrator is None:
         raise HTTPException(status_code=503, detail="orchestrator not initialized")
 
@@ -136,15 +190,117 @@ async def post_turn(req: TurnRequest):
         ):
             yield msg
 
-    # sse_starlette 이 SSE 헤더/형식을 자동으로 채워준다.
     return EventSourceResponse(event_generator())
 
 
 @app.post("/api/reset", status_code=204)
 async def reset_state() -> Response:
-    """오케스트레이터를 새로 조립. 모든 누적 상태/메모리 초기화 (디스크 chroma 는 유지).
-
-    현재 STATE 가 사용한 config 를 그대로 재사용해야 하지만, 단순화 위해 default 로 재초기화.
-    """
+    """오케스트레이터 재조립 (legacy). default config 로 재초기화."""
     STATE.reset()
+    return Response(status_code=204)
+
+
+# ---------------------------------------------------------------------------
+# Multi-instance routes
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/personas")
+async def list_personas_route() -> list[dict]:
+    """페르소나 카탈로그 — UI spawn 화면에 노출."""
+    return [p.to_dict() for p in _personas.list_personas()]
+
+
+@app.post("/api/instances", status_code=201)
+async def spawn_instance(body: SpawnRequest) -> dict:
+    """새 인스턴스 spawn. 메타데이터(card) 반환."""
+    try:
+        meta = MANAGER.spawn(
+            persona_id=body.persona_id,
+            display_name=body.display_name,
+            jitter=float(body.jitter),
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return _card_dict(meta)
+
+
+@app.get("/api/instances")
+async def list_instances() -> list[dict]:
+    """모든 인스턴스 카드 (last_active desc). _default 도 노출."""
+    return [_card_dict(m) for m in MANAGER.list()]
+
+
+@app.get("/api/instances/{instance_id}")
+async def get_instance_state(instance_id: str) -> dict:
+    """특정 인스턴스의 full state."""
+    try:
+        orch = MANAGER.get(instance_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"instance not found: {instance_id}")
+    history = _instance_mood_history.get(instance_id, [])
+    return _state_payload(orch, history)
+
+
+@app.delete("/api/instances/{instance_id}", status_code=204)
+async def delete_instance(instance_id: str) -> Response:
+    if not MANAGER.exists(instance_id):
+        raise HTTPException(status_code=404, detail=f"instance not found: {instance_id}")
+    MANAGER.delete(instance_id)
+    _instance_mood_history.pop(instance_id, None)
+    return Response(status_code=204)
+
+
+@app.post("/api/instances/{instance_id}/turn")
+async def turn_for_instance(instance_id: str, body: TurnRequest):
+    """인스턴스별 SSE 한 턴."""
+    try:
+        orch = MANAGER.get(instance_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"instance not found: {instance_id}")
+
+    history = _instance_mood_history[instance_id]
+
+    def _record(turn: int, mood: dict) -> None:
+        history.append({
+            'turn': int(turn),
+            'valence': float(mood.get('valence', 0.0)),
+            'arousal': float(mood.get('arousal', 0.0)),
+        })
+
+    async def event_generator():
+        async for msg in stream_turn(
+            orch,
+            body.user_input,
+            on_mood_recorded=_record,
+        ):
+            yield msg
+        # done 후 메타 갱신 + state.json 영속.
+        try:
+            last_mood = history[-1] if history else {'valence': 0.0, 'arousal': 0.0}
+            MANAGER.update_metadata(
+                instance_id,
+                turn_number=int(orch.turn_number),
+                last_mood={
+                    'valence': float(last_mood.get('valence', 0.0)),
+                    'arousal': float(last_mood.get('arousal', 0.0)),
+                },
+            )
+            MANAGER.save_state(instance_id)
+        except Exception:
+            # 저장 실패는 응답을 막지 않는다.
+            pass
+
+    return EventSourceResponse(event_generator())
+
+
+@app.post("/api/instances/{instance_id}/reset", status_code=204)
+async def reset_instance(instance_id: str) -> Response:
+    """동일 페르소나 + 동일 jitter_seed 로 결정론적 재생성."""
+    if not MANAGER.exists(instance_id):
+        raise HTTPException(status_code=404, detail=f"instance not found: {instance_id}")
+    MANAGER.reset(instance_id)
+    _instance_mood_history.pop(instance_id, None)
     return Response(status_code=204)
