@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useChat } from './hooks/useChat';
 import { useTheme } from './hooks/useTheme';
+import { useDeepMode } from './hooks/useDeepMode';
 import { useInstances } from './hooks/useInstances';
 import { Chat } from './components/Chat';
 import { StatePanel } from './components/StatePanel';
@@ -10,13 +11,19 @@ import { MarkersPanel } from './components/MarkersPanel';
 import { EmotionPanel } from './components/EmotionPanel';
 import { ActionBadge } from './components/ActionBadge';
 import { ThemeToggle } from './components/ThemeToggle';
+import { DeepModeToggle } from './components/DeepModeToggle';
+import { MatrixDecompositionPanel } from './components/MatrixDecompositionPanel';
+import { EigenvaluePanel } from './components/EigenvaluePanel';
+import { MoodStepPanel } from './components/MoodStepPanel';
+import { DriftStepPanel } from './components/DriftStepPanel';
 import { Gallery } from './components/Gallery';
 import { SpawnModal } from './components/SpawnModal';
 import { WipeConfirmModal } from './components/WipeConfirmModal';
 
 export default function App() {
   const inst = useInstances();
-  const chat = useChat(inst.selectedId);
+  const { deep, toggle: toggleDeep } = useDeepMode();
+  const chat = useChat(inst.selectedId, deep);
   const { theme, toggle } = useTheme();
   const [spawnOpen, setSpawnOpen] = useState(false);
   const [wipeOpen, setWipeOpen] = useState(false);
@@ -71,7 +78,17 @@ export default function App() {
                 ? '왼쪽 갤러리에서 캐릭터를 선택하거나 스폰하세요.'
                 : '메시지를 입력해 대화를 시작하세요. (Enter 전송 / Shift+Enter 줄바꿈)'
             }
-            headerExtra={<ThemeToggle theme={theme} onToggle={toggle} />}
+            headerExtra={
+              <>
+                {deep && isInFlight && (
+                  <span className="mr-2 px-1.5 py-0.5 rounded text-[10px] font-mono bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300">
+                    심층 모드
+                  </span>
+                )}
+                <DeepModeToggle deep={deep} onToggle={toggleDeep} />
+                <ThemeToggle theme={theme} onToggle={toggle} />
+              </>
+            }
           />
         </section>
 
@@ -128,6 +145,24 @@ export default function App() {
                     {server.meta_resource.toFixed(2)}
                   </div>
                 </section>
+              )}
+
+              {deep && (
+                <>
+                  <MatrixDecompositionPanel
+                    decomp={chat.state.lastLowLevelDebug?.matrix_decomp ?? null}
+                  />
+                  <EigenvaluePanel
+                    spectrum={chat.state.lastLowLevelDebug?.eigenvalues ?? null}
+                  />
+                  <MoodStepPanel
+                    step={chat.state.lastLowLevelDebug?.mood_step ?? null}
+                  />
+                  <DriftStepPanel
+                    step={chat.state.lastLowLevelDebug?.drift_step ?? null}
+                    trail={chat.state.driftDeltaTrail}
+                  />
+                </>
               )}
             </>
           )}
