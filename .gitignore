@@ -37,10 +37,20 @@ Thumbs.db
 
 # Local data / runtime
 *.log
-*.sqlite
-*.db
+
+# Legacy single-instance paths (pre Wave 11 / instance manager)
 chroma_db/
 storage_data/
+
+# Instances — track per-character data so users can preserve / share
+# their custom-spawned characters. Only the auto-created _default instance
+# (legacy backward-compat for /api/turn) stays ignored.
+instances/_default/
+# Within tracked instance dirs, ignore Chroma's internal binary cache
+# (rebuilt on demand from the embedding model). Persist only the
+# logical state files (state.json, metadata.json, *.jsonl, *.db).
+instances/*/chroma_db/index/
+instances/*/chroma_db/*.bin
 
 # Secrets
 .env
