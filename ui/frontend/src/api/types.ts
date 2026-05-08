@@ -229,3 +229,57 @@ export type TurnEvent =
   | { type: 'error'; data: ErrorEvent };
 
 export type TurnEventName = TurnEvent['type'];
+
+// ---------------------------------------------------------------------------
+// Wave 14D — JSONL 로그 항목 (인스턴스별 turns/events/drift)
+// ---------------------------------------------------------------------------
+
+export type TurnsLogEntry = {
+  ts: string;
+  turn: number;
+  user_input_len: number;
+  response_len: number;
+  state: Record<string, number>;
+  raw_core_affect: { valence: number; arousal: number };
+  mood: { valence: number; arousal: number };
+  drives_fulfillment: Record<string, number>;
+  drives_max_deficit: number;
+  emotion_valence: number;
+  emotion_arousal: number;
+  emotion_labels: string[];
+  experience_dimensions: Record<string, number>;
+  experience_vector: Record<string, number>;
+  action: 'pass' | 'tone_adjust' | 'regenerate';
+  selected_index: number;
+  marker_match: 'approach' | 'avoid' | 'none';
+  recommended_delay_ms: number;
+  duration_ms: number;
+  llm_calls: number;
+  tokens_input: number;
+  tokens_output: number;
+};
+
+export type EventsLogType =
+  | 'marker_formed'
+  | 'marker_decayed'
+  | 'trigger_fired'
+  | 'reappraisal'
+  | 'fast_path_match'
+  | 'dmn_activity'
+  | 'auto_encode'
+  | 'llm_error';
+
+export type EventsLogEntry = {
+  ts: string;
+  type: string;
+  payload: Record<string, unknown>;
+  turn: number;
+};
+
+export type DriftLogEntry = {
+  ts: string;
+  turn: number;
+  baselines: Record<string, number>;
+  baseline_ema: Record<string, number>;
+  drift_delta_norm: number;
+};
