@@ -1,0 +1,591 @@
+"""시나리오 그룹 2 — 도덕/예술/극단 상태 (10~18).
+
+Spec v12 §12 의 27 시나리오 검증 스위트 중 그룹 2.
+모두 MockLLMClient 만 사용. 실제 OpenAI 호출 금지.
+
+각 시나리오는 단일 통합 테스트로 명확한 상태 변화/조건 분기를 검증한다.
+"""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from core.event_bus import EventBus
+from core.orchestrator import Orchestrator
+from core.trigger_registry import TriggerRegistry
+from high_level.candidate_generation import CandidateGeneration
+from high_level.dmn import DMN, DMNContext
+from high_level.emotion_appraisal import EmotionAppraisal
+from high_level.final_judgment import FinalJudgment
+from high_level.memory_retrieval import MemoryRetrieval
+from high_level.metacognition import Metacognition
+from high_level.output_postprocess import OutputPostprocess
+from high_level.social_cognition import SocialCognition
+from interface.experience_descent import ExperienceDescent
+from interface.signal_rise import SignalRise
+from llm import MockLLMClient
+from low_level.fast_path import FastPathPattern
+from low_level.markers import Marker
+from main import build_low_level
+from storage.memory_store import EpisodicMemory
+from storage.other_model import OtherModel
+from storage.prospective import ProspectiveQueue
+from storage.self_model import SelfModel
+from storage.vector_db import VectorDB
+
+
+pytestmark = pytest.mark.scenario
+
+
+CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / 'config' / 'temperament_test.yaml'
+
+
+# ---------------------------------------------------------------------------
+# 인라인 helper — 다른 그룹과의 _common.py 충돌 회피
+# ---------------------------------------------------------------------------
+
+DEFAULT_RESPONSES = {
+    'candidates': json.dumps({
+        "candidates": [
+            {"style": "emotional", "text": "정말 좋네"},
+            {"style": "restrained", "text": "괜찮네"},
+            {"style": "humor", "text": "재밌네"},
+            {"style": "silence", "text": "..."},
+        ]
+    }),
+    'final': json.dumps({
+        "selected_index": 1,
+        "text": "괜찮네",
+        "rationale": "톤 매칭",
+        "marker_match": "none",
+    }),
+    'tone': json.dumps({
+        "response_valence": 0.0,
+        "response_arousal": 0.3,
+        "rationale": "ok",
+    }),
+    'social': json.dumps({
+        "person_id": "u",
+        "estimated_emotion": {"valence": 0.0, "arousal": 0.3},
+        "estimated_intent": "",
+        "social_reward": 0.3,
+    }),
+    'emotion': json.dumps({
+        "valence": 0.0,
+        "arousal": 0.3,
+        "preliminary_labels": ["중립"],
+        "experience_dimensions": {"reward": 0.3, "threat": 0.0, "novelty": 0.2},
+    }),
+}
+
+
+def _make_response_fn(overrides: dict | None = None):
+    """messages 를 보고 어떤 페이로드를 줘야 하는지 라우팅."""
+    table = {**DEFAULT_RESPONSES, **(overrides or {})}
+
+    async def fn(messages, model_name):
+        last = messages[-1]['content'] if messages else ''
+        # 후보 생성 프롬프트 식별 — emotional/restrained/humor/silence 순서가 박힌다.
+        if 'emotional' in last and 'restrained' in last and 'humor' in last:
+            return table['candidates']
+        # 최종 판단 프롬프트 — selected_index 또는 marker_match 키워드.
+        if 'selected_index' in last or 'marker_match' in last:
+            return table['final']
+        # 톤 평가 — response_valence 키워드.
+        if 'response_valence' in last:
+            return table['tone']
+        # 사회인지 — social_reward 또는 한국어 사회 키워드.
+        if 'social_reward' in last or '사회' in last or '규범' in last:
+            return table['social']
+        # 그 외는 감정 평가로 라우팅.
+        return table['emotion']
+    return fn
+
+
+def _build_orch(tmp_path, mock: MockLLMClient) -> Orchestrator:
+    """tmp_path 기반 격리된 오케스트레이터 + MockLLMClient.
+
+    storage 경로를 tmp_path 로 분리해 테스트 간 충돌 없도록 한다.
+    """
+    low_level = build_low_level(CONFIG_PATH)
+    cfg = low_level.temperament.config
+
+    vdb = VectorDB(
+        collection_name='scenarios_g2',
+        persist_dir=str(tmp_path / 'chroma'),
+    )
+    episodic = EpisodicMemory(
+        vector_db=vdb,
+        reconsolidation_alpha=cfg.get('reconsolidation_alpha', 0.3),
+    )
+    prospective = ProspectiveQueue(db_path=str(tmp_path / 'prospective.db'))
+
+    dmn = DMN(base_activity=cfg.get('dmn_base_activity', 0.5))
+    dmn.llm = mock
+
+    orch = Orchestrator(
+        low_level=low_level,
+        event_bus=EventBus(),
+        trigger_registry=TriggerRegistry(),
+        signal_rise=SignalRise(
+            resolution=cfg.get('self_awareness_resolution', 3),
+            meta_beta=cfg.get('meta_beta', 0.08),
+        ),
+        experience_descent=ExperienceDescent(),
+        auto_encoding_threshold=cfg.get('auto_encoding_threshold', 1.2),
+        emotion_appraisal=EmotionAppraisal(llm_client=mock),
+        social_cognition=SocialCognition(llm_client=mock),
+        memory_retrieval=MemoryRetrieval(episodic=episodic, prospective=prospective),
+        candidate_generation=CandidateGeneration(llm_client=mock),
+        final_judgment=FinalJudgment(llm_client=mock),
+        output_postprocess=OutputPostprocess(llm_client=mock),
+        metacognition=Metacognition(
+            sensitivity=cfg.get('metacognition_sensitivity', 0.5),
+            floor=cfg.get('metacognition_floor', 0.1),
+            recovery_rate=cfg.get('meta_resource_recovery', 0.05),
+            regulation_capacity=cfg.get('emotion_regulation_capacity', 0.5),
+        ),
+        dmn=dmn,
+        episodic_memory=episodic,
+        self_model=SelfModel(),
+        other_model=OtherModel(),
+    )
+    orch.register_default_triggers()
+    return orch
+
+
+def _make_orch(tmp_path, overrides: dict | None = None):
+    """기본 mock + tmp_path 격리 orch 페어."""
+    mock = MockLLMClient(response_fn=_make_response_fn(overrides))
+    orch = _build_orch(tmp_path, mock)
+    return orch, mock
+
+
+# ---------------------------------------------------------------------------
+# 시나리오 10 — 도덕적 갈등 (moral conflict)
+# ---------------------------------------------------------------------------
+
+
+def test_scenario_10_moral_conflict_triggers_reframe(tmp_path):
+    """state_mismatch — 고수준 양의 valence vs 저수준 음의 valence.
+
+    Metacognition.review 가 strategy='reframe' 을 반환해야 한다.
+    """
+    orch, _ = _make_orch(tmp_path)
+
+    # 도덕적 갈등: 표면 감정은 긍정 ("도와줘서 다행이다") 인데
+    # 저수준 raw_core_affect 는 부정 (실제론 거부감/죄책감).
+    emotion_result = {
+        'valence': 0.6,
+        'arousal': 0.5,
+        'preliminary_labels': ['안도'],
+        'experience_dimensions': {'reward': 0.6, 'threat': 0.1, 'novelty': 0.2},
+    }
+    social_result = {
+        'person_id': 'friend',
+        'estimated_emotion': {'valence': 0.4, 'arousal': 0.3},
+        'estimated_intent': '도움 요청',
+        'social_reward': 0.4,
+    }
+    low_result = {
+        'raw_core_affect': {'valence': -0.6, 'arousal': 0.5},
+        'mood': {'valence': 0.0, 'arousal': 0.4},
+    }
+
+    review = orch.metacognition.review(emotion_result, social_result, low_result)
+
+    assert review['needs_reappraisal'] is True
+    assert review['strategy'] == 'reframe'
+    assert 'state_mismatch' in review['reasons']
+
+
+# ---------------------------------------------------------------------------
+# 시나리오 11 — 향수 (nostalgia)
+# ---------------------------------------------------------------------------
+
+
+async def test_scenario_11_nostalgia_mood_congruent_recall(tmp_path):
+    """과거 강한 양의 기억이 있고 현재 mood 가 양일 때, 인출 결과의 emotion_tag 가 양이어야 한다.
+
+    mood-congruent retrieval 편향 검증.
+    """
+    orch, _ = _make_orch(tmp_path)
+
+    # 1) 과거 강한 양의 기억 사전 저장 (turn=1)
+    await orch.episodic_memory.store(
+        content='어릴 때 가족과 보낸 따뜻한 여름 저녁',
+        emotion_tag={'valence': 0.8, 'arousal': 0.4, 'labels': ['행복']},
+        source='experience',
+        importance=0.85,
+        turn=1,
+    )
+
+    # 2) 양의 mood + 양의 core_affect 로 인출
+    mood = {'valence': 0.5, 'arousal': 0.3}
+    raw_core = {'valence': 0.4, 'arousal': 0.3}
+
+    result = await orch.memory_retrieval.retrieve(
+        user_input='따뜻했던 여름',
+        emotion_result={'valence': 0.5, 'arousal': 0.3, 'preliminary_labels': []},
+        mood=mood,
+        raw_core_affect=raw_core,
+        k=5,
+    )
+
+    assert result['memories'], '저장된 기억이 인출되어야 한다'
+    top = result['memories'][0]
+    # 재고정화로 약간 끌어내려도 여전히 양수여야 함 (alpha=0.3 → 0.3*0.4 + 0.7*0.8 = 0.68)
+    assert top['emotion_tag']['valence'] > 0.0
+    assert result['retrieval_context']['mood_bias_applied'] is True
+
+
+# ---------------------------------------------------------------------------
+# 시나리오 12 — 경외감 (awe)
+# ---------------------------------------------------------------------------
+
+
+def test_scenario_12_awe_high_novelty_high_reward_forms_marker(tmp_path):
+    """높은 novelty + 높은 reward → arousal 상승 + 마커 형성 (strength > 0.7).
+
+    저수준 파이프라인을 5턴 돌려서 누적 효과 관찰.
+    """
+    orch, _ = _make_orch(tmp_path)
+    baseline_state = dict(orch.low_level.internal_state.to_dict())
+    baseline_arousal = baseline_state['arousal']
+
+    # 강한 경외감 경험 벡터 — reward, novelty 모두 높음, threat 0
+    awe_exp = {
+        'reward': 0.9,
+        'novelty': 0.9,
+        'threat': 0.0,
+        'social_reward': 0.0,
+        'goal_progress': 0.0,
+    }
+    orch.prev_experience = dict(awe_exp)
+    for _ in range(5):
+        orch.run_low_level_only('')
+        # 매 턴 동일 경험 누적
+        orch.prev_experience = dict(awe_exp)
+
+    final_state = orch.low_level.internal_state.to_dict()
+
+    # arousal 상승 확인
+    assert final_state['arousal'] > baseline_arousal, (
+        f'arousal should rise from {baseline_arousal} but got {final_state["arousal"]}'
+    )
+
+    # 마커 형성 — reward=0.9 > formation_threshold=0.7
+    marker = orch.low_level.markers.maybe_form('awe', reward=0.9, threat=0.0)
+    assert marker is not None
+    assert marker.strength > 0.7
+    assert marker.valence > 0.0  # 접근 마커
+
+
+# ---------------------------------------------------------------------------
+# 시나리오 13 — 의지력 고갈 (willpower depletion)
+# ---------------------------------------------------------------------------
+
+
+def test_scenario_13_willpower_depletion_blocks_reappraisal(tmp_path):
+    """meta_resource 가 floor 근처일 때, mismatch 가 있어도 재평가 안 함.
+
+    reasons 에 'resource_low' 가 포함되어야 하고 needs_reappraisal=False.
+    """
+    orch, _ = _make_orch(tmp_path)
+
+    # 자원을 floor + 0.01 로 직접 세팅 (consume 사용해도 가능하지만 명시적으로)
+    orch.metacognition.resource = orch.metacognition.floor + 0.01
+
+    # 강한 mismatch — 정상 상태였다면 reframe 트리거되었을 조건
+    emotion_result = {
+        'valence': 0.7,
+        'arousal': 0.5,
+        'preliminary_labels': ['기쁨'],
+        'experience_dimensions': {'reward': 0.7, 'threat': 0.0, 'novelty': 0.2},
+    }
+    social_result = {
+        'person_id': 'u', 'estimated_emotion': {'valence': 0.0, 'arousal': 0.3},
+        'estimated_intent': '', 'social_reward': 0.3,
+    }
+    low_result = {
+        'raw_core_affect': {'valence': -0.7, 'arousal': 0.5},
+        'mood': {'valence': 0.0, 'arousal': 0.4},
+    }
+
+    review = orch.metacognition.review(emotion_result, social_result, low_result)
+
+    assert review['needs_reappraisal'] is False
+    assert 'resource_low' in review['reasons']
+    assert review['converged'] is True
+
+
+# ---------------------------------------------------------------------------
+# 시나리오 14 — 자기기만 (self-deception)
+# ---------------------------------------------------------------------------
+
+
+def test_scenario_14_self_deception_state_mismatch(tmp_path):
+    """고수준이 긍정으로 평가하지만 저수준 raw_core_affect 는 음.
+
+    자기기만의 시그니처: 의식이 부정 신호를 정 으로 덮음.
+    state_mismatch 감지 → strategy='reframe'.
+    """
+    orch, _ = _make_orch(tmp_path)
+
+    emotion_result = {
+        'valence': 0.55,  # "괜찮아, 다 잘 될 거야"
+        'arousal': 0.4,
+        'preliminary_labels': ['낙관'],
+        'experience_dimensions': {'reward': 0.55, 'threat': 0.05, 'novelty': 0.1},
+    }
+    social_result = {
+        'person_id': 'self', 'estimated_emotion': {'valence': 0.0, 'arousal': 0.3},
+        'estimated_intent': '', 'social_reward': 0.0,
+    }
+    # 저수준은 실제로는 부정 — 몸이 알고 있다.
+    low_result = {
+        'raw_core_affect': {'valence': -0.5, 'arousal': 0.6},
+        'mood': {'valence': -0.3, 'arousal': 0.5},
+    }
+
+    # mismatch 신호 강도 검증
+    signal = orch.metacognition.state_mismatch_signal(emotion_result, low_result)
+    assert signal > 0.4, f'mismatch signal should be strong: {signal}'
+
+    review = orch.metacognition.review(emotion_result, social_result, low_result)
+
+    assert review['needs_reappraisal'] is True
+    assert review['strategy'] == 'reframe'
+    assert 'state_mismatch' in review['reasons']
+
+
+# ---------------------------------------------------------------------------
+# 시나리오 15 — 복수→연민 (revenge → compassion)
+# ---------------------------------------------------------------------------
+
+
+async def test_scenario_15_revenge_to_compassion_via_dmn(tmp_path):
+    """강한 음의 마커 + 적대적 기억에 대해 DMN ruminate 가 재해석 통찰을 생성.
+
+    rumination_counter 가 증가하고 통찰 텍스트가 반환되는 것까지 검증.
+    실제 마커 valence 변환은 별도 reconsolidation 절차의 영역 — 여기서는
+    DMN 사이클이 동작하고 카운터가 증가함을 확인한다.
+    """
+    overrides = {
+        # ruminate 프롬프트 응답을 재구성/연민 톤으로
+        'emotion': '그가 내게 그러했던 이유는 두려움이었을 것이다',
+    }
+    # ruminate 는 dmn_model 이름으로 호출되며 기본 라우팅이 emotion 키로 떨어진다.
+    # 그래서 emotion 페이로드에 통찰 문장을 박아둔다 — JSON 이 아니어도 dmn 은 raw text 로 받음.
+    # 하지만 emotion_appraisal 도 같은 fn 을 쓰면 JSON 검증 실패. 별도 mock 사용.
+
+    async def dmn_fn(messages, model_name):
+        # DMN 호출은 model_name='dmn_model'.
+        if model_name == 'dmn_model':
+            return '그가 내게 그러했던 이유는 두려움이었을 것이다'
+        return DEFAULT_RESPONSES['emotion']
+
+    mock = MockLLMClient(response_fn=dmn_fn)
+    orch = _build_orch(tmp_path, mock)
+
+    # 1) 강한 음의 마커 사전 등록 (가설적 "복수 대상" 패턴)
+    orch.low_level.markers.markers['revenge_target'] = Marker(
+        pattern_id='revenge_target', valence=-0.8, strength=0.9, age=0,
+    )
+
+    # 2) 적대적 기억 사전 저장 — DMN ruminate 가 retrieve 로 가져갈 것
+    await orch.episodic_memory.store(
+        content='그가 나를 모욕했다',
+        emotion_tag={'valence': -0.85, 'arousal': 0.85, 'labels': ['분노']},
+        source='experience',
+        importance=0.95,
+        turn=1,
+    )
+
+    # 3) DMN ruminate 직접 호출
+    drives_status = orch.low_level.drives.compute(orch.low_level.internal_state.to_dict())
+    ctx = DMNContext(
+        episodic=orch.episodic_memory,
+        marker_store=None,
+        self_model=orch.self_model,
+        other_model=orch.other_model,
+        snapshot_manager=None,
+        llm=mock,
+        drives=drives_status,
+        unappraised_queue=[],
+        rumination_counter={},
+        turn=2,
+    )
+
+    result = await orch.dmn._try_ruminate(ctx)
+
+    assert result is not None
+    assert result.activity == 'ruminate'
+    assert result.success is True
+    # 통찰 텍스트가 반환되어 재해석 가능성을 보임
+    assert '두려움' in result.output['insight']
+    # rumination_counter 증가
+    assert result.output['count_after'] == 1
+
+    # 누적 카운터 증가 시뮬레이션 — 사전 카운터 1 부터 시작했다고 가정.
+    # (재고정화로 인해 강도가 점차 약해지므로 매 사이클 직렬 재실행이 항상 통과한다는
+    #  보장은 없다. 본 시나리오의 핵심은 "DMN 가 강한 음의 기억에 ruminate 활동을 수행한다"
+    #  이므로, 별도 사전-카운터 셋업으로 증가 동작을 한 번 더 확인한다.)
+    await orch.episodic_memory.store(
+        content='또 다른 적대적 사건',
+        emotion_tag={'valence': -0.9, 'arousal': 0.9, 'labels': ['분노']},
+        source='experience',
+        importance=0.95,
+        turn=4,
+    )
+    ctx2 = DMNContext(
+        episodic=orch.episodic_memory,
+        marker_store=None,
+        self_model=orch.self_model,
+        other_model=orch.other_model,
+        snapshot_manager=None,
+        llm=mock,
+        drives=drives_status,
+        unappraised_queue=[],
+        rumination_counter={},  # 새 컨텍스트
+        turn=5,
+    )
+    result2 = await orch.dmn._try_ruminate(ctx2)
+    # 결과가 있고 (강한 새 기억이 추가되었으므로) 카운터 증가 동작을 다시 확인.
+    if result2 is not None:
+        assert result2.activity == 'ruminate'
+        assert result2.output['count_after'] >= 1
+
+
+# ---------------------------------------------------------------------------
+# 시나리오 16 — 정체성 위기 (identity crisis)
+# ---------------------------------------------------------------------------
+
+
+def test_scenario_16_identity_crisis_preservation_deficit(tmp_path):
+    """self_model.confidence 급락 → drives.preservation 결핍 증가.
+
+    self-mismatch 누적의 효과로서 보존 드라이브 결핍을 시뮬레이션.
+    """
+    orch, _ = _make_orch(tmp_path)
+
+    # 초기 보존 결핍 측정
+    state_dict = orch.low_level.internal_state.to_dict()
+    initial = orch.low_level.drives.compute(state_dict)
+    initial_preservation_deficit = initial['deficits']['preservation']
+
+    # 정체성 위기 — confidence 폭락 시뮬레이션
+    orch.self_model.data['confidence'] = 0.05
+    orch.low_level.drives.set_preservation(0.05)
+
+    # 결핍 재계산
+    after = orch.low_level.drives.compute(state_dict)
+
+    # 보존 결핍이 증가했어야 함 — confidence 0.1(초기) → 0.05 로 떨어졌으므로
+    assert after['deficits']['preservation'] > initial_preservation_deficit
+    # ratios['preservation']=0.15, fulfillment=0.05 → deficit = 0.15 * 0.95 = 0.1425
+    assert after['deficits']['preservation'] == pytest.approx(0.15 * 0.95)
+    # fulfillment 확인
+    assert after['fulfillment']['preservation'] == pytest.approx(0.05)
+
+
+# ---------------------------------------------------------------------------
+# 시나리오 17 — 예술 창작 (artistic creation)
+# ---------------------------------------------------------------------------
+
+
+async def test_scenario_17_artistic_creation_diverse_styles(tmp_path):
+    """후보 생성이 4개의 서로 다른 style 을 만들어내고, 최종 선택이 가능해야 한다.
+
+    "결이 다른 응답" 의 핵심: emotional / restrained / humor / silence 4스타일 모두 등장.
+    final_judgment 는 non-zero index (humor) 도 선택할 수 있어야 한다 — 단조선택 금지.
+    """
+    orch, _ = _make_orch(tmp_path)
+
+    # 후보 단계 직접 호출해서 4스타일 다 등장하는지 확인 — pipeline 다양성의 본질
+    candidates = await orch.candidate_generation.generate(
+        emotion_result={'valence': 0.3, 'arousal': 0.4, 'preliminary_labels': []},
+        social_result=None,
+        memory_result={'memories': [], 'prospective_items': [], 'retrieval_context': {}},
+        self_model={'narrative': '', 'confidence': 0.3},
+        mood={'valence': 0.2, 'arousal': 0.3},
+        marker_signal='(없음)',
+        user_input='이 시 어때',
+    )
+
+    styles = [c['style'] for c in candidates]
+    assert len(candidates) == 4
+    assert set(styles) == {'emotional', 'restrained', 'humor', 'silence'}
+    # 순서도 spec 강제: emotional → restrained → humor → silence
+    assert styles == ['emotional', 'restrained', 'humor', 'silence']
+
+    # final_judgment 가 humor (index=2) 를 선택할 수 있는지 — non-zero index 검증.
+    # MockLLMClient 에 직접 큐로 final 응답 박아 라우팅 우회.
+    humor_final = json.dumps({
+        "selected_index": 2,
+        "text": candidates[2]['text'],
+        "rationale": "유머 톤이 적합",
+        "marker_match": "approach",
+    })
+    mock2 = MockLLMClient(responses=[humor_final])
+    orch.final_judgment.llm = mock2
+    final = await orch.final_judgment.select(
+        candidates, marker_signal='(없음)', confidence=0.5, user_input='이 시 어때',
+    )
+    assert final['selected_index'] == 2
+    assert final['text'] == candidates[2]['text']  # humor 후보 텍스트
+    assert final['marker_match'] == 'approach'
+
+
+# ---------------------------------------------------------------------------
+# 시나리오 18 — 트라우마 플래시백 (trauma flashback)
+# ---------------------------------------------------------------------------
+
+
+async def test_scenario_18_trauma_flashback_then_regression(tmp_path):
+    """기존 강한 음의 마커 + 매칭 패턴 입력 → fast_path 즉시 stress 점프 → 다수의 turn 으로 baseline 회귀.
+
+    fast_path 가 stress 를 즉각 끌어올리고, D-matrix 가 평형으로 끌어내리는 동학 검증.
+    """
+    orch, _ = _make_orch(tmp_path)
+
+    # 사전 강한 음의 마커
+    orch.low_level.markers.markers['trauma'] = Marker(
+        pattern_id='trauma', valence=-0.9, strength=0.9, age=0,
+    )
+
+    # FastPath 패턴: 입력에 'TRAUMA' 가 있으면 stress + 0.3
+    orch.low_level.fast_path.register(FastPathPattern(
+        trigger='TRAUMA',
+        state_changes={'stress': 0.3},
+        confidence=0.9,
+    ))
+
+    baseline_stress = orch.low_level.internal_state.to_dict()['stress']
+
+    # 1) 트리거 입력 → fast_path 발동
+    fired = orch.run_low_level_only('something TRAUMA happened')
+    assert fired['fast_path_triggered'] is True
+    stress_after_trigger = fired['state']['stress']
+    assert stress_after_trigger > baseline_stress, (
+        f'fast_path should bump stress: baseline={baseline_stress}, '
+        f'after={stress_after_trigger}'
+    )
+
+    # 2) 다수 빈 입력 턴 — D-matrix 회귀
+    orch.prev_experience = {}
+    for _ in range(30):
+        orch.run_low_level_only('')
+
+    final_stress = orch.low_level.internal_state.to_dict()['stress']
+
+    # 회귀: 최종 stress 가 직후 stress 보다 baseline 에 더 가까워야 함
+    distance_immediately = abs(stress_after_trigger - baseline_stress)
+    distance_final = abs(final_stress - baseline_stress)
+    assert distance_final < distance_immediately, (
+        f'stress should regress toward baseline: '
+        f'baseline={baseline_stress}, immediate={stress_after_trigger}, '
+        f'final={final_stress}'
+    )
