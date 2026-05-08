@@ -331,6 +331,15 @@ class Orchestrator:
             else {'narrative': '', 'confidence': 0.1}
         )
 
+        # ADR-010: 9-dim 저수준 매질 + baseline 을 candidate prompt 로 직접 주입
+        # (정성 라벨로). LLM 이 emotion 2-dim 만 받으면 saturation 을 못 알아채는
+        # 정보 병목을 푼다. spec §3.1 의 "정밀도 손실" 의도를 정성 라벨로 보존.
+        ll_state = low_result.get('state') if isinstance(low_result, dict) else None
+        ll_baselines = (
+            self.low_level.temperament.baselines
+            if (self.low_level and self.low_level.temperament) else None
+        )
+
         if self.candidate_generation is not None:
             try:
                 candidates = await self.candidate_generation.generate(
@@ -342,6 +351,8 @@ class Orchestrator:
                     marker_signal=marker_signal,
                     user_input=user_input,
                     recent_dialogue=list(self.dialogue_buffer),
+                    internal_state=ll_state,
+                    baselines=ll_baselines,
                 )
             except LLMError as exc:
                 candidates = [{'style': 'restrained', 'text': '...'}]
@@ -431,6 +442,8 @@ class Orchestrator:
                         marker_signal=marker_signal,
                         user_input=user_input,
                         recent_dialogue=list(self.dialogue_buffer),
+                        internal_state=ll_state,
+                        baselines=ll_baselines,
                     )
                 except LLMError as exc:
                     if self.logger is not None:

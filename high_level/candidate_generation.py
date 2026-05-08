@@ -26,15 +26,44 @@ _SYSTEM_MESSAGE = (
 )
 
 
+def _intensity_label(value: float, axis: str = "valence") -> str:
+    """수치를 정성 강도 라벨로. axis='valence' [-1, 1], 'arousal'/0to1 [0, 1].
+
+    LLM 이 0.5 와 0.9 를 톤 차이로 인식하도록 강도 앵커를 자연어로 박는다.
+    숫자만으로는 평탄화되어 saturation 이 출력에 안 보임 (audit 후속 — wave15A).
+    """
+    if axis == "valence":
+        v = max(-1.0, min(1.0, value))
+        if v >= 0.7: return "매우 강한 긍정"
+        if v >= 0.45: return "분명한 긍정"
+        if v >= 0.15: return "잔잔한 긍정"
+        if v >= -0.15: return "중립"
+        if v >= -0.45: return "잔잔한 부정"
+        if v >= -0.7: return "분명한 부정"
+        return "매우 강한 부정"
+    # arousal/0to1
+    v = max(0.0, min(1.0, value))
+    if v >= 0.8: return "최고조"
+    if v >= 0.6: return "고조"
+    if v >= 0.4: return "보통"
+    if v >= 0.2: return "차분함"
+    return "거의 없음"
+
+
 def _fmt_emotion(emotion_result: dict | None) -> str:
-    """감정 평가 결과 dict → 짧은 한국어 요약."""
+    """감정 평가 결과 dict → 짧은 한국어 요약 + 강도 라벨."""
     if not emotion_result:
         return "(감정 정보 없음)"
     valence = emotion_result.get('valence', 0.0)
     arousal = emotion_result.get('arousal', 0.0)
     labels = emotion_result.get('preliminary_labels') or []
     label_text = ", ".join(labels) if labels else "라벨 없음"
-    return f"valence={valence:.2f}, arousal={arousal:.2f}, 라벨=[{label_text}]"
+    v_lbl = _intensity_label(valence, "valence")
+    a_lbl = _intensity_label(arousal, "arousal")
+    return (
+        f"valence={valence:.2f} ({v_lbl}), "
+        f"arousal={arousal:.2f} ({a_lbl}), 라벨=[{label_text}]"
+    )
 
 
 def _fmt_social(social_result: dict | None) -> str:
@@ -76,20 +105,77 @@ def _fmt_memory(memory_result: dict | None) -> str:
 
 
 def _fmt_mood(mood: dict | None) -> str:
-    """현재 기분(mood) → 짧은 한국어 요약."""
+    """현재 기분(mood) → 짧은 한국어 요약 + 강도 라벨."""
     if not mood:
         return "(기분 정보 없음)"
     valence = mood.get('valence')
     arousal = mood.get('arousal')
     parts: list[str] = []
     if isinstance(valence, (int, float)):
-        parts.append(f"valence={valence:.2f}")
+        parts.append(f"valence={valence:.2f} ({_intensity_label(valence, 'valence')})")
     if isinstance(arousal, (int, float)):
-        parts.append(f"arousal={arousal:.2f}")
+        parts.append(f"arousal={arousal:.2f} ({_intensity_label(arousal, 'arousal')})")
     label = mood.get('label')
     if label:
         parts.append(f"label={label}")
     return ", ".join(parts) if parts else "(기분 정보 없음)"
+
+
+_INTERNAL_STATE_LABELS_KO = {
+    'reward': '보상감/동기',
+    'patience': '인내·진정',
+    'arousal': '각성',
+    'learning': '학습·열린-사고',
+    'excitation': '흥분',
+    'inhibition': '억제·자제',
+    'stress': '스트레스',
+    'bonding': '유대감',
+    'comfort': '안위',
+}
+
+
+def _state_descriptor(value: float, baseline: float) -> str | None:
+    """state 값을 baseline 대비 정성 라벨로. baseline 근처면 None (생략)."""
+    dev = value - baseline
+    abs_dev = abs(dev)
+    if abs_dev < 0.15:
+        return None
+    # 절댓값으로 강도 결정.
+    if value >= 0.85: lvl = "거의 만점"
+    elif value >= 0.65: lvl = "꽤 높음"
+    elif value >= 0.4: lvl = "다소 높음" if dev > 0 else "다소 낮음"
+    elif value >= 0.15: lvl = "낮은 편"
+    else: lvl = "거의 바닥"
+    direction = "↑" if dev > 0 else "↓"
+    return f"{lvl}{direction}"
+
+
+def _fmt_internal_state(
+    internal_state: dict | None,
+    baselines: dict | None,
+) -> str:
+    """저수준 9 파라미터 → 정성 라벨 요약. baseline 에서 큰 편차만 표시.
+
+    spec §3.1 의 신호 상승 정밀도 손실 의도와 충돌하지 않도록, 숫자는 노출하지
+    않고 정성 라벨만 노출 ("유대감: 거의 만점↑"). 캘리브레이션이 안 된 LLM 이
+    감정 평가만 보고는 saturation 을 못 알아채는 정보 병목을 푼다.
+
+    ADR-010 (layered identity vs 표현력) 참조.
+    """
+    if not internal_state or not baselines:
+        return "(내부 상태 정보 없음)"
+    parts: list[str] = []
+    for key, label in _INTERNAL_STATE_LABELS_KO.items():
+        v = internal_state.get(key)
+        b = baselines.get(key)
+        if not isinstance(v, (int, float)) or not isinstance(b, (int, float)):
+            continue
+        desc = _state_descriptor(float(v), float(b))
+        if desc is not None:
+            parts.append(f"{label} {desc}")
+    if not parts:
+        return "(전반 안정 — baseline 근방)"
+    return "; ".join(parts)
 
 
 def _fmt_recent_dialogue(recent_dialogue: list | None) -> str:
@@ -127,6 +213,8 @@ class CandidateGeneration:
         marker_signal: str,
         user_input: str,
         recent_dialogue: list | None = None,
+        internal_state: dict | None = None,
+        baselines: dict | None = None,
     ) -> list[dict]:
         """후보 N개 생성. 반환: [{'style': str, 'text': str}, ...].
 
@@ -143,6 +231,7 @@ class CandidateGeneration:
         mood_text = _fmt_mood(mood)
         self_narrative = (self_model or {}).get('narrative', '') if isinstance(self_model, dict) else ''
         recent_dialogue_text = _fmt_recent_dialogue(recent_dialogue)
+        internal_state_summary = _fmt_internal_state(internal_state, baselines)
 
         rendered = self.template.render(
             user_input=user_input,
@@ -154,6 +243,7 @@ class CandidateGeneration:
             marker_signal=marker_signal,
             n_candidates=self.n_candidates,
             recent_dialogue=recent_dialogue_text,
+            internal_state_summary=internal_state_summary,
         )
         messages = [
             {"role": "system", "content": _SYSTEM_MESSAGE},

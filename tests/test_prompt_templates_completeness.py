@@ -26,7 +26,7 @@ EMOTION_VARS: dict = {
 
 CANDIDATE_VARS: dict = {
     'user_input': '오늘 어땠어?',
-    'emotion_summary': 'valence=0.30, arousal=0.40, 라벨=[기쁨]',
+    'emotion_summary': 'valence=0.30 (잔잔한 긍정), arousal=0.40 (보통), 라벨=[기쁨]',
     'social_summary': '의도=공감 요청; 상대 v=0.20/a=0.30',
     'memory_summary': '- 어제 좋았다는 발화 (중요도 0.80)',
     'self_narrative': '나는 차분하지만 정 많은 사람이다.',
@@ -34,6 +34,7 @@ CANDIDATE_VARS: dict = {
     'marker_signal': '접근 마커: 부드러운 농담',
     'n_candidates': 4,
     'recent_dialogue': '사람: 어제 영화 봤어\n나: 어떤 영화?',
+    'internal_state_summary': '유대감 다소 높음↑; 안위 잔잔함',
 }
 
 FINAL_VARS: dict = {
@@ -108,10 +109,11 @@ def test_candidate_generation_contains_rendered_vars():
         marker_signal='MARKER_MSIG',
         n_candidates=4,
         recent_dialogue='MARKER_DIALOGUE',
+        internal_state_summary='MARKER_INTERNAL_STATE',
     )
     for marker in ['MARKER_USER_INPUT', 'MARKER_EMOTION', 'MARKER_SOCIAL',
                    'MARKER_MEMORY', 'MARKER_NARRATIVE', 'MARKER_MOOD',
-                   'MARKER_MSIG', 'MARKER_DIALOGUE']:
+                   'MARKER_MSIG', 'MARKER_DIALOGUE', 'MARKER_INTERNAL_STATE']:
         assert marker in out, f"{marker} missing in candidate_generation"
     # n_candidates 는 두 번 등장 (입력 라벨 + "정확히 N 이다" 규칙)
     assert out.count('4') >= 1
