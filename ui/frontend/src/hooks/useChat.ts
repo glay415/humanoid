@@ -1,5 +1,10 @@
-import { useCallback, useReducer, useRef } from 'react';
-import { fetchState, postReset } from '../api/client';
+import { useCallback, useEffect, useReducer, useRef } from 'react';
+import {
+  fetchState,
+  getInstanceState,
+  postReset,
+  resetInstance,
+} from '../api/client';
 import { streamTurn } from '../api/sse';
 import type {
   CandidatesEvent,
@@ -55,7 +60,8 @@ type Action =
   | { type: 'EVENT_DONE'; data: { response: string; turn_number: number } }
   | { type: 'EVENT_ERROR'; data: ErrorEvent }
   | { type: 'TURN_ABORTED' }
-  | { type: 'RESET' };
+  | { type: 'RESET' }
+  | { type: 'INSTANCE_SWITCHED' };
 
 const INITIAL_STATE: AppState = {
   serverState: null,
@@ -122,18 +128,24 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, currentStage: 'idle' };
     case 'RESET':
       return { ...INITIAL_STATE, serverState: state.serverState };
+    case 'INSTANCE_SWITCHED':
+      // Switching instances clears the local message buffer (each instance
+      // owns its own dialogue history server-side) and any in-flight UI.
+      return { ...INITIAL_STATE };
     default:
       return state;
   }
 }
 
-export function useChat() {
+export function useChat(instanceId: string | null) {
   const [state, dispatch] = useReducer(reducer, INITIAL_STATE);
   const abortRef = useRef<AbortController | null>(null);
 
   const refreshState = useCallback(async () => {
     try {
-      const s = await fetchState();
+      const s = instanceId
+        ? await getInstanceState(instanceId)
+        : await fetchState();
       dispatch({ type: 'STATE_LOADED', state: s });
     } catch (err) {
       // Silent — backend may not be up yet during dev.
@@ -143,12 +155,30 @@ export function useChat() {
         data: { stage: 'fetchState', message: String(err) },
       });
     }
-  }, []);
+  }, [instanceId]);
+
+  // When the selected instance changes, reset local message history and
+  // refetch authoritative state for the new instance. If no instance is
+  // selected, just clear local buffers.
+  useEffect(() => {
+    // Cancel any in-flight turn from a previous instance.
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+    }
+    dispatch({ type: 'INSTANCE_SWITCHED' });
+    if (instanceId) {
+      void refreshState();
+    }
+    // refreshState is stable per instanceId via useCallback above.
+  }, [instanceId, refreshState]);
 
   const sendMessage = useCallback(
     async (userInput: string) => {
       const trimmed = userInput.trim();
       if (!trimmed) return;
+      // No instance → composer should already be disabled, but guard anyway.
+      if (!instanceId) return;
 
       // If a turn is in flight, ignore.
       if (abortRef.current) return;
@@ -194,6 +224,7 @@ export function useChat() {
           userInput: trimmed,
           signal: controller.signal,
           onEvent: handleEvent,
+          instanceId,
           onError: (err) => {
             dispatch({
               type: 'EVENT_ERROR',
@@ -209,7 +240,7 @@ export function useChat() {
         dispatch({ type: 'TURN_ABORTED' });
       }
     },
-    [refreshState],
+    [refreshState, instanceId],
   );
 
   const reset = useCallback(async () => {
@@ -218,7 +249,11 @@ export function useChat() {
       abortRef.current = null;
     }
     try {
-      await postReset();
+      if (instanceId) {
+        await resetInstance(instanceId);
+      } else {
+        await postReset();
+      }
     } catch (err) {
       dispatch({
         type: 'EVENT_ERROR',
@@ -227,7 +262,7 @@ export function useChat() {
     }
     dispatch({ type: 'RESET' });
     await refreshState();
-  }, [refreshState]);
+  }, [refreshState, instanceId]);
 
   return {
     state,
