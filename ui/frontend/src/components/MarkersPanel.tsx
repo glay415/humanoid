@@ -6,9 +6,23 @@ type MarkersPanelProps = {
 };
 
 function valenceLabel(v: number): { text: string; color: string } {
-  if (v > 0.05) return { text: '접근', color: 'bg-emerald-100 text-emerald-700 border-emerald-200' };
-  if (v < -0.05) return { text: '회피', color: 'bg-red-100 text-red-700 border-red-200' };
-  return { text: '중립', color: 'bg-ink-100 text-ink-600 border-ink-200' };
+  if (v > 0.05)
+    return {
+      text: '접근',
+      color:
+        'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-900',
+    };
+  if (v < -0.05)
+    return {
+      text: '회피',
+      color:
+        'bg-red-100 text-red-700 border-red-200 dark:bg-red-950/50 dark:text-red-300 dark:border-red-900',
+    };
+  return {
+    text: '중립',
+    color:
+      'bg-ink-100 text-ink-600 border-ink-200 dark:bg-zinc-800 dark:text-zinc-300 dark:border-zinc-700',
+  };
 }
 
 function truncate(s: string, n = 24): string {
@@ -18,12 +32,12 @@ function truncate(s: string, n = 24): string {
 
 export function MarkersPanel({ markers }: MarkersPanelProps) {
   return (
-    <section className="rounded-lg bg-white border border-ink-200 p-4">
-      <h3 className="text-xs uppercase tracking-widest font-mono text-ink-500 mb-3">
+    <section className="rounded-lg bg-white border border-ink-200 dark:bg-zinc-900 dark:border-zinc-800 p-4">
+      <h3 className="text-xs uppercase tracking-widest font-mono text-ink-500 dark:text-zinc-400 mb-3">
         markers
       </h3>
       {markers.length === 0 ? (
-        <p className="text-xs text-ink-400 font-mono">(아직 형성된 마커 없음)</p>
+        <p className="text-xs text-ink-400 dark:text-zinc-500 font-mono">(아직 형성된 마커 없음)</p>
       ) : (
         <ul className="space-y-2 max-h-56 overflow-y-auto scroll-thin pr-1">
           {markers.map((m) => {
@@ -43,18 +57,18 @@ export function MarkersPanel({ markers }: MarkersPanelProps) {
                   {tag.text}
                 </span>
                 <span
-                  className="font-mono text-ink-700 truncate"
+                  className="font-mono text-ink-700 dark:text-zinc-300 truncate"
                   title={m.pattern_id}
                 >
                   {truncate(m.pattern_id, 20)}
                 </span>
-                <div className="flex-1 h-1.5 rounded-full bg-ink-100 overflow-hidden min-w-[40px]">
+                <div className="flex-1 h-1.5 rounded-full bg-ink-100 dark:bg-zinc-800 overflow-hidden min-w-[40px]">
                   <div
-                    className="h-full bg-ink-500 rounded-full"
+                    className="h-full bg-ink-500 dark:bg-zinc-400 rounded-full"
                     style={{ width: `${strength * 100}%` }}
                   />
                 </div>
-                <span className="font-mono text-ink-400 tabular-nums shrink-0">
+                <span className="font-mono text-ink-400 dark:text-zinc-500 tabular-nums shrink-0">
                   {m.age}t
                 </span>
               </li>
