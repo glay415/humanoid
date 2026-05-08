@@ -1,6 +1,15 @@
 """기억 CRUD — 일화/의미/절차/전망 + 재고정화 + 자동 부호화.
 
 재고정화: new_tag = α × core_affect + (1-α) × original_tag
+
+spec §8.7 invariant
+-------------------
+**기분 일치 인출 편향(mood-congruent retrieval bias) 은 해제할 수 없다.**
+``retrieve(query, mood, ...)`` 의 ``mood`` 인자는 항상 vector_db.search 의
+``mood_bias`` 로 전달된다. ``disable_mood_bias`` 같은 우회 옵션은 의도적으로
+존재하지 않는다. 만약 호출자가 ``mood=None`` 또는 빈 dict 를 전달해 편향을
+끄려 시도하면, 내부에서 ``{'valence': 0.0, 'arousal': 0.0}`` 의 중립 mood 로
+강제 보정해 search 에는 반드시 mood_bias 가 흐른다.
 """
 
 from __future__ import annotations
@@ -9,6 +18,10 @@ import json
 from uuid import uuid4
 
 from storage.vector_db import VectorDB
+
+# 중립 mood — None / 빈 dict 가 들어왔을 때 fallback. spec §8.7 위반을 막기
+# 위해 항상 무엇인가는 vector_db.search 에 mood_bias 로 전달.
+_NEUTRAL_MOOD: dict = {'valence': 0.0, 'arousal': 0.0}
 
 
 # 출처 우선순위 — retrieve 재정렬 시 사용. experience > internet > general > imagination.
@@ -66,8 +79,20 @@ class EpisodicMemory:
         1) vector_db.search 에 mood_bias 를 넘겨 2k 후보 확보.
         2) source 우선순위로 재정렬 후 상위 k 선택.
         3) 각 메모리 emotion_tag 재팽창 + 재고정화.
+
+        spec §8.7: ``mood`` 가 None/빈 dict 면 중립 mood 로 강제 보정 — 편향을
+        해제할 수 없다. ``disable_mood_bias`` 같은 우회 인자는 제공하지 않는다.
         """
-        raw = await self.vector_db.search(query, k=k * 2, mood_bias=mood)
+        # spec §8.7 enforcement: mood 가 falsy 거나 valence/arousal 이 빠져 있어도
+        # search 에는 반드시 dict 가 전달된다 (None 으로 끌 수 없음).
+        if not mood or not isinstance(mood, dict):
+            effective_mood = dict(_NEUTRAL_MOOD)
+        else:
+            effective_mood = {
+                'valence': float(mood.get('valence', 0.0)),
+                'arousal': float(mood.get('arousal', 0.0)),
+            }
+        raw = await self.vector_db.search(query, k=k * 2, mood_bias=effective_mood)
         ranked = sorted(
             raw,
             key=lambda m: -SOURCE_PRIORITY.get(m.get("source", "general"), 0),

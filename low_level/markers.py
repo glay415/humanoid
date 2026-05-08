@@ -2,10 +2,27 @@
 
 Damasio의 as-if loop 구현. 패턴(의미적 요약)은 고수준 LLM이 생성하고,
 저수준은 수치(valence, strength)만 관리.
+
+spec §8.2 invariant
+-------------------
+경험 마커는 **고수준이 직접 지울 수 없다**. 마커는 오직 두 경로로 사라진다:
+  1. ``decay_all()`` — strength 가 자연 감쇠로 0 이하가 되면 expired 처리.
+  2. (없음) — 명시적 ``remove()`` API 자체가 존재하지 않는다.
+
+따라서 ``MarkerRegistry`` 에는 의도적으로 ``remove`` / ``clear`` / ``pop``
+함수가 없다. 누군가 우회로 ``registry.markers.pop(pid)`` 를 시도하면
+``markers`` dict 의 raw API 가 통하긴 하지만, 정상 코드 경로에서는 호출
+하지 않으며 lint / 코드 리뷰에서 반려된다.
+
+만약 향후 ``remove`` 가 필요해지더라도 그것은 spec §8.2 위반이므로
+``low_level.spec_invariants.SpecViolation`` 을 raise 하는 trap 으로만
+구현해야 한다.
 """
 
 from __future__ import annotations
 from dataclasses import dataclass, field
+
+from low_level.spec_invariants import SpecViolation
 
 
 @dataclass
@@ -31,7 +48,10 @@ class Marker:
 
 
 class MarkerRegistry:
-    """경험 마커 컬렉션. 형성/감쇠/조회."""
+    """경험 마커 컬렉션. 형성/감쇠/조회.
+
+    spec §8.2: ``remove`` 메서드가 없다 — 마커는 자연 감쇠로만 사라진다.
+    """
 
     def __init__(
         self,
@@ -80,3 +100,23 @@ class MarkerRegistry:
 
     def all_markers(self) -> list[Marker]:
         return list(self.markers.values())
+
+    def remove(self, pattern_id: str) -> None:
+        """spec §8.2: 마커 직접 삭제는 spec 위반 — 항상 SpecViolation.
+
+        decay_all() 의 자연 감쇠만이 제거 경로다. 이 trap 은 향후 누군가
+        실수로 ``registry.remove(pid)`` 를 호출해 invariant 를 우회하지 못하게
+        한다.
+        """
+        raise SpecViolation(
+            f"spec §8.2 — markers cannot be directly removed. "
+            f"only decay_all() (natural strength decay → 0) removes a marker. "
+            f"attempted to remove '{pattern_id}'."
+        )
+
+    def clear(self) -> None:
+        """spec §8.2: 일괄 삭제도 차단."""
+        raise SpecViolation(
+            "spec §8.2 — markers cannot be cleared en masse. "
+            "use decay_all() repeatedly during maintenance instead."
+        )
