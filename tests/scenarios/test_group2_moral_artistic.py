@@ -457,3 +457,135 @@ async def test_scenario_15_revenge_to_compassion_via_dmn(tmp_path):
     if result2 is not None:
         assert result2.activity == 'ruminate'
         assert result2.output['count_after'] >= 1
+
+
+# ---------------------------------------------------------------------------
+# 시나리오 16 — 정체성 위기 (identity crisis)
+# ---------------------------------------------------------------------------
+
+
+def test_scenario_16_identity_crisis_preservation_deficit(tmp_path):
+    """self_model.confidence 급락 → drives.preservation 결핍 증가.
+
+    self-mismatch 누적의 효과로서 보존 드라이브 결핍을 시뮬레이션.
+    """
+    orch, _ = _make_orch(tmp_path)
+
+    # 초기 보존 결핍 측정
+    state_dict = orch.low_level.internal_state.to_dict()
+    initial = orch.low_level.drives.compute(state_dict)
+    initial_preservation_deficit = initial['deficits']['preservation']
+
+    # 정체성 위기 — confidence 폭락 시뮬레이션
+    orch.self_model.data['confidence'] = 0.05
+    orch.low_level.drives.set_preservation(0.05)
+
+    # 결핍 재계산
+    after = orch.low_level.drives.compute(state_dict)
+
+    # 보존 결핍이 증가했어야 함 — confidence 0.1(초기) → 0.05 로 떨어졌으므로
+    assert after['deficits']['preservation'] > initial_preservation_deficit
+    # ratios['preservation']=0.15, fulfillment=0.05 → deficit = 0.15 * 0.95 = 0.1425
+    assert after['deficits']['preservation'] == pytest.approx(0.15 * 0.95)
+    # fulfillment 확인
+    assert after['fulfillment']['preservation'] == pytest.approx(0.05)
+
+
+# ---------------------------------------------------------------------------
+# 시나리오 17 — 예술 창작 (artistic creation)
+# ---------------------------------------------------------------------------
+
+
+async def test_scenario_17_artistic_creation_diverse_styles(tmp_path):
+    """후보 생성이 4개의 서로 다른 style 을 만들어내고, 최종 선택이 가능해야 한다.
+
+    "결이 다른 응답" 의 핵심: emotional / restrained / humor / silence 4스타일 모두 등장.
+    final_judgment 는 non-zero index (humor) 도 선택할 수 있어야 한다 — 단조선택 금지.
+    """
+    orch, _ = _make_orch(tmp_path)
+
+    # 후보 단계 직접 호출해서 4스타일 다 등장하는지 확인 — pipeline 다양성의 본질
+    candidates = await orch.candidate_generation.generate(
+        emotion_result={'valence': 0.3, 'arousal': 0.4, 'preliminary_labels': []},
+        social_result=None,
+        memory_result={'memories': [], 'prospective_items': [], 'retrieval_context': {}},
+        self_model={'narrative': '', 'confidence': 0.3},
+        mood={'valence': 0.2, 'arousal': 0.3},
+        marker_signal='(없음)',
+        user_input='이 시 어때',
+    )
+
+    styles = [c['style'] for c in candidates]
+    assert len(candidates) == 4
+    assert set(styles) == {'emotional', 'restrained', 'humor', 'silence'}
+    # 순서도 spec 강제: emotional → restrained → humor → silence
+    assert styles == ['emotional', 'restrained', 'humor', 'silence']
+
+    # final_judgment 가 humor (index=2) 를 선택할 수 있는지 — non-zero index 검증.
+    # MockLLMClient 에 직접 큐로 final 응답 박아 라우팅 우회.
+    humor_final = json.dumps({
+        "selected_index": 2,
+        "text": candidates[2]['text'],
+        "rationale": "유머 톤이 적합",
+        "marker_match": "approach",
+    })
+    mock2 = MockLLMClient(responses=[humor_final])
+    orch.final_judgment.llm = mock2
+    final = await orch.final_judgment.select(
+        candidates, marker_signal='(없음)', confidence=0.5, user_input='이 시 어때',
+    )
+    assert final['selected_index'] == 2
+    assert final['text'] == candidates[2]['text']  # humor 후보 텍스트
+    assert final['marker_match'] == 'approach'
+
+
+# ---------------------------------------------------------------------------
+# 시나리오 18 — 트라우마 플래시백 (trauma flashback)
+# ---------------------------------------------------------------------------
+
+
+async def test_scenario_18_trauma_flashback_then_regression(tmp_path):
+    """기존 강한 음의 마커 + 매칭 패턴 입력 → fast_path 즉시 stress 점프 → 다수의 turn 으로 baseline 회귀.
+
+    fast_path 가 stress 를 즉각 끌어올리고, D-matrix 가 평형으로 끌어내리는 동학 검증.
+    """
+    orch, _ = _make_orch(tmp_path)
+
+    # 사전 강한 음의 마커
+    orch.low_level.markers.markers['trauma'] = Marker(
+        pattern_id='trauma', valence=-0.9, strength=0.9, age=0,
+    )
+
+    # FastPath 패턴: 입력에 'TRAUMA' 가 있으면 stress + 0.3
+    orch.low_level.fast_path.register(FastPathPattern(
+        trigger='TRAUMA',
+        state_changes={'stress': 0.3},
+        confidence=0.9,
+    ))
+
+    baseline_stress = orch.low_level.internal_state.to_dict()['stress']
+
+    # 1) 트리거 입력 → fast_path 발동
+    fired = orch.run_low_level_only('something TRAUMA happened')
+    assert fired['fast_path_triggered'] is True
+    stress_after_trigger = fired['state']['stress']
+    assert stress_after_trigger > baseline_stress, (
+        f'fast_path should bump stress: baseline={baseline_stress}, '
+        f'after={stress_after_trigger}'
+    )
+
+    # 2) 다수 빈 입력 턴 — D-matrix 회귀
+    orch.prev_experience = {}
+    for _ in range(30):
+        orch.run_low_level_only('')
+
+    final_stress = orch.low_level.internal_state.to_dict()['stress']
+
+    # 회귀: 최종 stress 가 직후 stress 보다 baseline 에 더 가까워야 함
+    distance_immediately = abs(stress_after_trigger - baseline_stress)
+    distance_final = abs(final_stress - baseline_stress)
+    assert distance_final < distance_immediately, (
+        f'stress should regress toward baseline: '
+        f'baseline={baseline_stress}, immediate={stress_after_trigger}, '
+        f'final={final_stress}'
+    )
