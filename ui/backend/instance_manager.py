@@ -24,6 +24,7 @@ from typing import Any
 import yaml
 
 from storage.jitter import apply_jitter
+from storage.logger import InstanceLogger
 from ui.backend import personas as _personas
 from ui.backend.state_serializer import (
     restore_orchestrator,
@@ -121,14 +122,20 @@ class InstanceManager:
     # ------------------------------------------------------------------ build
 
     def _build_orchestrator(self, instance_id: str):
-        """temperament.yaml + storage_root 으로 풀 오케스트레이터 조립."""
+        """temperament.yaml + storage_root 으로 풀 오케스트레이터 조립.
+
+        Wave 14A — InstanceLogger 를 인스턴스 디렉토리 가리키도록 부착.
+        """
         from main import build_full_orchestrator
         llm = self._llm_client_factory() if self._llm_client_factory else None
-        return build_full_orchestrator(
+        orch = build_full_orchestrator(
             config_path=self._temperament_path(instance_id),
             llm_client=llm,
             storage_root=self.instance_dir(instance_id),
         )
+        # 인스턴스별 jsonl 로거를 부착. _default 포함 모든 인스턴스에 적용.
+        orch.logger = InstanceLogger(self.instance_dir(instance_id))
+        return orch
 
     # ------------------------------------------------------------------ spawn
 
@@ -416,7 +423,11 @@ class InstanceManager:
                     # Windows + Chroma 의 sqlite 파일 핸들 잔류 케이스: 두 번째 시도.
                     gc.collect()
                     shutil.rmtree(target, ignore_errors=True)
-        for fname in ('state.json', 'prospective.db', 'markers.db'):
+        for fname in (
+            'state.json', 'prospective.db', 'markers.db',
+            # Wave 14A — JSONL 로그도 같이 비운다.
+            'turns.jsonl', 'events.jsonl', 'drift.jsonl',
+        ):
             fpath = idir / fname
             if fpath.exists():
                 try:
