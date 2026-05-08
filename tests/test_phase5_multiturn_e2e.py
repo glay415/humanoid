@@ -435,3 +435,227 @@ async def test_meta_resource_depletes_under_repeated_reappraisal_then_recovers_i
         f"정비로 자원이 회복되지 않음: drain={after_drain}, recovery={after_recovery}"
     )
 
+
+# ---------------------------------------------------------------------------
+# 7. evaluate_triggers — drive_deficit_high 가 발동
+# ---------------------------------------------------------------------------
+
+
+def test_evaluate_triggers_after_high_drive_deficit_includes_drive_deficit_high(
+    tmp_path, mock_llm
+):
+    """드라이브 결핍을 강제로 높인 뒤 evaluate_triggers 호출 → 'drive_deficit_high' 포함.
+
+    test config 의 drive_ratios 는 모두 ≤ 0.25 라 자연 max_deficit 은 0.25 ≤ 0.6 → 절대 안 발동.
+    드라이브 비율을 직접 1.0 으로 올려서 deficit > 0.6 을 만들고 검증한다.
+    """
+    orch = _make_orch(tmp_path, mock_llm, register_triggers=True)
+    # bonding 비율을 1.0 으로 올리고 bonding state 를 0 으로 내려 deficit = 1.0 × (1-0) = 1.0
+    orch.low_level.drives.ratios = dict(orch.low_level.drives.ratios)
+    orch.low_level.drives.ratios['bonding'] = 1.0
+    bonding_idx = orch.low_level.internal_state.PARAMS.index('bonding')
+    orch.low_level.internal_state.state[bonding_idx] = 0.0
+
+    fired = orch.evaluate_triggers(idle_turns=0)
+    fired_names = [t.name for t in fired]
+    assert 'drive_deficit_high' in fired_names, (
+        f"drive_deficit_high 가 발동 목록에 없음: {fired_names}"
+    )
+    # INTERNAL 카테고리여야 함.
+    fired_drive = next(t for t in fired if t.name == 'drive_deficit_high')
+    assert fired_drive.category == TriggerCategory.INTERNAL
+
+
+# ---------------------------------------------------------------------------
+# 8. evaluate_triggers — idle_medium 발동 (TEMPORAL)
+# ---------------------------------------------------------------------------
+
+
+def test_evaluate_triggers_after_idle_includes_idle_temporal(tmp_path, mock_llm):
+    """idle_turns >= 10 이면 idle_medium (TEMPORAL) 발동."""
+    orch = _make_orch(tmp_path, mock_llm, register_triggers=True)
+    fired = orch.evaluate_triggers(idle_turns=15)
+    fired_names = [t.name for t in fired]
+    # idle_medium (≥10) + idle_short (≥3) 둘 다 발동.
+    assert 'idle_medium' in fired_names
+    assert 'idle_short' in fired_names
+    fired_med = next(t for t in fired if t.name == 'idle_medium')
+    assert fired_med.category == TriggerCategory.TEMPORAL
+
+
+# ---------------------------------------------------------------------------
+# 9. 마커 신호: 형성 → 정비 다회 → 변화 확인
+# ---------------------------------------------------------------------------
+
+
+async def test_marker_signal_changes_across_turns_when_marker_formed_then_decayed(
+    tmp_path, mock_llm
+):
+    """마커 사전 등록 → signal_rise.generate_marker_signal 첫 호출은 '접근/회피' 라벨,
+    정비 50턴 후엔 (감쇠로 인해) 라벨이 바뀌거나 마커가 사라진다."""
+    orch = _make_orch(tmp_path, mock_llm)
+    # 마커 형성 — 양의 valence (접근), 강도 0.5
+    orch.low_level.markers.markers['m_test'] = Marker(
+        pattern_id='m_test', valence=0.6, strength=0.5, age=0,
+    )
+
+    initial_signal = orch.signal_rise.generate_marker_signal(
+        list(orch.low_level.markers.markers.values())
+    )
+    assert "접근" in initial_signal or "회피" in initial_signal, (
+        f"형성 직후 마커 신호에 접근/회피 라벨이 없음: {initial_signal!r}"
+    )
+
+    # 정비 50턴 — 마커 strength 가 충분히 감쇠.
+    # decay rate = 0.05, resistance = min(0.5, 0.9) = 0.5 → effective = 0.025/턴.
+    # 50턴이면 약 1.25 만큼 감쇠 시도되지만 내부에서 strength 가 줄어들 때마다 resistance 도
+    # 줄어들어 가속 → 50턴이면 strength <= 0 으로 만료.
+    for _ in range(50):
+        await orch.process_maintenance_turn()
+
+    after_signal = orch.signal_rise.generate_marker_signal(
+        list(orch.low_level.markers.markers.values())
+    )
+    # 감쇠가 충분히 진행되었으면 마커가 expire 되어 "(관련 경험 마커 없음)" 이거나,
+    # 강도 라벨이 더 낮은 수준으로 떨어진 상태.
+    assert after_signal != initial_signal, (
+        f"마커 신호가 50턴 정비 후에도 변하지 않음. 감쇠가 작동하지 않는다는 뜻. "
+        f"initial={initial_signal!r}, after={after_signal!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 10. 대화 5턴에 걸쳐 mood 가 누적/표류 — SSE state holder 시나리오
+# ---------------------------------------------------------------------------
+
+
+async def test_mood_history_persists_across_turn_types(tmp_path, mock_llm):
+    """대화 5턴 동안 emotion_base.mood 시퀀스를 추적 — 매 턴마다 값이 갱신된다.
+
+    SSE 같은 외부 클라이언트가 매 턴 후 orchestrator.low_level.emotion_base.mood 를
+    조회한다는 시나리오. mood 는 leaky integral 이므로 갱신될 때마다 값이 변한다.
+    핵심: 5턴 모두 mood snapshot 이 비어있지 않고 매 턴마다 값이 변한다.
+    """
+    orch = _make_orch(tmp_path, mock_llm)
+    # 강한 prev_experience 프라이밍 — baseline stress 효과를 상쇄.
+    orch.prev_experience = {
+        'reward': 0.95, 'novelty': 0.4, 'threat': 0.0,
+        'social_reward': 0.7, 'goal_progress': 0.5,
+    }
+    mock_llm.responses = sum(
+        (_conversation_responses(valence=0.7, arousal=0.5) for _ in range(5)),
+        []
+    )
+
+    mood_history: list[dict] = []
+    for i in range(5):
+        await orch.process_conversation_turn(f"턴 {i}")
+        # 매 턴 직후 외부에서 mood 조회 (SSE 가 하는 것과 동일).
+        mood_history.append(dict(orch.low_level.emotion_base.mood))
+
+    assert len(mood_history) == 5
+    # 모든 mood 스냅샷에 valence/arousal 키 존재.
+    for snap in mood_history:
+        assert 'valence' in snap and 'arousal' in snap
+
+    # 매 턴 mood 가 실제로 갱신됨 (snapshot 들이 서로 다르다).
+    valences = [m['valence'] for m in mood_history]
+    arousals = [m['arousal'] for m in mood_history]
+    assert len(set(round(v, 6) for v in valences)) >= 4, (
+        f"5턴 동안 valence snapshot 이 거의 같음 (갱신 누락): {valences}"
+    )
+    assert len(set(round(a, 6) for a in arousals)) >= 3, (
+        f"5턴 동안 arousal snapshot 이 거의 같음 (갱신 누락): {arousals}"
+    )
+    # 강한 보상 자극이 5턴 누적되면 마지막 mood.valence 는 첫 mood 보다 높아야 한다.
+    assert valences[-1] > valences[0], (
+        f"강한 보상 5턴 후 mood.valence 가 누적되지 않음: {valences}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 11. Phase 5 통합 후에도 대화 턴이 모든 키를 채운다
+# ---------------------------------------------------------------------------
+
+
+async def test_full_conversation_turn_emits_response_field_after_phase5_changes(
+    tmp_path, mock_llm
+):
+    """Phase 5 통합 후에도 happy path 대화 턴이 정확한 키 셋을 반환하는지 회귀 게이트."""
+    orch = _make_orch(tmp_path, mock_llm)
+    mock_llm.responses = _conversation_responses(valence=0.3, arousal=0.5)
+
+    result = await orch.process_conversation_turn("안녕")
+
+    expected_keys = {
+        'response', 'action', 'tone_eval', 'recommended_delay_ms',
+        'low_level', 'emotion', 'experience_vector', 'turn_number',
+    }
+    assert set(result.keys()) == expected_keys
+    assert isinstance(result['response'], str) and result['response']
+    assert result['action'] in {'pass', 'tone_adjust', 'regenerate'}
+    assert isinstance(result['recommended_delay_ms'], int)
+    assert result['turn_number'] == 1
+    assert isinstance(result['low_level'], dict)
+    assert 'raw_core_affect' in result['low_level']
+    assert 'valence' in result['emotion']
+    assert {'reward', 'threat', 'novelty', 'social_reward', 'goal_progress'}.issubset(
+        result['experience_vector'].keys()
+    )
+
+
+# ---------------------------------------------------------------------------
+# 12. DMN unappraised_queue — 수동 push 후 소진 검증
+# ---------------------------------------------------------------------------
+
+
+async def test_dmn_unappraised_queue_drains_after_emotion_failure(tmp_path, mock_llm):
+    """현재 orchestrator 는 emotion 실패 시 dmn.unappraised_queue 에 자동으로 push 하지 않는다.
+
+    이 테스트는 두 가지 동작을 분리해서 검증한다:
+      A) emotion_appraisal.evaluate 가 LLMError 를 던져도 fallback 으로 대화 턴이 완료된다.
+      B) unappraised_queue 에 항목을 수동으로 push 하면 process_dmn_turn 의 첫 활동인
+         UNAPPRAISED_REPROCESS 가 큐를 1건 pop 하고 'unappraised_reprocess' 활동을 반환한다.
+
+    Note: 자동 push 는 미구현 — 추후 orchestrator 가 fallback 시 dmn.unappraised_queue 에
+    user_input 을 push 하면 (A)+(B) 가 자연스럽게 연결될 것. 본 테스트는 invariant 만 게이트한다.
+    """
+    # ─ A: emotion fallback 검증 ─
+    # mock_llm.responses 에 emotion 자리만 깨진 JSON, 나머지는 정상.
+    mock_llm.responses = [
+        "this is not json",  # emotion → LLMError → fallback
+        _candidates_payload(),
+        _final_payload(),
+        _tone_payload(),
+    ]
+
+    # 진짜 DMN 인스턴스 — unappraised_queue 가 list 여야 함.
+    from high_level.dmn import DMN
+    real_dmn = DMN(base_activity=0.5)
+    real_dmn.llm = mock_llm
+
+    orch = _make_orch(tmp_path, mock_llm, dmn=real_dmn)
+
+    result = await orch.process_conversation_turn("음...")
+    assert result['response']  # fallback 으로도 응답은 생성됨
+    # 자동 push 가 미구현이므로 이 시점엔 큐가 비어 있어야 한다.
+    assert real_dmn.unappraised_queue == [], (
+        "현재 orchestrator 는 emotion fallback 시 dmn.unappraised_queue 에 자동 push 하지 않음. "
+        "이 invariant 가 깨지면 본 테스트의 (B) 단계도 재설계가 필요."
+    )
+
+    # ─ B: 수동 push 후 process_dmn_turn 이 큐를 소진하는지 검증 ─
+    real_dmn.unappraised_queue.append({
+        'user_input': "재평가 필요한 입력",
+        'turn_number': result['turn_number'],
+    })
+
+    dmn_result = await orch.process_dmn_turn()
+    assert dmn_result['activity'] == 'unappraised_reprocess', (
+        f"DMN 이 unappraised_reprocess 를 반환하지 않음: {dmn_result}"
+    )
+    assert dmn_result['success'] is True
+    # 큐가 1 → 0 으로 비워졌는지.
+    assert real_dmn.unappraised_queue == [], (
+        f"unappraised_queue 가 소진되지 않음: {real_dmn.unappraised_queue!r}"
+    )
