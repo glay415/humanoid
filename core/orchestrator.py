@@ -726,9 +726,12 @@ class Orchestrator:
             k: float(v)
             for k, v in (emotion_result.get('experience_dimensions') or {}).items()
         }
-        exp_vec = {
-            k: float(v) for k, v in (experience_vector or {}).items()
-        }
+        # experience_vector 는 'extensions': {} 같은 비-스칼라 키도 들고 있을 수
+        # 있다. 평탄화 시 numeric 만 통과시킨다.
+        exp_vec: dict[str, float] = {}
+        for k, v in (experience_vector or {}).items():
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                exp_vec[k] = float(v)
         labels = list(emotion_result.get('preliminary_labels') or [])
         entry = TurnLogEntry(
             ts=_iso_now(),

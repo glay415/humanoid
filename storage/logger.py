@@ -20,14 +20,23 @@
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
-from typing import Iterable
 
 from storage.log_schemas import DriftLogEntry, EventLogEntry, TurnLogEntry
 
 
 class InstanceLogger:
-    """인스턴스별 JSONL 로거. instance_dir 하나당 1 인스턴스."""
+    """인스턴스별 JSONL 로거. instance_dir 하나당 1 인스턴스.
+
+    같은 instance_dir 을 여러 logger 가 공유할 수도 있으므로 (예: 동일 path 로
+    두 번 instantiate), per-path threading.Lock 을 클래스 단에서 관리해
+    동시 write 의 line 단위 atomicity 를 보장한다.
+    """
+
+    # path → Lock. 서로 다른 logger 인스턴스라도 동일 path 면 같은 lock 공유.
+    _PATH_LOCKS: dict[str, threading.Lock] = {}
+    _PATH_LOCKS_GUARD: threading.Lock = threading.Lock()
 
     def __init__(self, instance_dir: Path | str):
         self.instance_dir = Path(instance_dir)
@@ -35,6 +44,16 @@ class InstanceLogger:
         self.turns_path = self.instance_dir / 'turns.jsonl'
         self.events_path = self.instance_dir / 'events.jsonl'
         self.drift_path = self.instance_dir / 'drift.jsonl'
+
+    @classmethod
+    def _lock_for(cls, path: Path) -> threading.Lock:
+        key = str(path.resolve())
+        with cls._PATH_LOCKS_GUARD:
+            lk = cls._PATH_LOCKS.get(key)
+            if lk is None:
+                lk = threading.Lock()
+                cls._PATH_LOCKS[key] = lk
+            return lk
 
     # ------------------------------------------------------------------ write
 
@@ -47,11 +66,13 @@ class InstanceLogger:
     def log_drift(self, entry: DriftLogEntry) -> None:
         self._append(self.drift_path, entry.model_dump_json())
 
-    @staticmethod
-    def _append(path: Path, line: str) -> None:
+    @classmethod
+    def _append(cls, path: Path, line: str) -> None:
+        # path-scoped lock 으로 동시 write 의 line 단위 atomicity 보장.
         # 매 호출마다 open/close — 핸들 누적 회피.
-        with path.open('a', encoding='utf-8') as f:
-            f.write(line + '\n')
+        with cls._lock_for(path):
+            with path.open('a', encoding='utf-8') as f:
+                f.write(line + '\n')
 
     # ------------------------------------------------------------------ read
 
