@@ -295,3 +295,143 @@ async def test_conversation_then_dmn_then_conversation(tmp_path, mock_llm):
     assert r3['response']
 
 
+# ---------------------------------------------------------------------------
+# 4. 재평가 루프 — depth 3 도달
+# ---------------------------------------------------------------------------
+
+
+async def test_reappraisal_loop_runs_at_most_three_times_in_one_turn(
+    tmp_path, mock_llm
+):
+    """metacognition.review 가 매번 needs_reappraisal=True 라도 reappraise 는 정확히 3회."""
+    orch = _make_orch(tmp_path, mock_llm)
+
+    # review stub — 항상 True (반복 횟수 추적용).
+    review_calls = {'n': 0}
+
+    def stub_review(emotion_result, social_result, low_result, prev_iterations=0):
+        review_calls['n'] += 1
+        return {
+            'needs_reappraisal': True,
+            'iterations': prev_iterations + 1,
+            'strategy': 'reframe',
+            'reasons': ['stub_force_reappraise'],
+            'converged': False,
+        }
+
+    orch.metacognition.review = stub_review
+
+    # reappraise stub — 호출마다 카운터.
+    reappraise_calls = {'n': 0}
+
+    async def stub_reappraise(prev_result, strategy, low_result, user_input):
+        reappraise_calls['n'] += 1
+        return {
+            **prev_result,
+            'preliminary_labels': [f'after_reappraisal_{reappraise_calls["n"]}'],
+        }
+
+    orch.emotion_appraisal.reappraise = stub_reappraise
+
+    mock_llm.responses = _conversation_responses(valence=0.1, arousal=0.4)
+
+    result = await orch.process_conversation_turn("그저 그래")
+
+    # 재평가는 정확히 3회 — depth limit (orchestrator.py L203 `while iterations < 3`)
+    assert reappraise_calls['n'] == 3, (
+        f"reappraise 호출 횟수 mismatch: {reappraise_calls['n']} (기대: 3)"
+    )
+    # review 는 4번째 호출에서 break 가 일어나지 않음 — 루프가 iterations < 3 로 종료.
+    # 즉 review 는 정확히 3번 호출 (iter 0,1,2 에서 호출되고 iter 3 에선 while 조건이 거짓).
+    assert review_calls['n'] == 3, (
+        f"review 호출 횟수 mismatch: {review_calls['n']} (기대: 3)"
+    )
+    assert result['response']
+    assert result['turn_number'] == 1
+
+
+# ---------------------------------------------------------------------------
+# 5. 재평가 루프 — 첫 review 가 converged → reappraise 호출 안 됨
+# ---------------------------------------------------------------------------
+
+
+async def test_reappraisal_short_circuits_when_first_review_says_converged(
+    tmp_path, mock_llm
+):
+    """review 가 needs_reappraisal=False 를 반환하면 reappraise 는 호출되지 않는다."""
+    orch = _make_orch(tmp_path, mock_llm)
+
+    def stub_review(emotion_result, social_result, low_result, prev_iterations=0):
+        return {
+            'needs_reappraisal': False,
+            'iterations': 0,
+            'strategy': None,
+            'reasons': [],
+            'converged': True,
+        }
+
+    orch.metacognition.review = stub_review
+
+    reappraise_calls = {'n': 0}
+
+    async def stub_reappraise(prev_result, strategy, low_result, user_input):
+        reappraise_calls['n'] += 1
+        return prev_result
+
+    orch.emotion_appraisal.reappraise = stub_reappraise
+
+    mock_llm.responses = _conversation_responses(valence=0.1)
+
+    await orch.process_conversation_turn("괜찮아")
+    assert reappraise_calls['n'] == 0
+
+
+# ---------------------------------------------------------------------------
+# 6. 재평가 반복 → 자원 고갈 → 정비 회복
+# ---------------------------------------------------------------------------
+
+
+async def test_meta_resource_depletes_under_repeated_reappraisal_then_recovers_in_maintenance(
+    tmp_path, mock_llm
+):
+    """매 턴 3회 강제 재평가 → 자원이 명확히 감소. 이후 정비 5턴으로 회복."""
+    orch = _make_orch(tmp_path, mock_llm)
+
+    # review stub — 매 턴 3회 reappraise 강제 (depth limit 내에서 항상 True).
+    def stub_review(emotion_result, social_result, low_result, prev_iterations=0):
+        return {
+            'needs_reappraisal': True,
+            'iterations': prev_iterations + 1,
+            'strategy': 'reframe',
+            'reasons': ['force'],
+            'converged': False,
+        }
+    orch.metacognition.review = stub_review
+
+    async def stub_reappraise(prev_result, strategy, low_result, user_input):
+        return prev_result
+    orch.emotion_appraisal.reappraise = stub_reappraise
+
+    # 대화 3턴분 LLM 응답.
+    mock_llm.responses = (
+        _conversation_responses() + _conversation_responses() + _conversation_responses()
+    )
+
+    initial_resource = orch.metacognition.resource
+    for utt in ("a", "b", "c"):
+        await orch.process_conversation_turn(utt)
+    after_drain = orch.metacognition.resource
+    # consume(0.05) × 3 턴 = 0.15 감소 (재평가 자체가 자원을 추가 소모하지는 않음 —
+    # orchestrator 가 직접 소비하는 건 턴 끝의 0.05 한 번뿐). 그래도 단조 감소.
+    assert after_drain < initial_resource, (
+        f"자원이 감소하지 않음: {initial_resource} → {after_drain}"
+    )
+
+    # 정비 5턴 — recovery_rate 0.05 × 5 = 0.25 회복 (단, 1.0 cap).
+    for _ in range(5):
+        await orch.process_maintenance_turn()
+    after_recovery = orch.metacognition.resource
+    assert after_recovery > after_drain, (
+        f"정비로 자원이 회복되지 않음: drain={after_drain}, recovery={after_recovery}"
+    )
+
