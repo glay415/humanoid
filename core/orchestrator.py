@@ -381,6 +381,35 @@ class Orchestrator:
         }
 
     # ------------------------------------------------------------------
+    # Phase 5: 정비 턴 (spec §9)
+    # ------------------------------------------------------------------
+    async def process_maintenance_turn(self) -> dict:
+        """정비 턴 (spec §9) — LLM 호출 없이 저수준 감쇠 + 메타 자원 회복."""
+        self.turn_number += 1
+        self.current_turn_type = TurnType.MAINTENANCE
+
+        # 저수준 파이프라인을 빈 입력으로 실행 (감쇠/표류 진행)
+        low_result = self.low_level.run('', {}) if self.low_level else None
+
+        # 마커 감쇠 (정비 사이클의 핵심)
+        expired_markers: list[str] = []
+        if self.low_level is not None and self.low_level.markers is not None:
+            expired_markers = self.low_level.markers.decay_all()
+
+        # 메타 자원 회복
+        if self.metacognition is not None:
+            self.metacognition.recover()
+
+        return {
+            'turn_number': self.turn_number,
+            'low_level': low_result,
+            'expired_markers': expired_markers,
+            'meta_resource': (
+                self.metacognition.resource if self.metacognition else None
+            ),
+        }
+
+    # ------------------------------------------------------------------
     # Phase 5: 트리거 레지스트리 wiring (spec §1.2)
     # ------------------------------------------------------------------
     def register_default_triggers(self) -> None:
