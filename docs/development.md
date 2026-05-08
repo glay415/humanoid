@@ -69,11 +69,52 @@ tests: cover trigger evaluation, reappraisal depth limit, dmn/maintenance turn p
 
 `git log --oneline | grep "Merge wave"` 로 모든 wave 경계를 한눈에 본다.
 
+## Branches & releases (ADR-008)
+
+두 트랙 분리:
+
+| 브랜치 | 역할 |
+|---|---|
+| `main` | 작업 트렁크. 모든 wave 머지 대상. `pytest -q` 그린 유지. GitHub default branch (PR base). |
+| `release` | 안정 트랙. main 의 검증된 commit 만 fast-forward. 모든 SemVer 태그가 여기 위에. 외부 의존자가 reference. |
+
+릴리스 절차 (wave 머지 + 검증 + 사용자 confirm 후):
+
+```bash
+git checkout release
+git merge --ff-only main
+git tag -a vX.Y.Z -m "vX.Y.Z — short summary"
+git push origin release vX.Y.Z
+git checkout main  # 작업 복귀
+```
+
+CHANGELOG 도 같은 commit 흐름 안에서:
+
+1. `[Unreleased]` 섹션의 항목들을 `[X.Y.Z] — YYYY-MM-DD` 헤더로 promote.
+2. 새 빈 `[Unreleased]` 섹션을 맨 위에 추가.
+3. main 에 commit 후 release 로 ff.
+
+### SemVer 룰
+
+`MAJOR.MINOR.PATCH` (https://semver.org/spec/v2.0.0.html):
+- **MAJOR**: 기존 API / 스키마 / 저장 포맷 호환성 깨짐 (예: `/api/turn` 페이로드 변경).
+- **MINOR**: backward-compat 기능 추가 (예: 새 endpoint, 새 schema 필드, 새 wave 기능).
+- **PATCH**: backward-compat 버그 fix.
+
+**Pre-1.0 (현재 0.x)**: MINOR 가 breaking 가능. CHANGELOG 의 해당 버전 섹션에 명시. 1.0.0 이후 strict.
+
+### 현재 태그
+
+- `v0.1.0` (2026-05-08): Phases 1-5 + UI + 27 시나리오 + gpt-5.5 + humanize. 480 + 1 skip + 1 xfail.
+- `v0.2.0` (2026-05-08): Wave 11 — instance management + persona catalog + frontend gallery + docs handoff. 513 + 1 skip + 1 xfail.
+
+다음 promotion 후보: Phase 6 (W 행렬 실 LLM calibration) 또는 DMN.unappraised_queue 자동 통합.
+
 ## Testing
 
 | Command | Coverage |
 |---|---|
-| `pytest tests/ -q` | 전체 (~100s, 480 + 1 skip + 1 xfail baseline) |
+| `pytest tests/ -q` | 전체 (~136s, 513 + 1 skip + 1 xfail baseline) |
 | `pytest tests/scenarios/ -q` 또는 `pytest -m scenario -q` | spec §12 시나리오 27 종 (~17s) |
 | `pytest tests/test_lifecycle*.py -q` | 1000-turn long-run 시뮬레이션 (~30s) |
 | `pytest tests/test_w_*.py -q` | W matrix 안정성 invariants + sensitivity |

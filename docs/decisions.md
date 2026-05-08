@@ -67,7 +67,7 @@
 
 **Consequences**: 한 백엔드가 다수의 페르소나 동시 호스팅. 디스크 사용량은 인스턴스 수에 선형. ChromaDB 임베딩 모델 (~80MB) 은 인스턴스 간 공유 (인스턴스마다 Chroma client 생성하지만 임베딩 모델은 프로세스 내 캐시). 단점: 인스턴스 100 개 같은 극단 케이스에서 sqlite 파일 핸들 / Chroma 컬렉션 메모리 footprint 모니터 필요.
 
-**Status**: in progress (Wave 11). <!-- TODO(post-wave11-merge): merge commit 해시, 단일/멀티 경로 통합 일정 명시. -->
+**Status**: accepted (Wave 11 merged at `034b6c4`). 단일/멀티 경로 통합은 추후 ADR — 현재는 legacy `_default` 인스턴스가 자동 생성되어 기존 라우트 backward-compat.
 
 ## ADR-007 (2026-05-08): Persona catalog with jitter for randomness (Wave 11 in progress)
 
@@ -77,7 +77,27 @@
 
 **Consequences**: 예측 가능한 변동성. 새 페르소나 추가가 yaml 한 파일. seed 를 metadata 에 저장해 테스트 재현 / 디버그 가능. 단점: 페르소나간 경계가 baseline 변동 폭 안에서 흐려질 수 있음 (jitter 0.05 vs 페르소나 간 차이 ~0.2 라면 문제 없음, ~0.06 이면 occlusion). 추가 검증 필요.
 
-**Status**: in progress (Wave 11). <!-- TODO(post-wave11-merge): 5 페르소나 정확 id 목록 + jitter 가 시나리오 테스트와 충돌 없는지 검증. -->
+**Status**: accepted (Wave 11 merged at `034b6c4`). 5 페르소나: `introvert_thoughtful`, `extrovert_warm`, `sensitive_empathic`, `steady_analytical`, `playful_companion` (`config/personas/*.yaml`). jitter 는 baselines `±0.1 × jitter` (default 0.3 → ±0.03) + drive_ratios `±0.05 × jitter` 후 합 1.0 재정규화. seed 는 metadata 에 보존 (재현 가능). 27 시나리오 테스트는 default temperament 기반이라 영향 없음.
+
+## ADR-008 (2026-05-08): Branch + SemVer release policy
+
+**Context**: 작업 트렁크와 안정 트랙을 분리하지 않으면 "지금 main 이 깨졌나?" 와 "지금 외부 의존자가 쓰는 안정판은 무엇인가?" 가 섞인다. Wave 단위 작업이 main 에 직접 들어가는 상황에서 외부 reference point 가 없다.
+
+**Decision**:
+- `main` = 작업 트렁크. 모든 wave 가 머지. `pytest -q` 그린 유지.
+- `release` = 안정 트랙. main 의 검증된 commit 만 fast-forward. 외부 / 사용자 reference.
+- 태그는 `release` 위에 SemVer (`vMAJOR.MINOR.PATCH`).
+- 첫 태그 `v0.1.0` (2026-05-08, 480 + 1 skip + 1 xfail, gpt-5.5, humanize, UI dark mode 시점).
+- Pre-1.0 (0.x): MINOR 가 breaking 가능 — `CHANGELOG.md` 에 명시. 1.0 이후 strict SemVer.
+- 매 release 시점에 `CHANGELOG.md` 의 `[Unreleased]` 를 `[X.Y.Z]` 헤더로 promote 하고 새 `[Unreleased]` 추가.
+- 워크플로:
+  1. `wave<N>/<topic>` 작업 → main 머지 → `pytest -q` + 수동 smoke + 사용자 확인.
+  2. 안정 시점에 `git checkout release && git merge --ff-only main && git tag -a vX.Y.Z -m "..."` → `git push origin release vX.Y.Z`.
+  3. CHANGELOG `[Unreleased]` → `[vX.Y.Z]` promote (별도 commit).
+
+**Consequences**: 외부 / docs / pip install 등이 `release` 또는 특정 태그를 reference. main 이 일시적으로 회귀되어도 안정 트랙 영향 없음. 단점: 머지 후 release promotion 이 별도 단계 — automation 후보 (Wave 후 자동 release branch update). CHANGELOG 유지가 doc 의무 (CLAUDE.md 의 update-after 룰에 포함).
+
+**Status**: accepted. 첫 적용: v0.1.0 (2026-05-08, commit `ddeb718`). 다음 promotion 예정: v0.2.0 = Wave 11 머지 head (`87501cd`).
 
 ---
 

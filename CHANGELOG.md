@@ -10,15 +10,35 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+(empty — Wave 11 promoted to v0.2.0)
+
+---
+
+## [0.2.0] — 2026-05-08
+
+Wave 11: multi-instance management with persona catalog and dedicated UI gallery; complete docs handoff infrastructure (CLAUDE.md + 4 living docs); SemVer + branch policy formalized.
+
 ### Added
-- Wave 11 (in progress): instance management — multiple humanoid characters with persona catalog, baseline jitter, per-instance storage isolation, frontend gallery + spawn modal.
-- `CLAUDE.md` and supporting docs (`state-of-the-project`, `development`, `api-contract`, `decisions`) for session handoff and mandated update workflow.
+- **Instance management** (`ui/backend/instance_manager.py`): spawn / list / get / delete / reset / save_state / per-instance directory `./instances/<uuid>/{chroma_db, storage_data, state.json, metadata.json}`.
+- **Persona catalog**: 5 default personas in `config/personas/` — `introvert_thoughtful`, `extrovert_warm`, `sensitive_empathic`, `steady_analytical`, `playful_companion`. Each has shifted baselines, drive_ratios, and a layered-identity narrative seed.
+- **Baseline jitter** (`storage/jitter.py`): ±0.1 baselines × jitter (default 0.3 → ±0.03), ±0.05 drive_ratios with renormalization. Seed stored in instance metadata for reproducibility.
+- **State serializer** (`ui/backend/state_serializer.py`): orchestrator state ↔ JSON dict roundtrip (internal_state, baselines, mood, drives, self/other model, metacognition resource, dialogue_buffer, turn_number, dmn queues).
+- **Routes**: `GET /api/personas`, `POST /api/instances`, `GET /api/instances`, `GET /api/instances/{id}`, `DELETE /api/instances/{id}`, `POST /api/instances/{id}/turn` (SSE), `POST /api/instances/{id}/reset`. Legacy `/api/turn`, `/api/state`, `/api/reset` continue via auto-created `_default` instance.
+- **Frontend gallery** (`ui/frontend/src/components/`): `Gallery`, `InstanceCard`, `PersonaPicker`, `SpawnModal`, `useInstances` hook with localStorage `humanoid-selected-instance` persistence. `useChat` refactored to accept `instanceId`. Three-column layout (gallery + chat + sidebar) with mobile stacking.
+- **Docs handoff infra**: `CLAUDE.md` (read-before / update-after workflow rules), `docs/state-of-the-project.md`, `docs/development.md`, `docs/api-contract.md`, `docs/decisions.md` (ADR-001 ~ ADR-008).
+- **ADR-008**: Branch + SemVer policy. `main` = trunk, `release` = stable, SemVer tags on `release`. Pre-1.0 MINOR can break with CHANGELOG note.
 
 ### Changed
-- N/A
+- `main.build_full_orchestrator(storage_root=...)` accepts an optional path so InstanceManager can isolate disk per instance.
+- `tests/scenarios/_common.py` and existing single-instance flow remain backward-compatible — `_default` instance auto-spawns on legacy route hits.
 
-### Fixed
-- N/A
+### Tests
+- 480 → **513 passed** + 1 skipped + 1 xfailed. +33 new tests across `test_personas.py`, `test_instance_manager.py`, `test_state_serializer.py`, `test_ui_backend_instances.py`.
+
+### Notes
+- Per-instance ChromaDB clients share the embedding model in-process (one ~80MB download).
+- `_default` legacy instance + new instance routing coexist; future ADR may unify.
+- Pre-1.0: this MINOR bump introduces new endpoints but does not break existing ones.
 
 ---
 
