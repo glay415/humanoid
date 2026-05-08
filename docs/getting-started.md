@@ -5,12 +5,37 @@
 
 ## 사전 요구사항
 
-- Python 3.11 이상 (`pyproject.toml` 의 `requires-python = ">=3.11"`)
+- Python 3.11 ~ 3.12 (`pyproject.toml` 의 `requires-python = ">=3.11,<3.13"`)
+- `uv` 0.4 이상 (Astral, https://docs.astral.sh/uv/) — 권장 설치 경로
 - Node 18 이상 (UI 프론트엔드 빌드용. CLI 만 쓸 거면 불필요)
 - OpenAI API 키 (`AGENT_OPENAI_API_KEY` 환경변수로 주입)
 - 첫 실행 시 ChromaDB 의 임베딩 모델 다운로드 ~80MB. 인터넷 필요.
 
-## 설치
+## 설치 (uv 권장)
+
+```bash
+git clone https://github.com/glay415/humanoid.git
+cd humanoid
+
+# 한 줄 셋업 — uv sync + .env 복사 + (npm 있으면) frontend deps
+./scripts/setup.sh        # Linux / macOS
+# scripts\setup.ps1       # Windows PowerShell
+
+# 편집기로 .env 열고 AGENT_OPENAI_API_KEY=sk-... 채우기
+```
+
+`scripts/setup.sh` (또는 `setup.ps1`) 가 하는 일:
+
+1. `uv` 가 PATH 에 있는지 확인 — 없으면 설치 안내 후 종료.
+2. `uv sync --extra dev --extra ui` 로 `.venv/` 생성 + `uv.lock` 기반
+   고정 버전 의존성 설치 (`numpy`, `chromadb`, `litellm`, `fastapi`,
+   `pytest` 등 100 개 패키지).
+3. `.env.example` → `.env` 복사 (없을 때만).
+4. `npm` 이 있으면 `ui/frontend` 에서 `npm install`.
+
+이후 모든 Python 명령은 `uv run <cmd>` 로 실행 — `.venv` activate 불필요.
+
+### 대안: 수동 pip 설치
 
 ```bash
 git clone https://github.com/glay415/humanoid.git
