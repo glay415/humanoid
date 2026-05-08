@@ -74,11 +74,12 @@ def _make_llm(line: str = '한 줄 통찰') -> MockLLMClient:
 # ---------------------------------------------------------------------------
 
 
-async def test_run_cycle_returns_none_when_nothing_eligible():
+async def test_run_cycle_returns_empty_list_when_nothing_eligible():
+    """audit ε3: run_cycle 는 list 를 반환. 자격 없음 = 빈 리스트."""
     dmn = DMN()
     ctx = DMNContext()  # 모두 None / 빈 값
-    result = await dmn.run_cycle(ctx)
-    assert result is None
+    results = await dmn.run_cycle(ctx)
+    assert results == []
 
 
 # ---------------------------------------------------------------------------
@@ -89,8 +90,9 @@ async def test_run_cycle_returns_none_when_nothing_eligible():
 async def test_unappraised_reprocess_pops_queue():
     dmn = DMN()
     ctx = DMNContext(unappraised_queue=[{'user_input': '뭐였더라'}])
-    result = await dmn.run_cycle(ctx)
-    assert result is not None
+    results = await dmn.run_cycle(ctx)
+    assert len(results) >= 1
+    result = results[0]
     assert result.activity == 'unappraised_reprocess'
     assert result.activity_type == int(DMNActivityType.UNAPPRAISED_REPROCESS)
     assert result.success is True
@@ -111,9 +113,10 @@ async def test_ruminate_picks_strong_emotion_memory():
         episodic=_EpisodicStub([strong, weak1, weak2]),
         llm=_make_llm('다른 시각으로는 그 다툼은 신호였다'),
     )
-    result = await dmn.run_cycle(ctx)
-    assert result is not None
-    assert result.activity == 'ruminate'
+    results = await dmn.run_cycle(ctx)
+    assert len(results) >= 1
+    # ruminate 가 첫 결과여야 한다 (UNAPPRAISED_REPROCESS 큐가 비어있어 다음 우선순위).
+    result = next(r for r in results if r.activity == 'ruminate')
     assert result.output['memory_id'] == 'm_strong'
     assert '다툼' in result.output['insight']
 
@@ -131,9 +134,9 @@ async def test_ruminate_respects_max_count():
         llm=_make_llm('통찰'),
         rumination_counter={'m_strong': 3},
     )
-    result = await dmn.run_cycle(ctx)
-    # ruminate 에서 자격 없음 → None (다른 활동도 자격 없으므로 전체 None)
-    assert result is None
+    results = await dmn.run_cycle(ctx)
+    # ruminate 에서 자격 없음 → 빈 리스트 (다른 활동도 자격 없음)
+    assert results == []
 
 
 # ---------------------------------------------------------------------------
@@ -149,9 +152,8 @@ async def test_ruminate_increments_counter():
         llm=_make_llm('통찰'),
         rumination_counter={'m_strong': 1},
     )
-    result = await dmn.run_cycle(ctx)
-    assert result is not None
-    assert result.activity == 'ruminate'
+    results = await dmn.run_cycle(ctx)
+    result = next(r for r in results if r.activity == 'ruminate')
     assert ctx.rumination_counter['m_strong'] == 2
     assert result.output['count_after'] == 2
 
@@ -168,9 +170,9 @@ async def test_case_promote_requires_strong_marker():
     ])
     dmn = DMN()
     ctx = DMNContext(marker_store=weak_only, llm=_make_llm('규칙'))
-    result = await dmn.run_cycle(ctx)
-    # case_promote 자격 없음 + 다른 활동도 자격 없음 → None.
-    assert result is None
+    results = await dmn.run_cycle(ctx)
+    # case_promote 자격 없음 + 다른 활동도 자격 없음 → 빈 리스트.
+    assert results == []
 
     # 강한 마커 추가 시 케이스 승격.
     strong = _MarkerStoreStub([
@@ -178,9 +180,8 @@ async def test_case_promote_requires_strong_marker():
         {'pattern_id': 'p_weak', 'valence': 0.0, 'strength': 0.5, 'age': 1},
     ])
     ctx2 = DMNContext(marker_store=strong, llm=_make_llm('비슷한 상황에선 다가가는 편이다'))
-    result2 = await dmn.run_cycle(ctx2)
-    assert result2 is not None
-    assert result2.activity == 'case_promote'
+    results2 = await dmn.run_cycle(ctx2)
+    result2 = next(r for r in results2 if r.activity == 'case_promote')
     assert result2.output['pattern_id'] == 'p_strong'
     assert result2.output['rule_summary'] == '비슷한 상황에선 다가가는 편이다'
 
@@ -206,9 +207,8 @@ async def test_internalize_uses_self_model_narrative_in_prompt():
         self_model=_SelfModelStub(narrative='나는 호기심 많은 존재다'),
         llm=MockLLMClient(response_fn=capture_fn),
     )
-    result = await dmn.run_cycle(ctx)
-    assert result is not None
-    assert result.activity == 'knowledge_internalize'
+    results = await dmn.run_cycle(ctx)
+    result = next(r for r in results if r.activity == 'knowledge_internalize')
     assert captured['model_name'] == 'dmn_model'
     user_text = captured['messages'][-1]['content']
     # narrative 가 프롬프트에 그대로 박혀야 한다.
@@ -236,9 +236,8 @@ async def test_contemplate_picks_max_deficit_drive():
         }},
         llm=MockLLMClient(response_fn=capture_fn),
     )
-    result = await dmn.run_cycle(ctx)
-    assert result is not None
-    assert result.activity == 'contemplate'
+    results = await dmn.run_cycle(ctx)
+    result = next(r for r in results if r.activity == 'contemplate')
     assert result.output['drive'] == 'bonding'
     user_text = captured['messages'][-1]['content']
     assert 'bonding' in user_text
@@ -257,12 +256,15 @@ async def test_priority_order_unappraised_first():
         episodic=_EpisodicStub([strong]),
         llm=_make_llm('통찰'),
     )
-    result = await dmn.run_cycle(ctx)
-    assert result is not None
-    assert result.activity == 'unappraised_reprocess'
-    assert result.activity_type == int(DMNActivityType.UNAPPRAISED_REPROCESS)
-    # 반추 카운터는 안 올라가야 함.
-    assert ctx.rumination_counter == {}
+    results = await dmn.run_cycle(ctx)
+    assert len(results) >= 1
+    # 첫 결과는 항상 unappraised_reprocess (최우선순위).
+    assert results[0].activity == 'unappraised_reprocess'
+    assert results[0].activity_type == int(DMNActivityType.UNAPPRAISED_REPROCESS)
+    # 두 번째 활동은 ruminate 가 자격이 있어 채워질 수 있다 — 하지만 카운터는
+    # 그 ruminate 가 실행되어야만 올라간다. 이 테스트의 의도는 "unappraised 가
+    # 가장 먼저"이므로, ruminate 가 두 번째로 실행될 수도 있고 안 될 수도 있다.
+    # 우선순위 검증만 — counter 확인은 제거.
 
 
 # ---------------------------------------------------------------------------
@@ -281,8 +283,10 @@ async def test_run_cycle_handles_llm_error_gracefully():
         episodic=_EpisodicStub([strong]),
         llm=MockLLMClient(response_fn=err_fn),
     )
-    result = await dmn.run_cycle(ctx)
+    results = await dmn.run_cycle(ctx)
     # ruminate 가 LLMError 를 만나 success=False, error set, 다른 활동은 자격 없음.
+    assert len(results) == 1
+    result = results[0]
     assert isinstance(result, DMNCycleResult)
     assert result.activity == 'ruminate'
     assert result.success is False
@@ -316,9 +320,8 @@ async def test_run_cycle_with_snapshot_manager_commits_on_success():
 
     sm.stage_write = spy  # type: ignore[assignment]
 
-    result = await dmn.run_cycle(ctx)
-    assert result is not None
-    assert result.activity == 'knowledge_internalize'
+    results = await dmn.run_cycle(ctx)
+    result = next(r for r in results if r.activity == 'knowledge_internalize')
     assert result.success is True
     assert result.committed is True
     # stage_write 가 1회 호출되고 commit 후 큐가 비어 있어야 함.

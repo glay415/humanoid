@@ -102,12 +102,20 @@ class DMN:
 
     # ------------------------------------------------------------------ cycle
 
-    async def run_cycle(self, ctx: DMNContext) -> DMNCycleResult | None:
-        """우선순위 큐 1회 실행. 자격 있는 활동이 없으면 None.
+    async def run_cycle(
+        self,
+        ctx: DMNContext,
+        max_activities: int = 2,
+    ) -> list[DMNCycleResult]:
+        """우선순위 큐 실행. spec §2.4 — 한 DMN 턴에 1~2개 활동 처리 (audit ε3).
 
         각 활동은 try-except 로 감싸 한 활동 실패가 다음 활동을 막지 않게 한다.
-        활동이 LLM 에러로 인해 실패해도 DMNCycleResult(success=False) 를 반환할 수 있다.
-        그 경우에도 더 낮은 우선순위 활동으로 진행하지 않고 그 결과를 그대로 반환한다.
+        활동이 LLM 에러로 인해 실패해도 DMNCycleResult(success=False) 가 들어
+        간다. 자격 없는 활동은 None 을 반환하므로 그냥 건너뛴다.
+
+        Returns:
+            DMNCycleResult 의 리스트. 자격 있는 활동이 하나도 없으면 빈 리스트.
+            ``max_activities`` 도달 시 즉시 종료. 기본값 2.
         """
         # ctx.unappraised_queue 와 ctx.rumination_counter 가 비어있으면 인스턴스 상태로 fallback.
         if not ctx.unappraised_queue and self.unappraised_queue:
@@ -115,6 +123,7 @@ class DMN:
         if not ctx.rumination_counter and self.rumination_counter:
             ctx.rumination_counter = self.rumination_counter
 
+        results: list[DMNCycleResult] = []
         for fn in (
             self._try_unappraised_reprocess,
             self._try_ruminate,
@@ -122,9 +131,11 @@ class DMN:
             self._try_knowledge_internalize,
             self._try_contemplate,
         ):
+            if len(results) >= max_activities:
+                break
             try:
                 result = await fn(ctx)
-            except Exception as exc:  # noqa: BLE001 — 한 활동 크래시가 사이클을 죽이지 않게.
+            except Exception:  # noqa: BLE001 — 한 활동 크래시가 사이클을 죽이지 않게.
                 # 스냅샷 매니저가 있으면 안전하게 롤백.
                 if ctx.snapshot_manager is not None:
                     try:
@@ -134,8 +145,8 @@ class DMN:
                 # 다음 활동으로 계속 진행 (활동별 격리).
                 continue
             if result is not None:
-                return result
-        return None
+                results.append(result)
+        return results
 
     # -------------------------------------------------------------- activity 1
 

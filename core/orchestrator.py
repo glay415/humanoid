@@ -596,24 +596,51 @@ class Orchestrator:
                 drives=drives_status,
                 unappraised_queue=getattr(self.dmn, 'unappraised_queue', None),
             )
-            result = await self.dmn.run_cycle(ctx)
+            raw = await self.dmn.run_cycle(ctx)
         else:
             # Team O 미머지: 인자 없이 호출 가능한 stub 도 허용.
-            result = await self.dmn.run_cycle()
+            raw = await self.dmn.run_cycle()
+
+        # audit ε3: run_cycle 가 list[DMNCycleResult] 를 반환 (spec §2.4 — 1~2개 활동).
+        # 단일 결과를 반환하는 구버전/Mock stub 도 backward-compat 으로 받는다.
+        if isinstance(raw, list):
+            results = raw
+        elif raw is None:
+            results = []
+        else:
+            # 단일 결과 — deprecation 흔적만 남기고 리스트로 정규화.
+            results = [raw]
+
+        # 첫 활동 = primary. 두 번째 활동 = secondary (있을 때).
+        primary = results[0] if results else None
+        secondary = results[1] if len(results) > 1 else None
 
         out = {
             'turn_number': self.turn_number,
-            'activity': getattr(result, 'activity', None) if result else None,
-            'success': getattr(result, 'success', False) if result else False,
-            'output': getattr(result, 'output', None) if result else None,
+            'activity': getattr(primary, 'activity', None) if primary else None,
+            'success': getattr(primary, 'success', False) if primary else False,
+            'output': getattr(primary, 'output', None) if primary else None,
+            # spec §2.4 — 한 턴에 최대 2개. activities 는 0~2 길이 리스트.
+            'activities': [
+                {
+                    'activity': getattr(r, 'activity', None),
+                    'success': getattr(r, 'success', False),
+                    'output': getattr(r, 'output', None),
+                }
+                for r in results
+            ],
+            'secondary_activity': (
+                getattr(secondary, 'activity', None) if secondary else None
+            ),
         }
-        # Wave 14A — DMN 활동 이벤트 기록.
+        # Wave 14A — DMN 활동 이벤트 기록 (활동마다 1줄).
         if self.logger is not None:
-            self._log_event_safe('dmn_activity', {
-                'activity': out['activity'],
-                'success': out['success'],
-                'output': out['output'],
-            })
+            for r in results:
+                self._log_event_safe('dmn_activity', {
+                    'activity': getattr(r, 'activity', None),
+                    'success': getattr(r, 'success', False),
+                    'output': getattr(r, 'output', None),
+                })
         return out
 
     # ------------------------------------------------------------------
