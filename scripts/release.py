@@ -33,6 +33,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Windows default stdout is cp949 (mbcs) which can't encode the unicode glyphs
+# we use in status lines. Force utf-8 so prints don't crash mid-promotion.
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+except (AttributeError, OSError):
+    pass
+
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CHANGELOG = REPO_ROOT / "CHANGELOG.md"
@@ -64,7 +72,9 @@ def split_changelog(text: str) -> tuple[str, str, str, str]:
     if not m:
         sys.exit("error: no `## [Unreleased]` section found in CHANGELOG.md")
 
-    head = text[: m.end()] + "\n"
+    # head ends just before `## [Unreleased]` so the new block can replace it
+    # cleanly without leaving a duplicate header behind.
+    head = text[: m.start()]
     after = text[m.end() :].lstrip("\n")
 
     next_match = NEXT_RELEASE_HEADER.search(after)
