@@ -21,18 +21,27 @@ import json
 import logging
 from typing import AsyncGenerator
 
+import numpy as np
+
 from core.event_bus import Event
 from core.turn import TurnType
 from llm.client import LLMError
+from low_level.internal_state import InternalState
 from ui.backend.sse_events import (
     CandidateItem,
     DoneEvent,
+    EigenvalueSpectrum,
+    DriftStepTrace,
     EmotionEvent,
     ErrorEvent,
     FinalEvent,
+    LowLevelDebug,
     LowLevelEvent,
+    MatrixDecomposition,
     MemoryEvent,
+    MoodStepTrace,
     ToneEvent,
+    ValenceArousal,
 )
 
 
@@ -64,6 +73,7 @@ async def stream_turn(
     *,
     on_mood_recorded=None,
     turn_lock: asyncio.Lock | None = None,
+    debug: bool = False,
 ) -> AsyncGenerator[SSEMessage, None]:
     """한 turn 을 stage 단위로 실행하며 SSE 메시지를 yield.
 
@@ -88,12 +98,12 @@ async def stream_turn(
     if turn_lock is not None:
         async with turn_lock:
             async for msg in _stream_turn_body(
-                orch, user_input, on_mood_recorded=on_mood_recorded
+                orch, user_input, on_mood_recorded=on_mood_recorded, debug=debug,
             ):
                 yield msg
         return
     async for msg in _stream_turn_body(
-        orch, user_input, on_mood_recorded=on_mood_recorded
+        orch, user_input, on_mood_recorded=on_mood_recorded, debug=debug,
     ):
         yield msg
 
@@ -103,6 +113,7 @@ async def _stream_turn_body(
     user_input: str,
     *,
     on_mood_recorded=None,
+    debug: bool = False,
 ) -> AsyncGenerator[SSEMessage, None]:
     """실제 turn 파이프라인. CancelledError 를 잡아 log + re-raise.
 
@@ -110,7 +121,7 @@ async def _stream_turn_body(
     """
     try:
         async for msg in _stream_turn_pipeline(
-            orch, user_input, on_mood_recorded=on_mood_recorded
+            orch, user_input, on_mood_recorded=on_mood_recorded, debug=debug,
         ):
             yield msg
     except asyncio.CancelledError:
@@ -123,16 +134,140 @@ async def _stream_turn_body(
         raise
 
 
+def _snapshot_pre_pipeline(orch) -> dict:
+    """debug=True 일 때 low_level.run() 전에 입력 측을 캡쳐.
+
+    ``LowLevelPipeline.run`` 은 다음 순서로 mutate 한다:
+      1. fast_path → state 직접 변경
+      2. internal_state.update(exp_vec) → state mutate
+      3. emotion_base.update_raw_core_affect → raw_core_affect 갱신
+      4. emotion_base.update_mood → mood 갱신 (eta·(raw - mood))
+      5. temperament.drift → _baseline_ema + baselines mutate
+
+    decomposition / mood_step / drift_step 모두 단계 진입 전 값이 필요하므로
+    여기서 한꺼번에 스냅샷을 잡는다. fast_path 가 발동해도 update() 가 본
+    state 와 동일한 사전 상태를 캡쳐하기 위해 fast_path 적용분은 의도적으로
+    미반영 — UI 는 fast_path_triggered 플래그로 별도 표시.
+    """
+    ils = orch.low_level.internal_state
+    eb = orch.low_level.emotion_base
+    temp = orch.low_level.temperament
+    return {
+        'state_before': ils.state.copy(),
+        'baselines_before': ils.baselines.copy(),
+        'exp_vec': InternalState.experience_dict_to_vector(orch.prev_experience),
+        'mood_before': dict(eb.mood),
+        'baseline_ema_before': temp._baseline_ema.copy(),
+    }
+
+
+def _build_debug_payload(orch, low_result: dict, snap: dict) -> LowLevelDebug:
+    """pre-snapshot + post low_result 로 debug 페이로드를 합성."""
+    ils = orch.low_level.internal_state
+
+    # ----- matrix_decomp -----
+    # snap 의 state/baselines 로 임시 InternalState 형태의 dict 를 만들어
+    # compute_decomposition 호출. 단, pure 함수는 self.state/baselines 에 의존
+    # 하므로 잠시 attribute 를 바꿔치기했다 되돌리는 방식으로 호출한다.
+    # → 이미 fast_path 적용된 사후 state 가 .state 에 있을 가능성 (audit):
+    #   compute_decomposition 은 mutate 안 하므로 우리는 잠시 snap.state_before
+    #   를 self.state 에 꽂고 다시 원복한다.
+    saved_state = ils.state
+    saved_baselines = ils.baselines
+    try:
+        ils.state = snap['state_before']
+        ils.baselines = snap['baselines_before']
+        decomp = ils.compute_decomposition(snap['exp_vec'])
+    finally:
+        ils.state = saved_state
+        ils.baselines = saved_baselines
+
+    matrix_decomp = MatrixDecomposition(
+        a_exp_term=decomp['a_exp_term'],
+        w_dev_term=decomp['w_dev_term'],
+        d_recovery_term=decomp['d_recovery_term'],
+        delta_clamped=decomp['delta_clamped'],
+        exp_vec=decomp['exp_vec'],
+    )
+
+    # ----- eigenvalues -----
+    eigs = ils.cached_eigenvalues
+    real_parts = [float(x) for x in eigs.real.tolist()]
+    eig_payload = EigenvalueSpectrum(
+        real_parts=real_parts,
+        max_real=float(max(real_parts)) if real_parts else 0.0,
+    )
+
+    # ----- mood_step -----
+    # mood += eta · (raw - mood). raw 는 low_result['raw_core_affect'] (사후),
+    # before 는 snap['mood_before'], after 는 low_result['mood'].
+    # eta_step 은 단순 차로 재계산.
+    eta_step = {
+        'valence': float(
+            low_result['mood']['valence'] - snap['mood_before']['valence']
+        ),
+        'arousal': float(
+            low_result['mood']['arousal'] - snap['mood_before']['arousal']
+        ),
+    }
+    mood_step = MoodStepTrace(
+        before=ValenceArousal(
+            valence=float(snap['mood_before']['valence']),
+            arousal=float(snap['mood_before']['arousal']),
+        ),
+        raw=ValenceArousal(
+            valence=float(low_result['raw_core_affect']['valence']),
+            arousal=float(low_result['raw_core_affect']['arousal']),
+        ),
+        eta_step=ValenceArousal(**eta_step),
+        after=ValenceArousal(
+            valence=float(low_result['mood']['valence']),
+            arousal=float(low_result['mood']['arousal']),
+        ),
+    )
+
+    # ----- drift_step -----
+    # temperament.drift 는 이미 mutate 됐다 → before 는 snap, after 는 현재 EMA.
+    temp = orch.low_level.temperament
+    after_arr = temp._baseline_ema
+    before_arr = snap['baseline_ema_before']
+    delta_norm = float(np.linalg.norm(after_arr - before_arr))
+    drift_step = DriftStepTrace(
+        baseline_ema_before={
+            p: float(before_arr[i]) for i, p in enumerate(InternalState.PARAMS)
+        },
+        baseline_ema_after={
+            p: float(after_arr[i]) for i, p in enumerate(InternalState.PARAMS)
+        },
+        drift_delta_norm=delta_norm,
+    )
+
+    return LowLevelDebug(
+        matrix_decomp=matrix_decomp,
+        eigenvalues=eig_payload,
+        mood_step=mood_step,
+        drift_step=drift_step,
+    )
+
+
 async def _stream_turn_pipeline(
     orch,
     user_input: str,
     *,
     on_mood_recorded=None,
+    debug: bool = False,
 ) -> AsyncGenerator[SSEMessage, None]:
     """순수 turn pipeline — lock / cancel 처리는 호출자 책임."""
     # core/orchestrator.process_conversation_turn 와 동일한 부팅 시퀀스.
     orch.turn_number += 1
     orch.current_turn_type = TurnType.CONVERSATION
+
+    # ----- debug: pre-update 스냅샷 -----
+    # internal_state.update / temperament.drift 가 mutate 하므로 pipeline.run()
+    # 호출 전에 입력 측을 캡쳐해야 정확한 decomposition 을 만들 수 있다.
+    debug_snap: dict | None = None
+    if debug:
+        debug_snap = _snapshot_pre_pipeline(orch)
 
     # ----- 0. 저수준 파이프라인 (동기) -----
     low_result = orch.low_level.run(user_input, orch.prev_experience)
@@ -145,6 +280,10 @@ async def _stream_turn_pipeline(
             # mood 기록 실패는 turn 진행을 막지 않는다.
             pass
 
+    debug_payload: LowLevelDebug | None = None
+    if debug and debug_snap is not None:
+        debug_payload = _build_debug_payload(orch, low_result, debug_snap)
+
     yield _msg('low_level', LowLevelEvent(
         state=low_result['state'],
         raw_core_affect={
@@ -154,6 +293,7 @@ async def _stream_turn_pipeline(
         mood=low_result['mood'],
         drives=low_result['drives'],
         fast_path_triggered=low_result['fast_path_triggered'],
+        debug=debug_payload,
     ))
 
     # ----- 1. 감정 평가 (LLM 실패 시 fallback) -----

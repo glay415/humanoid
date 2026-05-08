@@ -19,6 +19,47 @@ class ExperienceDimensions(BaseModel):
     novelty: float
 
 
+class MatrixDecomposition(BaseModel):
+    """3행렬 분해 결과 — 시각화용. update() 의 각 항을 9 파라미터별로 분해.
+
+    Δstate = a_exp_term + w_dev_term + d_recovery_term  (delta_clamped 가 실제 적용분)
+    """
+    a_exp_term: dict[str, float]      # A · exp_vec  (9 param)
+    w_dev_term: dict[str, float]      # W · (state - baseline)  (9 param)
+    d_recovery_term: dict[str, float] # D · (baseline - state)  (9 param)
+    delta_clamped: dict[str, float]   # Δmax + [0,1] 클램프 후 실제 적용분 (9 param)
+    exp_vec: dict[str, float]         # 입력 경험 벡터 (5 dim)
+
+
+class EigenvalueSpectrum(BaseModel):
+    """J = W - D 의 고유값 정보. real_parts 만 노출 (안정성 판단용)."""
+    real_parts: list[float]
+    max_real: float
+
+
+class MoodStepTrace(BaseModel):
+    """mood += η · (raw - mood) 의 단일 step 분해."""
+    before: ValenceArousal
+    raw: ValenceArousal
+    eta_step: ValenceArousal
+    after: ValenceArousal
+
+
+class DriftStepTrace(BaseModel):
+    """기질 표류 EMA step 분해."""
+    baseline_ema_before: dict[str, float]
+    baseline_ema_after: dict[str, float]
+    drift_delta_norm: float
+
+
+class LowLevelDebug(BaseModel):
+    """저수준 dynamics 의 시각화용 추가 정보. debug=True 일 때만 emit."""
+    matrix_decomp: MatrixDecomposition
+    eigenvalues: EigenvalueSpectrum
+    mood_step: MoodStepTrace
+    drift_step: DriftStepTrace
+
+
 class LowLevelEvent(BaseModel):
     """event: low_level — 저수준 파이프라인 결과 스냅샷."""
     state: dict[str, float]
@@ -26,6 +67,7 @@ class LowLevelEvent(BaseModel):
     mood: dict[str, float]
     drives: dict
     fast_path_triggered: bool
+    debug: LowLevelDebug | None = None
 
 
 class EmotionEvent(BaseModel):

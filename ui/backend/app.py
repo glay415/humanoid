@@ -111,6 +111,9 @@ def _require_admin_token(
 
 class TurnRequest(BaseModel):
     user_input: str
+    # debug=True 시 low_level SSE 이벤트에 verbose decomposition 페이로드 포함.
+    # 기본 false → 기존 클라이언트는 영향 없음.
+    debug: bool = False
 
 
 class SpawnRequest(BaseModel):
@@ -233,6 +236,7 @@ async def post_turn(request: Request, req: TurnRequest):
             STATE.orchestrator,
             req.user_input,
             on_mood_recorded=STATE.record_mood,
+            debug=req.debug,
         ):
             yield msg
 
@@ -327,6 +331,7 @@ async def turn_for_instance(request: Request, instance_id: str, body: TurnReques
             orch,
             body.user_input,
             on_mood_recorded=_record,
+            debug=body.debug,
         ):
             yield msg
         # done 후 메타 갱신 + state.json 영속.
