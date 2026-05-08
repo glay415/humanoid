@@ -5,6 +5,8 @@ from storage.prospective import ProspectiveQueue
 from storage.self_model import SelfModel
 from storage.other_model import OtherModel
 from storage.snapshot import SnapshotManager
+from storage.log_schemas import TurnLogEntry, EventLogEntry, DriftLogEntry
+from storage.logger import InstanceLogger
 
 __all__ = [
     'VectorDB',
@@ -14,4 +16,8 @@ __all__ = [
     'SelfModel',
     'OtherModel',
     'SnapshotManager',
+    'InstanceLogger',
+    'TurnLogEntry',
+    'EventLogEntry',
+    'DriftLogEntry',
 ]

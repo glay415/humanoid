@@ -7,6 +7,9 @@ spec v12 §1, §2.2 ①~⑤, impl-spec §3.3 의 process_conversation_turn 의�
 from __future__ import annotations
 
 import asyncio
+import datetime as _dt
+import math
+import time
 from typing import TYPE_CHECKING
 
 from core.event_bus import EventBus, Event
@@ -16,6 +19,11 @@ from low_level.pipeline import LowLevelPipeline
 from interface.signal_rise import SignalRise
 from interface.experience_descent import ExperienceDescent
 from llm.client import LLMError
+from storage.log_schemas import (
+    DriftLogEntry,
+    EventLogEntry,
+    TurnLogEntry,
+)
 
 if TYPE_CHECKING:
     from high_level.emotion_appraisal import EmotionAppraisal
@@ -29,6 +37,15 @@ if TYPE_CHECKING:
     from storage.memory_store import EpisodicMemory
     from storage.self_model import SelfModel
     from storage.other_model import OtherModel
+    from storage.logger import InstanceLogger
+
+
+def _iso_now() -> str:
+    return (
+        _dt.datetime.now(_dt.timezone.utc)
+        .replace(microsecond=0, tzinfo=None)
+        .isoformat() + 'Z'
+    )
 
 
 class Orchestrator:
@@ -54,6 +71,7 @@ class Orchestrator:
         episodic_memory: 'EpisodicMemory | None' = None,
         self_model: 'SelfModel | None' = None,
         other_model: 'OtherModel | None' = None,
+        logger: 'InstanceLogger | None' = None,
     ):
         self.low_level = low_level
         self.event_bus = event_bus
@@ -90,6 +108,9 @@ class Orchestrator:
         # 호환: 기존 코드의 storage 단일 핸들 흔적
         self.storage = None
 
+        # Wave 14A — JSONL 로거. None 이면 비활성 (backward compat).
+        self.logger = logger
+
         # 동기화 지점 (spec §1.4) — 진단 용도.
         # 감정 평가 / 사회인지 / 기억 인출 세 이벤트가 도착해야 후보 생성으로 진행.
         self.event_bus.create_sync_point(
@@ -121,8 +142,17 @@ class Orchestrator:
         self.turn_number += 1
         self.current_turn_type = TurnType.CONVERSATION
 
+        # Wave 14A — 턴 측정 시작.
+        _t_start = time.perf_counter_ns()
+
         # 0. 저수준 파이프라인 (동기, prev_experience 반영)
         low_result = self.low_level.run(user_input, self.prev_experience)
+
+        # 빠른 경로 발동 시 이벤트 기록.
+        if self.logger is not None and low_result.get('fast_path_triggered'):
+            self._log_event_safe('fast_path_match', {
+                'raw_core_affect': dict(low_result.get('raw_core_affect', {})),
+            })
 
         # 1. 감정 평가 (LLM 실패 시 raw_core_affect 기반 fallback)
         if self.emotion_appraisal is not None:
@@ -130,8 +160,13 @@ class Orchestrator:
                 emotion_result = await self.emotion_appraisal.evaluate(
                     user_input, low_result['raw_core_affect']
                 )
-            except (LLMError, AttributeError, KeyError):
+            except (LLMError, AttributeError, KeyError) as exc:
                 emotion_result = self._emotion_fallback(low_result['raw_core_affect'])
+                if self.logger is not None:
+                    self._log_event_safe('llm_error', {
+                        'stage': 'emotion_appraisal',
+                        'message': str(exc),
+                    })
         else:
             emotion_result = self._emotion_fallback(low_result['raw_core_affect'])
 
@@ -144,9 +179,16 @@ class Orchestrator:
             intensity = abs(emotion_result['valence']) + emotion_result['arousal']
             if intensity > self.auto_encoding_threshold:
                 try:
-                    await self.episodic_memory.auto_encode(
+                    memory_id = await self.episodic_memory.auto_encode(
                         user_input, emotion_result, self.turn_number
                     )
+                    if self.logger is not None:
+                        self._log_event_safe('auto_encode', {
+                            'memory_id': memory_id,
+                            'intensity': float(intensity),
+                            'valence': float(emotion_result.get('valence', 0.0)),
+                            'arousal': float(emotion_result.get('arousal', 0.0)),
+                        })
                 except Exception:
                     # 자동 부호화 실패는 turn 진행을 막지 않는다.
                     pass
@@ -222,6 +264,12 @@ class Orchestrator:
                         user_input=user_input,
                     )
                     iterations = review.get('iterations', iterations + 1)
+                    if self.logger is not None:
+                        self._log_event_safe('reappraisal', {
+                            'strategy': review.get('strategy'),
+                            'iteration': iterations,
+                            'reasons': review.get('reasons', []),
+                        })
                     # 갱신된 감정 결과를 동일 토픽으로 재발행 (다른 구독자 동기화)
                     await self.event_bus.publish(
                         Event(
@@ -231,9 +279,14 @@ class Orchestrator:
                             self.turn_number,
                         )
                     )
-                except (LLMError, NotImplementedError, TypeError):
+                except (LLMError, NotImplementedError, TypeError) as exc:
                     # 재평가 실패 — 현재 결과로 진행
                     converged = False
+                    if self.logger is not None and isinstance(exc, LLMError):
+                        self._log_event_safe('llm_error', {
+                            'stage': 'reappraise',
+                            'message': str(exc),
+                        })
                     break
             else:
                 # depth 3 도달 — 수렴 실패 표기
@@ -278,8 +331,13 @@ class Orchestrator:
                     user_input=user_input,
                     recent_dialogue=list(self.dialogue_buffer),
                 )
-            except LLMError:
+            except LLMError as exc:
                 candidates = [{'style': 'restrained', 'text': '...'}]
+                if self.logger is not None:
+                    self._log_event_safe('llm_error', {
+                        'stage': 'candidate_generation',
+                        'message': str(exc),
+                    })
         else:
             candidates = [{'style': 'restrained', 'text': '(stub)'}]
 
@@ -290,13 +348,18 @@ class Orchestrator:
                 final = await self.final_judgment.select(
                     candidates, marker_signal, confidence, user_input
                 )
-            except LLMError:
+            except LLMError as exc:
                 final = {
                     'selected_index': 0,
                     'text': candidates[0]['text'],
                     'rationale': 'fallback',
                     'marker_match': 'none',
                 }
+                if self.logger is not None:
+                    self._log_event_safe('llm_error', {
+                        'stage': 'final_judgment',
+                        'message': str(exc),
+                    })
         else:
             final = {
                 'selected_index': 0,
@@ -318,11 +381,16 @@ class Orchestrator:
                 action = post['action']
                 tone_eval = post['tone_eval']
                 delay_ms = post['recommended_delay_ms']
-            except LLMError:
+            except LLMError as exc:
                 response_text = final['text']
                 action = 'pass'
                 tone_eval = {}
                 delay_ms = 0
+                if self.logger is not None:
+                    self._log_event_safe('llm_error', {
+                        'stage': 'output_postprocess',
+                        'message': str(exc),
+                    })
         else:
             response_text = final['text']
             action = 'pass'
@@ -337,6 +405,25 @@ class Orchestrator:
         self.dialogue_buffer.append({'user': user_input, 'assistant': response_text})
         if len(self.dialogue_buffer) > self.dialogue_buffer_max:
             self.dialogue_buffer = self.dialogue_buffer[-self.dialogue_buffer_max:]
+
+        # Wave 14A — 턴 1줄 JSONL 기록.
+        _duration_ms = int(round((time.perf_counter_ns() - _t_start) / 1e6))
+        if self.logger is not None:
+            try:
+                self._log_turn_safe(
+                    user_input=user_input,
+                    response_text=response_text,
+                    low_result=low_result,
+                    emotion_result=emotion_result,
+                    experience_vector=experience_vector,
+                    action=action,
+                    final=final,
+                    delay_ms=int(delay_ms),
+                    duration_ms=_duration_ms,
+                )
+            except Exception:
+                # 로깅 실패는 turn 진행을 막지 않는다.
+                pass
 
         return {
             'response': response_text,
@@ -414,12 +501,20 @@ class Orchestrator:
             # Team O 미머지: 인자 없이 호출 가능한 stub 도 허용.
             result = await self.dmn.run_cycle()
 
-        return {
+        out = {
             'turn_number': self.turn_number,
             'activity': getattr(result, 'activity', None) if result else None,
             'success': getattr(result, 'success', False) if result else False,
             'output': getattr(result, 'output', None) if result else None,
         }
+        # Wave 14A — DMN 활동 이벤트 기록.
+        if self.logger is not None:
+            self._log_event_safe('dmn_activity', {
+                'activity': out['activity'],
+                'success': out['success'],
+                'output': out['output'],
+            })
+        return out
 
     # ------------------------------------------------------------------
     # Phase 5: 정비 턴 (spec §9)
@@ -429,6 +524,11 @@ class Orchestrator:
         self.turn_number += 1
         self.current_turn_type = TurnType.MAINTENANCE
 
+        # Wave 14A — drift 측정용 baselines 스냅샷.
+        baselines_before: dict[str, float] = {}
+        if self.low_level is not None and self.low_level.temperament is not None:
+            baselines_before = dict(self.low_level.temperament.baselines)
+
         # 저수준 파이프라인을 빈 입력으로 실행 (감쇠/표류 진행)
         low_result = self.low_level.run('', {}) if self.low_level else None
 
@@ -437,9 +537,21 @@ class Orchestrator:
         if self.low_level is not None and self.low_level.markers is not None:
             expired_markers = self.low_level.markers.decay_all()
 
+        # 마커 만료 이벤트 — 각각 1줄.
+        if self.logger is not None and expired_markers:
+            for pid in expired_markers:
+                self._log_event_safe('marker_decayed', {'pattern_id': pid})
+
         # 메타 자원 회복
         if self.metacognition is not None:
             self.metacognition.recover()
+
+        # Wave 14A — drift 1줄 기록.
+        if self.logger is not None and self.low_level is not None:
+            try:
+                self._log_drift_safe(baselines_before)
+            except Exception:
+                pass
 
         return {
             'turn_number': self.turn_number,
@@ -558,3 +670,127 @@ class Orchestrator:
             'prospective_items': [],
             'retrieval_context': {'mood_bias_applied': False},
         }
+
+    # ------------------------------------------------------------------
+    # Wave 14A — JSONL 로깅 헬퍼
+    # ------------------------------------------------------------------
+
+    def _log_event_safe(self, event_type: str, payload: dict) -> None:
+        """Logger 가 있을 때 EventLogEntry 1건 기록. 실패는 무시."""
+        if self.logger is None:
+            return
+        try:
+            entry = EventLogEntry(
+                ts=_iso_now(),
+                type=event_type,  # type: ignore[arg-type]
+                payload=payload,
+                turn=int(self.turn_number),
+            )
+            self.logger.log_event(entry)
+        except Exception:
+            # 로깅 실패는 절대 turn 흐름을 막지 않는다.
+            pass
+
+    def _log_turn_safe(
+        self,
+        *,
+        user_input: str,
+        response_text: str,
+        low_result: dict,
+        emotion_result: dict,
+        experience_vector: dict,
+        action: str,
+        final: dict,
+        delay_ms: int,
+        duration_ms: int,
+    ) -> None:
+        """TurnLogEntry 1줄 기록."""
+        if self.logger is None:
+            return
+        # 평탄화: dict[str, float] 보장.
+        state = {
+            k: float(v) for k, v in (low_result.get('state') or {}).items()
+        }
+        rca = {
+            k: float(v) for k, v in (low_result.get('raw_core_affect') or {}).items()
+        }
+        mood = {
+            k: float(v) for k, v in (low_result.get('mood') or {}).items()
+        }
+        drives = low_result.get('drives') or {}
+        fulfillment = {
+            k: float(v) for k, v in (drives.get('fulfillment') or {}).items()
+        }
+        max_def = float(drives.get('max_deficit', 0.0))
+        exp_dims = {
+            k: float(v)
+            for k, v in (emotion_result.get('experience_dimensions') or {}).items()
+        }
+        # experience_vector 는 'extensions': {} 같은 비-스칼라 키도 들고 있을 수
+        # 있다. 평탄화 시 numeric 만 통과시킨다.
+        exp_vec: dict[str, float] = {}
+        for k, v in (experience_vector or {}).items():
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                exp_vec[k] = float(v)
+        labels = list(emotion_result.get('preliminary_labels') or [])
+        entry = TurnLogEntry(
+            ts=_iso_now(),
+            turn=int(self.turn_number),
+            user_input_len=len(user_input or ''),
+            response_len=len(response_text or ''),
+            state=state,
+            raw_core_affect=rca,
+            mood=mood,
+            drives_fulfillment=fulfillment,
+            drives_max_deficit=max_def,
+            emotion_valence=float(emotion_result.get('valence', 0.0)),
+            emotion_arousal=float(emotion_result.get('arousal', 0.0)),
+            emotion_labels=labels,
+            experience_dimensions=exp_dims,
+            experience_vector=exp_vec,
+            action=str(action),
+            selected_index=int(final.get('selected_index', 0)),
+            marker_match=str(final.get('marker_match', 'none')),
+            recommended_delay_ms=int(delay_ms),
+            duration_ms=int(duration_ms),
+        )
+        self.logger.log_turn(entry)
+
+    def _log_drift_safe(self, baselines_before: dict[str, float]) -> None:
+        """DriftLogEntry 1줄 기록."""
+        if self.logger is None or self.low_level is None:
+            return
+        temperament = getattr(self.low_level, 'temperament', None)
+        if temperament is None:
+            return
+        baselines_after = {k: float(v) for k, v in temperament.baselines.items()}
+        # baseline_ema 는 numpy array — dict 로 펴서 기록.
+        ema_vals = getattr(temperament, '_baseline_ema', None)
+        try:
+            from low_level.internal_state import InternalState
+            if ema_vals is not None:
+                baseline_ema = {
+                    p: float(ema_vals[i]) for i, p in enumerate(InternalState.PARAMS)
+                }
+            else:
+                baseline_ema = {}
+        except Exception:
+            baseline_ema = {}
+
+        # ||after - before|| 유클리드.
+        keys = list(baselines_after.keys())
+        sq = 0.0
+        for k in keys:
+            a = baselines_after.get(k, 0.0)
+            b = baselines_before.get(k, a)
+            sq += (a - b) ** 2
+        delta_norm = math.sqrt(sq)
+
+        entry = DriftLogEntry(
+            ts=_iso_now(),
+            turn=int(self.turn_number),
+            baselines=baselines_after,
+            baseline_ema=baseline_ema,
+            drift_delta_norm=float(delta_norm),
+        )
+        self.logger.log_drift(entry)
