@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Trash2 } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { MoreVertical, RotateCcw, Trash2 } from 'lucide-react';
 import { cn } from '../lib/cn';
 import type { InstanceCard as InstanceCardData } from '../api/types';
 
@@ -8,6 +8,7 @@ type InstanceCardProps = {
   selected: boolean;
   onSelect: (id: string) => void;
   onDelete: (id: string) => void | Promise<void>;
+  onHardReset: (id: string) => void | Promise<unknown>;
 };
 
 // Map valence in [-1, 1] to a Tailwind text color (used for the mood dot)
@@ -43,13 +44,35 @@ function timeSince(iso: string): string {
   return `${day}일 전`;
 }
 
-export function InstanceCard({ card, selected, onSelect, onDelete }: InstanceCardProps) {
-  const [confirmOpen, setConfirmOpen] = useState(false);
+type Confirm = null | 'delete' | 'hard-reset';
+
+export function InstanceCard({
+  card,
+  selected,
+  onSelect,
+  onDelete,
+  onHardReset,
+}: InstanceCardProps) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [confirmKind, setConfirmKind] = useState<Confirm>(null);
   const [busy, setBusy] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
 
   const valence = card.last_mood?.valence ?? 0;
   const dotColor = moodColorClass(valence);
   const dotOpacity = moodOpacity(valence);
+
+  // Close popover when clicking outside.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    window.addEventListener('mousedown', handler);
+    return () => window.removeEventListener('mousedown', handler);
+  }, [menuOpen]);
 
   const handleDelete = async () => {
     if (busy) return;
@@ -58,7 +81,18 @@ export function InstanceCard({ card, selected, onSelect, onDelete }: InstanceCar
       await onDelete(card.instance_id);
     } finally {
       setBusy(false);
-      setConfirmOpen(false);
+      setConfirmKind(null);
+    }
+  };
+
+  const handleHardReset = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await onHardReset(card.instance_id);
+    } finally {
+      setBusy(false);
+      setConfirmKind(null);
     }
   };
 
@@ -97,17 +131,53 @@ export function InstanceCard({ card, selected, onSelect, onDelete }: InstanceCar
             {card.persona_display_name}
           </div>
         </div>
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            setConfirmOpen(true);
-          }}
-          aria-label="삭제"
-          className="shrink-0 inline-flex items-center justify-center w-7 h-7 rounded-md text-ink-400 hover:text-red-500 hover:bg-red-50 dark:text-zinc-500 dark:hover:text-red-400 dark:hover:bg-red-950/40 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
-        >
-          <Trash2 size={13} />
-        </button>
+        <div ref={menuRef} className="relative shrink-0">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setMenuOpen((v) => !v);
+            }}
+            aria-label="메뉴"
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            className="inline-flex items-center justify-center w-7 h-7 rounded-md text-ink-400 hover:text-ink-700 hover:bg-ink-100 dark:text-zinc-500 dark:hover:text-zinc-200 dark:hover:bg-zinc-800 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
+          >
+            <MoreVertical size={14} />
+          </button>
+          {menuOpen && (
+            <div
+              role="menu"
+              onClick={(e) => e.stopPropagation()}
+              className="absolute right-0 top-8 z-20 w-44 rounded-md border border-ink-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-lg overflow-hidden text-xs"
+            >
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setMenuOpen(false);
+                  setConfirmKind('hard-reset');
+                }}
+                className="flex items-center gap-2 w-full px-3 py-2 text-left text-ink-700 dark:text-zinc-200 hover:bg-ink-50 dark:hover:bg-zinc-800 transition-colors"
+              >
+                <RotateCcw size={12} />
+                기억 초기화 (하드 리셋)
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setMenuOpen(false);
+                  setConfirmKind('delete');
+                }}
+                className="flex items-center gap-2 w-full px-3 py-2 text-left text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors"
+              >
+                <Trash2 size={12} />
+                삭제
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Thin valence bar (red ↔ green) */}
@@ -133,7 +203,7 @@ export function InstanceCard({ card, selected, onSelect, onDelete }: InstanceCar
         <span>{timeSince(card.last_active)}</span>
       </div>
 
-      {confirmOpen && (
+      {confirmKind === 'delete' && (
         <div
           className="absolute inset-0 rounded-lg bg-white/95 dark:bg-zinc-900/95 backdrop-blur-sm flex flex-col items-center justify-center gap-2 px-3 py-2 z-10"
           onClick={(e) => e.stopPropagation()}
@@ -146,7 +216,7 @@ export function InstanceCard({ card, selected, onSelect, onDelete }: InstanceCar
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => setConfirmOpen(false)}
+              onClick={() => setConfirmKind(null)}
               disabled={busy}
               className="px-2.5 py-1 text-xs rounded-md text-ink-700 dark:text-zinc-300 hover:bg-ink-100 dark:hover:bg-zinc-800 transition-colors disabled:opacity-50"
             >
@@ -159,6 +229,38 @@ export function InstanceCard({ card, selected, onSelect, onDelete }: InstanceCar
               className="px-2.5 py-1 text-xs rounded-md text-white bg-red-600 hover:bg-red-500 dark:bg-red-500 dark:hover:bg-red-400 transition-colors disabled:opacity-50"
             >
               {busy ? '삭제 중…' : '삭제'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {confirmKind === 'hard-reset' && (
+        <div
+          className="absolute inset-0 rounded-lg bg-white/95 dark:bg-zinc-900/95 backdrop-blur-sm flex flex-col items-center justify-center gap-2 px-3 py-2 z-10"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <p className="text-[11px] text-ink-700 dark:text-zinc-300 text-center leading-snug">
+            <span className="font-semibold">{card.display_name}</span> 의 모든 기억과
+            마커, 대화 히스토리를 삭제합니다.
+            <br />
+            페르소나와 성격(baseline)은 유지됩니다. 계속할까요?
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setConfirmKind(null)}
+              disabled={busy}
+              className="px-2.5 py-1 text-xs rounded-md text-ink-700 dark:text-zinc-300 hover:bg-ink-100 dark:hover:bg-zinc-800 transition-colors disabled:opacity-50"
+            >
+              취소
+            </button>
+            <button
+              type="button"
+              onClick={handleHardReset}
+              disabled={busy}
+              className="px-2.5 py-1 text-xs rounded-md text-white bg-amber-600 hover:bg-amber-500 dark:bg-amber-500 dark:hover:bg-amber-400 transition-colors disabled:opacity-50"
+            >
+              {busy ? '초기화 중…' : '초기화'}
             </button>
           </div>
         </div>
