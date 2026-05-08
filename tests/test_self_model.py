@@ -4,23 +4,23 @@ from __future__ import annotations
 
 import pytest
 
-from storage.self_model import SelfModel
+from storage.self_model import SelfModel, DEFAULT_NARRATIVE
 
 
 def test_initial_seed_shape():
     """Spec §5.6 — 초기 시드 값."""
     sm = SelfModel()
 
-    assert sm.data['narrative'] == '나는 방금 시작된 존재다'
+    assert sm.data['narrative'] == DEFAULT_NARRATIVE
     assert sm.data['goals'] == []
     assert sm.data['emotions'] == {}
-    assert sm.data['confidence'] == pytest.approx(0.1)
+    assert sm.data['confidence'] == pytest.approx(0.5)
     assert sm.data['relationship_stage'] is None
 
 
 def test_confidence_property_reflects_data():
     sm = SelfModel()
-    assert sm.confidence == pytest.approx(0.1)
+    assert sm.confidence == pytest.approx(0.5)
 
     sm.update({'confidence': 0.7})
     assert sm.confidence == pytest.approx(0.7)
@@ -35,7 +35,7 @@ def test_update_partial_merges_into_data():
     # 나머지 시드 값은 유지
     assert sm.data['goals'] == []
     assert sm.data['emotions'] == {}
-    assert sm.data['confidence'] == pytest.approx(0.1)
+    assert sm.data['confidence'] == pytest.approx(0.5)
     assert sm.data['relationship_stage'] is None
 
 
@@ -71,5 +71,5 @@ def test_to_dict_returns_independent_copy():
     snapshot['confidence'] = 0.99
     snapshot['narrative'] = 'mutated'
 
-    assert sm.confidence == pytest.approx(0.1)
-    assert sm.data['narrative'] == '나는 방금 시작된 존재다'
+    assert sm.confidence == pytest.approx(0.5)
+    assert sm.data['narrative'] == DEFAULT_NARRATIVE

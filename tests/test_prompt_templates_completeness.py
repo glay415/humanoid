@@ -33,6 +33,7 @@ CANDIDATE_VARS: dict = {
     'mood_text': 'valence=0.10, arousal=0.30',
     'marker_signal': '접근 마커: 부드러운 농담',
     'n_candidates': 4,
+    'recent_dialogue': '사람: 어제 영화 봤어\n나: 어떤 영화?',
 }
 
 FINAL_VARS: dict = {
@@ -106,10 +107,11 @@ def test_candidate_generation_contains_rendered_vars():
         mood_text='MARKER_MOOD',
         marker_signal='MARKER_MSIG',
         n_candidates=4,
+        recent_dialogue='MARKER_DIALOGUE',
     )
     for marker in ['MARKER_USER_INPUT', 'MARKER_EMOTION', 'MARKER_SOCIAL',
                    'MARKER_MEMORY', 'MARKER_NARRATIVE', 'MARKER_MOOD',
-                   'MARKER_MSIG']:
+                   'MARKER_MSIG', 'MARKER_DIALOGUE']:
         assert marker in out, f"{marker} missing in candidate_generation"
     # n_candidates 는 두 번 등장 (입력 라벨 + "정확히 N 이다" 규칙)
     assert out.count('4') >= 1
