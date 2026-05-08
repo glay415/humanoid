@@ -14,9 +14,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import IntEnum
+from typing import Callable
 
 from llm.client import LLMError
 from llm.prompts import load_prompt
+
+
+def _noop_commit_sink(key: str, value: object) -> None:
+    """기본 commit sink — 아무것도 하지 않는다 (Wave 7 호환)."""
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -46,6 +52,11 @@ class DMNContext:
     unappraised_queue: list = field(default_factory=list)
     rumination_counter: dict = field(default_factory=dict)
     turn: int = 0
+    # audit β6: 트랜잭션 commit 의 실제 영속화 sink.
+    # SnapshotManager.commit(commit_sink) 가 stage 된 (key, value) 쌍 각각에 대해
+    # 호출. None 또는 미설정 → 기본 no-op (Wave 7 동작 그대로).
+    # 실제 영속화 백엔드 (예: 파일 기반 K-V 스토어) 를 hook 으로 주입할 때 사용.
+    commit_sink: Callable[[str, object], None] | None = None
 
 
 @dataclass
@@ -102,12 +113,20 @@ class DMN:
 
     # ------------------------------------------------------------------ cycle
 
-    async def run_cycle(self, ctx: DMNContext) -> DMNCycleResult | None:
-        """우선순위 큐 1회 실행. 자격 있는 활동이 없으면 None.
+    async def run_cycle(
+        self,
+        ctx: DMNContext,
+        max_activities: int = 2,
+    ) -> list[DMNCycleResult]:
+        """우선순위 큐 실행. spec §2.4 — 한 DMN 턴에 1~2개 활동 처리 (audit ε3).
 
         각 활동은 try-except 로 감싸 한 활동 실패가 다음 활동을 막지 않게 한다.
-        활동이 LLM 에러로 인해 실패해도 DMNCycleResult(success=False) 를 반환할 수 있다.
-        그 경우에도 더 낮은 우선순위 활동으로 진행하지 않고 그 결과를 그대로 반환한다.
+        활동이 LLM 에러로 인해 실패해도 DMNCycleResult(success=False) 가 들어
+        간다. 자격 없는 활동은 None 을 반환하므로 그냥 건너뛴다.
+
+        Returns:
+            DMNCycleResult 의 리스트. 자격 있는 활동이 하나도 없으면 빈 리스트.
+            ``max_activities`` 도달 시 즉시 종료. 기본값 2.
         """
         # ctx.unappraised_queue 와 ctx.rumination_counter 가 비어있으면 인스턴스 상태로 fallback.
         if not ctx.unappraised_queue and self.unappraised_queue:
@@ -115,6 +134,7 @@ class DMN:
         if not ctx.rumination_counter and self.rumination_counter:
             ctx.rumination_counter = self.rumination_counter
 
+        results: list[DMNCycleResult] = []
         for fn in (
             self._try_unappraised_reprocess,
             self._try_ruminate,
@@ -122,9 +142,11 @@ class DMN:
             self._try_knowledge_internalize,
             self._try_contemplate,
         ):
+            if len(results) >= max_activities:
+                break
             try:
                 result = await fn(ctx)
-            except Exception as exc:  # noqa: BLE001 — 한 활동 크래시가 사이클을 죽이지 않게.
+            except Exception:  # noqa: BLE001 — 한 활동 크래시가 사이클을 죽이지 않게.
                 # 스냅샷 매니저가 있으면 안전하게 롤백.
                 if ctx.snapshot_manager is not None:
                     try:
@@ -134,8 +156,8 @@ class DMN:
                 # 다음 활동으로 계속 진행 (활동별 격리).
                 continue
             if result is not None:
-                return result
-        return None
+                results.append(result)
+        return results
 
     # -------------------------------------------------------------- activity 1
 
@@ -249,7 +271,10 @@ class DMN:
                     'count': counter[mem_id],
                     'insight': insight,
                 })
-                sm.commit(lambda k, v: None)  # Wave 7: in-memory only.
+                # audit β6: ctx.commit_sink 가 있으면 그 hook 으로 영속화.
+                # 없으면 no-op (Wave 7 호환). SnapshotManager.commit 는
+                # stage 된 (key, value) 각각에 대해 sink 를 호출한다.
+                sm.commit(ctx.commit_sink or _noop_commit_sink)
                 committed = True
             except Exception:
                 try:
@@ -322,7 +347,8 @@ class DMN:
                     'pattern_id': chosen.get('pattern_id'),
                     'rule_summary': rule,
                 })
-                sm.commit(lambda k, v: None)
+                # audit β6: ctx.commit_sink 가 있으면 그 hook 으로 영속화.
+                sm.commit(ctx.commit_sink or _noop_commit_sink)
                 committed = True
             except Exception:
                 try:
@@ -409,7 +435,8 @@ class DMN:
                     'memory_id': mem_id,
                     'narrative_delta': delta,
                 })
-                sm.commit(lambda k, v: None)
+                # audit β6: ctx.commit_sink 가 있으면 그 hook 으로 영속화.
+                sm.commit(ctx.commit_sink or _noop_commit_sink)
                 committed = True
             except Exception:
                 try:
@@ -488,7 +515,8 @@ class DMN:
                     'drive': chosen_drive,
                     'reflection': reflection,
                 })
-                sm.commit(lambda k, v: None)
+                # audit β6: ctx.commit_sink 가 있으면 그 hook 으로 영속화.
+                sm.commit(ctx.commit_sink or _noop_commit_sink)
                 committed = True
             except Exception:
                 try:
