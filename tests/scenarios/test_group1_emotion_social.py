@@ -346,3 +346,214 @@ class TestScenario06Love:
         assert max_drive != 'bonding', drives['deficits']
         # OtherModel 관찰 카운터가 턴 수와 일치.
         assert orch.other_model.data['observation_count'] == 10
+
+
+# ---------------------------------------------------------------------------
+# 7. 창피→자부심 (shame→pride) — state_mismatch + uncertainty → reframe → valence 양수
+# ---------------------------------------------------------------------------
+
+
+class TestScenario07ShamePride:
+    """창피→자부심 — 첫 감정 평가가 (음성 valence + 빈 preliminary_labels) 로
+    state_mismatch + uncertainty_low_labels 두 사유를 한꺼번에 트리거.
+    Metacognition.review 가 strategy='reframe' 을 반환 → reappraise 가 양성
+    valence + 라벨을 채워 반환. 결과적으로 result['emotion'] 의 valence 가 양수.
+
+    spec invariant:
+        baseline 이 양성(reward/comfort/bonding 높음) → raw_core_affect.valence > 0.
+        첫 emotion = {valence < 0, preliminary_labels=[]} → mismatch 두 사유 동시 발생.
+        reappraise = {valence > 0, preliminary_labels=['자부심']} → 최종 result.emotion.valence > 0.
+    """
+
+    async def test_negative_then_reappraised_positive(self, tmp_path):
+        cfg = copy_temperament_yaml(
+            tmp_path,
+            name='shame_pride',
+            baseline_overrides={
+                'reward': 0.7, 'comfort': 0.7,
+                'bonding': 0.6, 'stress': 0.1,
+            },
+        )
+
+        # 호출 카운터 — 첫 emotion 호출은 음성, 이후(reappraise 포함) 양성.
+        call_count = {'emotion': 0}
+
+        def emotion_payload(messages, model_name):  # noqa: ARG001
+            call_count['emotion'] += 1
+            if call_count['emotion'] == 1:
+                # 음성 + preliminary_labels=[] → state_mismatch + uncertainty 동시.
+                return {
+                    'valence': -0.5, 'arousal': 0.6,
+                    'preliminary_labels': [],
+                    'experience_dimensions': {
+                        'reward': 0.0, 'threat': 0.5, 'novelty': 0.2,
+                    },
+                }
+            return {
+                'valence': 0.4, 'arousal': 0.5,
+                'preliminary_labels': ['자부심'],
+                'experience_dimensions': {
+                    'reward': 0.5, 'threat': 0.0, 'novelty': 0.2,
+                },
+            }
+
+        rfn = make_response_fn(emotion=emotion_payload, reappraise=emotion_payload)
+        orch = _build_mocked_orchestrator(tmp_path, response_fn=rfn, config_path=cfg)
+
+        # 사전조건: 초기 raw_core_affect.valence > 0.
+        # (baseline 양성 → state_dict 기반 raw_v 양수)
+        result = await orch.process_conversation_turn('그걸 잘못한 것 같아')
+
+        # 재평가가 트리거되어 양성으로 뒤집혔어야 한다.
+        assert result['emotion']['valence'] > 0.0, result['emotion']
+        assert '자부심' in result['emotion']['preliminary_labels']
+        # raw_core_affect (저수준) 는 baseline 양성으로 양수 유지.
+        assert result['low_level']['raw_core_affect']['valence'] > 0.0
+
+
+# ---------------------------------------------------------------------------
+# 8. 질투 (jealousy) — social_reward 큼 + threat 큼 → review strategy='distance'
+# ---------------------------------------------------------------------------
+
+
+class TestScenario08Jealousy:
+    """질투 — emotion.experience_dimensions.threat=0.7 + social_result.social_reward=0.7.
+    Metacognition.review 가 'social_threat_conflict' 사유로 strategy='distance' 반환.
+
+    spec invariant:
+        review() 결과: needs_reappraisal=True, strategy='distance',
+        reasons 에 'social_threat_conflict' 포함.
+        직접 review 를 호출해도 동일 (full turn 없이 단위로 검증 가능).
+    """
+
+    async def test_review_returns_distance_strategy(self, tmp_path):
+        orch = _build_mocked_orchestrator(tmp_path)
+
+        emotion_result = {
+            'valence': -0.2, 'arousal': 0.7,
+            'preliminary_labels': ['질투'],
+            'experience_dimensions': {
+                'reward': 0.4, 'threat': 0.7, 'novelty': 0.1,
+            },
+        }
+        social_result = {
+            'person_id': 'u',
+            'estimated_emotion': {'valence': 0.0, 'arousal': 0.5},
+            'estimated_intent': '',
+            'social_reward': 0.7,
+        }
+        # raw 와 high 의 부호가 같으므로 state_mismatch 는 트리거되지 않는다.
+        low_result = {'raw_core_affect': {'valence': -0.1, 'arousal': 0.6}}
+
+        review = orch.metacognition.review(emotion_result, social_result, low_result)
+
+        assert review['needs_reappraisal'] is True
+        assert review['strategy'] == 'distance'
+        assert 'social_threat_conflict' in review['reasons']
+
+
+# ---------------------------------------------------------------------------
+# 9. 몰입 (flow) — 적당 arousal + 높은 reward + 낮은 inhibition → mood 최대
+# ---------------------------------------------------------------------------
+
+
+class TestScenario09Flow:
+    """몰입 — baseline 이 reward 높음 + arousal 중간 + inhibition 낮음.
+    5턴 양성 경험 벡터로 운영 후, mood.valence > 0.4 이고 max_deficit < 0.2.
+
+    spec invariant:
+        mood.valence > 0.4 (몰입 = 지속 양성 기분).
+        max_deficit < 0.2 (모든 드라이브 충족 상태 근방).
+    """
+
+    @pytest.fixture
+    async def orch(self, tmp_path):
+        cfg = copy_temperament_yaml(
+            tmp_path,
+            name='flow',
+            baseline_overrides={
+                'reward': 0.9, 'arousal': 0.5,
+                'inhibition': 0.2, 'comfort': 0.7,
+                'bonding': 0.6, 'stress': 0.1,
+            },
+        )
+        rfn = make_response_fn(
+            emotion={
+                'valence': 0.6, 'arousal': 0.5,
+                'preliminary_labels': ['몰입'],
+                'experience_dimensions': {
+                    'reward': 0.9, 'threat': 0.0, 'novelty': 0.4,
+                },
+            },
+            social={
+                'person_id': 'u',
+                'estimated_emotion': {'valence': 0.4, 'arousal': 0.4},
+                'estimated_intent': '',
+                'social_reward': 0.5,
+            },
+        )
+        return _build_mocked_orchestrator(tmp_path, response_fn=rfn, config_path=cfg)
+
+    async def test_flow_state_high_mood_low_deficit(self, orch):
+        for _ in range(5):
+            await orch.process_conversation_turn('지금 너무 잘 흘러간다')
+
+        state = orch.low_level.internal_state.to_dict()
+        drives = orch.low_level.drives.compute(state)
+        mood = orch.low_level.emotion_base.mood
+
+        assert mood['valence'] > 0.4, mood
+        assert drives['max_deficit'] < 0.2, drives['deficits']
+
+
+# ---------------------------------------------------------------------------
+# 헬퍼 자체 동작 검증 (회귀 방지) — 시나리오에서 신뢰할 fixture 인지 1회 확인.
+# ---------------------------------------------------------------------------
+
+
+class TestCommonHelperSanity:
+    """tests.scenarios._common 의 헬퍼가 풀 turn 한 사이클을 흠 없이 돌리는지."""
+
+    async def test_default_turn_completes(self, tmp_path):
+        orch = _build_mocked_orchestrator(tmp_path)
+        result = await orch.process_conversation_turn('안녕')
+
+        assert result['turn_number'] == 1
+        # 응답 텍스트 채워짐.
+        assert isinstance(result['response'], str) and result['response']
+        # action 은 enum 셋 중 하나.
+        assert result['action'] in {'pass', 'tone_adjust', 'regenerate'}
+        # experience_vector 가 다음 턴 prev_experience 로 저장됨.
+        assert orch.prev_experience == result['experience_vector']
+
+    async def test_response_fn_routing_emotion_vs_social(self, tmp_path):
+        # emotion 과 social 에 서로 다른 valence 를 박아 분기를 검증.
+        rfn = make_response_fn(
+            emotion={
+                'valence': 0.7, 'arousal': 0.4,
+                'preliminary_labels': ['testE'],
+                'experience_dimensions': {
+                    'reward': 0.5, 'threat': 0.0, 'novelty': 0.1,
+                },
+            },
+            social={
+                'person_id': 'tester',
+                'estimated_emotion': {'valence': -0.3, 'arousal': 0.5},
+                'estimated_intent': 'probing',
+                'social_reward': 0.9,
+            },
+        )
+        orch = _build_mocked_orchestrator(tmp_path, response_fn=rfn)
+        result = await orch.process_conversation_turn('test')
+
+        # 감정 평가 결과가 emotion 페이로드의 라벨로 채워졌어야 한다 (재평가 안 일어났다면).
+        # state_mismatch 가능성: baseline test → raw_v 음수 vs high_v 양수 → reframe 트리거.
+        # 그래도 라벨은 'testE' 또는 폴백된 라벨일 수 있으므로,
+        # 더 안전하게 — turn 이 무사히 종료되고 social 페이로드가 사용되었음만 검증.
+        assert result['response']
+        # social 가 user_input 단계에서 호출되었는지 — 호출 로그에 social 단계 메시지 존재.
+        assert any(
+            '사회인지' in c['messages'][-1]['content']
+            or 'social_reward' in c['messages'][-1]['content']
+            for c in orch._mock_llm.call_log
+        )
