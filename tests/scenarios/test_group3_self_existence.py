@@ -276,3 +276,152 @@ def test_scenario_21_self_other_boundary(tmp_path, monkeypatch):
     )
     # 두 모델이 비교 가능하다는 사실 자체가 자타 경계 *소멸의 가능성* 의 근거.
     assert diff['common_count'] >= 2
+# ---------------------------------------------------------------------------
+# 시나리오 22 — 자아 확장 (self-expansion)
+# ---------------------------------------------------------------------------
+
+
+def test_scenario_22_self_expansion(tmp_path, monkeypatch):
+    """지속적 novelty + bonding 입력 → bonding 상태 상승 + learning 활성화.
+
+    self_model.confidence 도 update() 를 통해 외부 갱신 가능하다는 invariant
+    까지 함께 검증한다 (spec §5.7).
+    """
+    orch, _ = _make_orch(tmp_path, monkeypatch)
+
+    baseline_bonding = orch.low_level.internal_state.to_dict()['bonding']
+    baseline_learning = orch.low_level.internal_state.to_dict()['learning']
+
+    expansion_exp = {
+        'reward': 0.6, 'novelty': 0.7, 'threat': 0.0,
+        'social_reward': 0.7, 'goal_progress': 0.3,
+    }
+    # 10 턴 동일 자극
+    for _ in range(10):
+        orch.low_level.run('', expansion_exp)
+
+    final_state = orch.low_level.internal_state.to_dict()
+
+    # bonding 은 social_reward 를 받아 +0.3 계수로 올라가야 함 (A 행렬)
+    assert final_state['bonding'] > baseline_bonding, (
+        f"bonding should grow: {final_state['bonding']:.3f} > {baseline_bonding:.3f}"
+    )
+    # learning 은 novelty 에 +0.2 로 반응 — baseline 대비 ≥ 약간 상승
+    assert final_state['learning'] >= baseline_learning - 1e-6, (
+        f"learning should not decrease: {final_state['learning']:.3f} vs {baseline_learning:.3f}"
+    )
+
+    # self_model.confidence 외부 update — 자아 확장의 인터페이스.
+    orig_conf = orch.self_model.confidence
+    orch.self_model.update({'confidence': min(1.0, orig_conf + 0.2)})
+    assert orch.self_model.confidence > orig_conf
+
+
+# ---------------------------------------------------------------------------
+# 시나리오 23 — 용서 (forgiveness)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_scenario_23_forgiveness(tmp_path, monkeypatch):
+    """강한 음성 마커 → reframe 재평가 → 양성 valence 결과.
+
+    spec §1.4: 메타인지가 트리거하는 reappraise 루프를 직접 호출하여,
+    원 prev_result 의 음성 valence 가 mock 응답을 통해 양성으로 전환되는지
+    검증한다. 마커 자체는 저수준 컬렉션에 직접 주입.
+    """
+    # mock 응답: 재평가는 양성 valence 로 응답하도록 emotion 페이로드 오버라이드.
+    overrides = {
+        'emotion': (
+            '{"valence":0.5,"arousal":0.4,"preliminary_labels":["수용","평온"],'
+            '"experience_dimensions":{"reward":0.5,"threat":0.0,"novelty":0.1}}'
+        ),
+    }
+    orch, _ = _make_orch(tmp_path, monkeypatch, overrides=overrides)
+
+    # 강한 음성 마커 사전 주입
+    orch.low_level.markers.markers['betrayal_pattern'] = Marker(
+        pattern_id='betrayal_pattern',
+        valence=-0.8,
+        strength=0.9,
+        age=0,
+    )
+    pre = orch.low_level.markers.markers['betrayal_pattern']
+    assert pre.valence < -0.5
+
+    # 재평가 직접 호출
+    prev_result = {
+        'valence': -0.6,
+        'arousal': 0.5,
+        'preliminary_labels': ['분노', '배신감'],
+        'experience_dimensions': {'reward': 0.0, 'threat': 0.6, 'novelty': 0.1},
+    }
+    new_result = await orch.emotion_appraisal.reappraise(
+        prev_result=prev_result,
+        strategy='reframe',
+        low_result={'raw_core_affect': {'valence': -0.5, 'arousal': 0.4}},
+        user_input='용서를 시도한다',
+    )
+    # 양성 valence 결과 — 용서의 인지적 결과
+    assert new_result['valence'] > 0.0, (
+        f"reframe 재평가 결과 valence={new_result['valence']:.3f} 가 양성이어야 한다"
+    )
+    # 오케스트레이터의 재평가 루프가 새 emotion_result 를 받을 수 있는 형태인지 (스키마 합치)
+    assert 'experience_dimensions' in new_result
+    assert {'reward', 'threat', 'novelty'} <= set(new_result['experience_dimensions'].keys())
+
+
+# ---------------------------------------------------------------------------
+# 시나리오 24 — 죽음 인식 (mortality awareness)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_scenario_24_mortality_awareness(tmp_path, monkeypatch):
+    """높은 turn_number + 메타 자원 다회 소모 → 회복 + 기질 표류 가능성 확인.
+
+    spec §9 의 정비 턴 사이클이 (a) 에러 없이 호출되고, (b) 자원이 회복되고,
+    (c) 기질 baselines 가 *변화 가능* 하다는 메커니즘 invariant 만 검증한다.
+    실제 200 턴 표류는 tests/test_lifecycle 가 다룬다.
+    """
+    orch, _ = _make_orch(tmp_path, monkeypatch)
+
+    # 죽음을 의식할 만큼 살아 본 시뮬레이션 — turn_number 점프
+    orch.turn_number = 1000
+
+    # 자원 다회 소모
+    for _ in range(20):
+        orch.metacognition.consume(0.05)
+    consumed_resource = orch.metacognition.resource
+    # floor 까지 떨어졌어야 함
+    assert consumed_resource <= orch.metacognition.floor + 1e-9
+
+    # 표류를 보려면 state 가 baselines 와 달라야 한다 (EMA 가 움직여야 drift 발생).
+    # stress 를 일시 끌어올린 뒤 정비 턴을 돌리면 drift 가 생긴다.
+    _set_state(orch, stress=0.8, comfort=0.1, reward=0.1)
+
+    initial_baselines = dict(orch.low_level.temperament.baselines)
+
+    # 정비 턴 다회 — 자원 회복 + 기질 표류
+    for _ in range(10):
+        result = await orch.process_maintenance_turn()
+        assert result['turn_number'] > 1000  # 진행 중인 시간
+        assert result['meta_resource'] is not None
+
+    # 자원이 회복 (recover() 가 floor 보다 높여줘야 함)
+    assert orch.metacognition.resource > consumed_resource, (
+        f"resource should recover: {orch.metacognition.resource:.3f} "
+        f"vs initial {consumed_resource:.3f}"
+    )
+
+    # 기질 baselines 가 *변화 가능* 한 메커니즘 — 실제 변화 검증.
+    # test config 의 beta=0.01, gamma=0.01 + 비기저 state 라서 미세 표류 보장.
+    final_baselines = orch.low_level.temperament.baselines
+    max_drift = max(
+        abs(final_baselines[p] - initial_baselines[p])
+        for p in InternalState.PARAMS
+    )
+    assert max_drift > 1e-9, (
+        f"baselines should drift across maintenance turns, max_drift={max_drift:.2e}"
+    )
+
