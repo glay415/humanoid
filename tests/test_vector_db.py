@@ -96,3 +96,54 @@ async def test_embed_returns_vector(vdb):
     assert len(vec) > 0
     # numpy float32 도 허용 — float() 가능하면 OK
     assert all(isinstance(float(v), float) for v in vec)
+
+
+# ---------------------------------------------------------------------------
+# audit γ5 — NaN/Inf distance 가 mood-bias rerank 정렬을 깨지 않는다.
+# ---------------------------------------------------------------------------
+
+async def test_search_skips_nan_distance_in_mood_rerank(vdb, monkeypatch):
+    """Chroma 가 NaN 거리를 반환해도 결과 정렬이 망가지지 않고, 정상 항목만 살아남는다."""
+    # 정상 record 두 개 + NaN 거리를 한 항목에 주입할 모의 응답.
+    vdb.upsert(_record("good", "the dog barked loudly", 0.5))
+    vdb.upsert(_record("bad", "the dog ran fast", 0.4))
+
+    nan_payload = {
+        "ids": [["good", "bad"]],
+        "documents": [["the dog barked loudly", "the dog ran fast"]],
+        "metadatas": [[
+            {"emotion_valence": 0.5, "emotion_arousal": 0.5, "emotion_labels": "[]"},
+            {"emotion_valence": 0.4, "emotion_arousal": 0.5, "emotion_labels": "[]"},
+        ]],
+        "distances": [[float("nan"), 0.3]],
+    }
+    monkeypatch.setattr(vdb.collection, "query", lambda **kw: nan_payload)
+
+    results = await vdb.search(
+        "dog", k=2, mood_bias={"valence": 0.5, "arousal": 0.5}
+    )
+
+    # NaN 항목은 결과에서 제외되어야 한다.
+    assert [r["id"] for r in results] == ["bad"]
+    # 점수가 정상 float
+    assert isinstance(results[0]["_score"], float)
+    assert not (results[0]["_score"] != results[0]["_score"])  # NaN 검사
+
+
+async def test_search_skips_inf_distance_in_mood_rerank(vdb, monkeypatch):
+    vdb.upsert(_record("a", "x", 0.0))
+    vdb.upsert(_record("b", "y", 0.0))
+    payload = {
+        "ids": [["a", "b"]],
+        "documents": [["x", "y"]],
+        "metadatas": [[
+            {"emotion_valence": 0.0, "emotion_arousal": 0.0, "emotion_labels": "[]"},
+            {"emotion_valence": 0.0, "emotion_arousal": 0.0, "emotion_labels": "[]"},
+        ]],
+        "distances": [[float("inf"), 0.5]],
+    }
+    monkeypatch.setattr(vdb.collection, "query", lambda **kw: payload)
+    results = await vdb.search(
+        "anything", k=2, mood_bias={"valence": 0.0}
+    )
+    assert [r["id"] for r in results] == ["b"]

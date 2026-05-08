@@ -8,6 +8,7 @@ flat 형태로만 저장 가능하므로 emotion_tag 는 valence/arousal/labels(
 from __future__ import annotations
 
 import json
+import math
 from typing import Any
 
 import chromadb
@@ -115,13 +116,20 @@ class VectorDB:
 
         if mood_bias is not None:
             mood_v = float(mood_bias.get("valence", 0.0))
+            # audit γ5: NaN/Inf 거리는 정렬을 깨뜨리므로 mood-bias rerank 단계에서 스킵.
+            #          (정상 값으로 복구 불가능 → 결과 후보에서 제외하는 게 안전.)
+            cleaned: list[dict] = []
             for entry in results:
-                semantic_score = 1.0 / (1.0 + entry["distance"])
+                dist = entry["distance"]
+                if math.isnan(dist) or math.isinf(dist):
+                    continue
+                semantic_score = 1.0 / (1.0 + dist)
                 emo_v = float(entry.get("emotion_valence", 0.0))
                 mood_match = 1.0 - abs(mood_v - emo_v) / 2.0
                 entry["_score"] = semantic_score + 0.5 * mood_match
-            results.sort(key=lambda e: -e["_score"])
-            results = results[:k]
+                cleaned.append(entry)
+            cleaned.sort(key=lambda e: -e["_score"])
+            results = cleaned[:k]
         else:
             results = results[:k]
 
