@@ -3,6 +3,7 @@ import type {
   PersonaInfo,
   ServerState,
   SpawnRequest,
+  WipeResponse,
 } from './types';
 
 export async function fetchHealth(): Promise<{ ok: boolean; turn_number: number }> {
@@ -77,4 +78,36 @@ export async function resetInstance(instanceId: string): Promise<void> {
   if (!res.ok && res.status !== 204) {
     throw new Error(`POST /api/instances/${instanceId}/reset responded ${res.status}`);
   }
+}
+
+// --- wave12: destructive operations ---
+
+// Hard reset: wipe an instance's persistent storage (chroma / sqlite / state)
+// while preserving its persona + jitter_seed for deterministic respawn.
+export async function hardResetInstance(instanceId: string): Promise<InstanceCard> {
+  const res = await fetch(
+    `/api/instances/${encodeURIComponent(instanceId)}/hard-reset`,
+    { method: 'POST' },
+  );
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new Error(
+      `POST /api/instances/${instanceId}/hard-reset responded ${res.status} ${detail}`.trim(),
+    );
+  }
+  return (await res.json()) as InstanceCard;
+}
+
+// Global wipe: deletes ALL instances. Server requires `confirm === "WIPE"`.
+export async function wipeAll(confirm: string): Promise<WipeResponse> {
+  const res = await fetch('/api/admin/wipe', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ confirm }),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new Error(`POST /api/admin/wipe responded ${res.status} ${detail}`.trim());
+  }
+  return (await res.json()) as WipeResponse;
 }
