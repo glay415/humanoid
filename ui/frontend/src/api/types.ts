@@ -64,6 +64,41 @@ export type ServerState = {
   markers: Marker[];
   self_model: SelfModel;
   meta_resource: number;
+  // Present on instance-scoped /api/instances/{id} responses; absent on the
+  // legacy /api/state route.
+  instance_id?: string;
+  display_name?: string;
+};
+
+// Persona catalog and multi-instance spawn types (wave11).
+
+export type PersonaSummary = {
+  key_baselines: Record<string, number>;
+  key_traits: string[];
+};
+
+export type PersonaInfo = {
+  id: string;
+  display_name: string;
+  description: string;
+  summary: PersonaSummary;
+};
+
+export type InstanceCard = {
+  instance_id: string;
+  display_name: string;
+  persona_id: string;
+  persona_display_name: string;
+  turn_number: number;
+  last_mood: CoreAffect;
+  last_active: string;  // ISO 8601
+  created_at: string;   // ISO 8601
+};
+
+export type SpawnRequest = {
+  persona_id: string;
+  display_name?: string;
+  jitter?: number; // 0..1
 };
 
 // Per-event payloads emitted on /api/turn.
