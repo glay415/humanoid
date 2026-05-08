@@ -22,18 +22,18 @@ export function DrivesPanel({ drives, pending }: DrivesPanelProps) {
   const live = pending ?? drives;
 
   return (
-    <section className="rounded-lg bg-white border border-ink-200 p-4">
-      <h3 className="text-xs uppercase tracking-widest font-mono text-ink-500 mb-3 flex items-center justify-between">
+    <section className="rounded-lg bg-white border border-ink-200 dark:bg-zinc-900 dark:border-zinc-800 p-4">
+      <h3 className="text-xs uppercase tracking-widest font-mono text-ink-500 dark:text-zinc-400 mb-3 flex items-center justify-between">
         <span>drives</span>
         {live && (
-          <span className="text-ink-400 normal-case tracking-normal">
+          <span className="text-ink-400 dark:text-zinc-500 normal-case tracking-normal">
             max deficit{' '}
-            <span className="tabular-nums text-ink-700">{live.max_deficit.toFixed(2)}</span>
+            <span className="tabular-nums text-ink-700 dark:text-zinc-300">{live.max_deficit.toFixed(2)}</span>
           </span>
         )}
       </h3>
       {!live ? (
-        <p className="text-xs text-ink-400 font-mono">(드라이브 데이터 없음)</p>
+        <p className="text-xs text-ink-400 dark:text-zinc-500 font-mono">(드라이브 데이터 없음)</p>
       ) : (
         <ul className="space-y-2.5">
           {DRIVE_ORDER.map((key) => {
@@ -43,18 +43,25 @@ export function DrivesPanel({ drives, pending }: DrivesPanelProps) {
             return (
               <li key={key}>
                 <div className="flex items-center justify-between text-xs font-mono mb-1">
-                  <span className="flex items-center gap-1.5 text-ink-700">
+                  <span className="flex items-center gap-1.5 text-ink-700 dark:text-zinc-300">
                     {isHighDeficit && (
                       <span
-                        className="inline-block w-1.5 h-1.5 rounded-full bg-red-500"
+                        className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 dark:bg-red-400"
                         aria-label="결핍"
                       />
                     )}
                     {DRIVE_LABEL[key]}
                   </span>
-                  <span className="text-ink-500 tabular-nums">
+                  <span className="text-ink-500 dark:text-zinc-400 tabular-nums">
                     {fulfillment.toFixed(2)}
-                    <span className={cn('ml-1', isHighDeficit ? 'text-red-500' : 'text-ink-400')}>
+                    <span
+                      className={cn(
+                        'ml-1',
+                        isHighDeficit
+                          ? 'text-red-500 dark:text-red-400'
+                          : 'text-ink-400 dark:text-zinc-500',
+                      )}
+                    >
                       Δ{deficit.toFixed(2)}
                     </span>
                   </span>
@@ -62,13 +69,17 @@ export function DrivesPanel({ drives, pending }: DrivesPanelProps) {
                 <div
                   className={cn(
                     'relative h-2 rounded-full overflow-hidden',
-                    isHighDeficit ? 'bg-red-100' : 'bg-ink-100',
+                    isHighDeficit
+                      ? 'bg-red-100 dark:bg-red-950/50'
+                      : 'bg-ink-100 dark:bg-zinc-800',
                   )}
                 >
                   <div
                     className={cn(
                       'absolute inset-y-0 left-0 rounded-full transition-all',
-                      isHighDeficit ? 'bg-red-500' : 'bg-sky-500',
+                      isHighDeficit
+                        ? 'bg-red-500 dark:bg-red-400'
+                        : 'bg-sky-500 dark:bg-sky-400',
                     )}
                     style={{ width: `${fulfillment * 100}%` }}
                   />

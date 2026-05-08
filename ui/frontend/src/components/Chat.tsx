@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { RotateCcw, Send } from 'lucide-react';
 import { cn } from '../lib/cn';
 import type { Stage, ChatMessage } from '../hooks/useChat';
@@ -33,6 +33,7 @@ type ChatProps = {
   onSend: (text: string) => void | Promise<void>;
   onReset: () => void | Promise<void>;
   disabled?: boolean;
+  headerExtra?: ReactNode;
 };
 
 export function Chat({
@@ -43,6 +44,7 @@ export function Chat({
   onSend,
   onReset,
   disabled,
+  headerExtra,
 }: ChatProps) {
   const [draft, setDraft] = useState('');
   const listRef = useRef<HTMLDivElement>(null);
@@ -80,25 +82,28 @@ export function Chat({
 
   return (
     <div className="flex flex-col h-full">
-      <header className="flex items-center justify-between px-6 py-4 border-b border-ink-200">
+      <header className="flex items-center justify-between px-6 py-4 border-b border-ink-200 dark:border-zinc-800">
         <div className="flex items-baseline gap-3">
-          <h1 className="font-semibold tracking-tight text-lg">humanoid</h1>
-          <span className="text-xs font-mono text-ink-400">v12 cognitive architecture</span>
+          <h1 className="font-semibold tracking-tight text-lg dark:text-zinc-100">humanoid</h1>
+          <span className="text-xs font-mono text-ink-400 dark:text-zinc-500">v12 cognitive architecture</span>
         </div>
-        <button
-          type="button"
-          onClick={() => void onReset()}
-          className="inline-flex items-center gap-1.5 text-xs font-mono text-ink-500 hover:text-ink-900 px-2.5 py-1.5 rounded-md hover:bg-ink-100 transition-colors"
-          aria-label="대화 초기화"
-        >
-          <RotateCcw size={14} />
-          reset
-        </button>
+        <div className="flex items-center gap-1">
+          {headerExtra}
+          <button
+            type="button"
+            onClick={() => void onReset()}
+            className="inline-flex items-center gap-1.5 text-xs font-mono text-ink-500 hover:text-ink-900 dark:text-zinc-400 dark:hover:text-zinc-100 px-2.5 py-1.5 rounded-md hover:bg-ink-100 dark:hover:bg-zinc-800 transition-colors"
+            aria-label="대화 초기화"
+          >
+            <RotateCcw size={14} />
+            reset
+          </button>
+        </div>
       </header>
 
       <div ref={listRef} className="flex-1 overflow-y-auto scroll-thin px-6 py-6 space-y-4">
         {messages.length === 0 && (
-          <div className="text-sm text-ink-400 font-mono">
+          <div className="text-sm text-ink-400 dark:text-zinc-500 font-mono">
             메시지를 입력해 대화를 시작하세요. (Enter 전송 / Shift+Enter 줄바꿈)
           </div>
         )}
@@ -110,25 +115,25 @@ export function Chat({
         {/* Live preview of the in-progress assistant turn */}
         {isActive && pendingFinal && (
           <div className="flex justify-start">
-            <div className="max-w-[80%] rounded-2xl px-4 py-3 bg-ink-100 text-ink-700 border border-dashed border-ink-300">
-              <div className="text-xs font-mono text-ink-500 mb-1">초안</div>
+            <div className="max-w-[80%] rounded-2xl px-4 py-3 bg-ink-100 dark:bg-zinc-800 text-ink-700 dark:text-zinc-300 border border-dashed border-ink-300 dark:border-zinc-600">
+              <div className="text-xs font-mono text-ink-500 dark:text-zinc-400 mb-1">초안</div>
               <div className="whitespace-pre-wrap text-sm">{pendingFinal.text}</div>
             </div>
           </div>
         )}
 
         {isActive && (
-          <div className="flex items-center gap-2 text-xs font-mono text-ink-500">
+          <div className="flex items-center gap-2 text-xs font-mono text-ink-500 dark:text-zinc-400">
             <span className="relative flex h-2 w-2">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500 dark:bg-emerald-400" />
             </span>
             {STAGE_LABEL[currentStage]}
           </div>
         )}
 
         {errors.length > 0 && (
-          <div className="rounded-md border border-red-300 bg-red-50 text-red-700 text-xs font-mono px-3 py-2 space-y-1">
+          <div className="rounded-md border border-red-300 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300 text-xs font-mono px-3 py-2 space-y-1">
             {errors.slice(-3).map((e, i) => (
               <div key={i}>
                 <span className="font-semibold">[{e.stage}]</span> {e.message}
@@ -140,9 +145,9 @@ export function Chat({
 
       <form
         onSubmit={onSubmit}
-        className="border-t border-ink-200 px-4 py-3 bg-white"
+        className="border-t border-ink-200 dark:border-zinc-800 px-4 py-3 bg-white dark:bg-zinc-900"
       >
-        <div className="flex items-end gap-2 rounded-xl border border-ink-200 focus-within:border-ink-400 transition-colors px-3 py-2 bg-white">
+        <div className="flex items-end gap-2 rounded-xl border border-ink-200 dark:border-zinc-700 focus-within:border-ink-400 dark:focus-within:border-zinc-500 transition-colors px-3 py-2 bg-white dark:bg-zinc-900">
           <textarea
             ref={taRef}
             value={draft}
@@ -151,7 +156,7 @@ export function Chat({
             rows={1}
             placeholder="메시지를 입력하세요..."
             disabled={disabled}
-            className="flex-1 resize-none bg-transparent outline-none text-sm leading-6 max-h-40 font-sans placeholder:text-ink-400"
+            className="flex-1 resize-none bg-transparent outline-none text-sm leading-6 max-h-40 font-sans placeholder:text-ink-400 dark:placeholder:text-zinc-500 dark:text-zinc-100"
           />
           <button
             type="submit"
@@ -159,8 +164,8 @@ export function Chat({
             className={cn(
               'inline-flex items-center justify-center w-9 h-9 rounded-lg transition-colors',
               disabled || draft.trim().length === 0
-                ? 'bg-ink-200 text-ink-400 cursor-not-allowed'
-                : 'bg-ink-900 text-white hover:bg-ink-700',
+                ? 'bg-ink-200 text-ink-400 cursor-not-allowed dark:bg-zinc-800 dark:text-zinc-600'
+                : 'bg-ink-900 text-white hover:bg-ink-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white',
             )}
             aria-label="전송"
           >
@@ -180,13 +185,20 @@ function Bubble({ message }: { message: ChatMessage }) {
         className={cn(
           'max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap',
           isUser
-            ? 'bg-ink-900 text-white rounded-br-sm'
-            : 'bg-white border border-ink-200 text-ink-900 rounded-bl-sm',
+            ? 'bg-ink-900 text-white rounded-br-sm dark:bg-zinc-100 dark:text-zinc-900'
+            : 'bg-white border border-ink-200 text-ink-900 rounded-bl-sm dark:bg-zinc-900 dark:border-zinc-800 dark:text-zinc-100',
         )}
       >
         {message.text}
         {message.turn !== undefined && (
-          <div className={cn('mt-1 text-[10px] font-mono', isUser ? 'text-ink-300' : 'text-ink-400')}>
+          <div
+            className={cn(
+              'mt-1 text-[10px] font-mono',
+              isUser
+                ? 'text-ink-300 dark:text-zinc-500'
+                : 'text-ink-400 dark:text-zinc-500',
+            )}
+          >
             turn {message.turn}
           </div>
         )}

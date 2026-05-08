@@ -12,19 +12,19 @@ const ACTION_LABEL: Record<ToneAction, string> = {
 };
 
 const ACTION_STYLE: Record<ToneAction, string> = {
-  pass: 'bg-emerald-100 text-emerald-700 border-emerald-200',
-  tone_adjust: 'bg-amber-100 text-amber-700 border-amber-200',
-  regenerate: 'bg-red-100 text-red-700 border-red-200',
+  pass: 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-900',
+  tone_adjust: 'bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-950/50 dark:text-amber-300 dark:border-amber-900',
+  regenerate: 'bg-red-100 text-red-700 border-red-200 dark:bg-red-950/50 dark:text-red-300 dark:border-red-900',
 };
 
 export function ActionBadge({ tone }: ActionBadgeProps) {
   return (
-    <section className="rounded-lg bg-white border border-ink-200 p-4">
-      <h3 className="text-xs uppercase tracking-widest font-mono text-ink-500 mb-3">
+    <section className="rounded-lg bg-white border border-ink-200 dark:bg-zinc-900 dark:border-zinc-800 p-4">
+      <h3 className="text-xs uppercase tracking-widest font-mono text-ink-500 dark:text-zinc-400 mb-3">
         last action
       </h3>
       {!tone ? (
-        <p className="text-xs text-ink-400 font-mono">(아직 톤 검증 결과 없음)</p>
+        <p className="text-xs text-ink-400 dark:text-zinc-500 font-mono">(아직 톤 검증 결과 없음)</p>
       ) : (
         <>
           <div className="flex items-center gap-2 mb-2">
@@ -36,26 +36,26 @@ export function ActionBadge({ tone }: ActionBadgeProps) {
             >
               {ACTION_LABEL[tone.action]}
             </span>
-            <span className="text-xs font-mono text-ink-500 tabular-nums">
+            <span className="text-xs font-mono text-ink-500 dark:text-zinc-400 tabular-nums">
               delay {tone.recommended_delay_ms}ms
             </span>
           </div>
-          <div className="text-xs font-mono text-ink-500 mb-2 flex gap-3">
+          <div className="text-xs font-mono text-ink-500 dark:text-zinc-400 mb-2 flex gap-3">
             <span>
               v{' '}
-              <span className="text-ink-900 tabular-nums">
+              <span className="text-ink-900 dark:text-zinc-100 tabular-nums">
                 {tone.tone_eval.response_valence.toFixed(2)}
               </span>
             </span>
             <span>
               a{' '}
-              <span className="text-ink-900 tabular-nums">
+              <span className="text-ink-900 dark:text-zinc-100 tabular-nums">
                 {tone.tone_eval.response_arousal.toFixed(2)}
               </span>
             </span>
           </div>
           {tone.tone_eval.rationale && (
-            <p className="text-xs text-ink-600 leading-relaxed">
+            <p className="text-xs text-ink-600 dark:text-zinc-400 leading-relaxed">
               {tone.tone_eval.rationale}
             </p>
           )}

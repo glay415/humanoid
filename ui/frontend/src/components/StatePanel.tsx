@@ -35,10 +35,10 @@ type StatePanelProps = {
 // are in [0, 1] in the v12 architecture, so a 0.2 delta is large.
 function deviationColor(delta: number): string {
   const a = Math.abs(delta);
-  if (a < 0.05) return 'bg-emerald-500';
-  if (a < 0.12) return 'bg-lime-500';
-  if (a < 0.2) return 'bg-amber-500';
-  return 'bg-red-500';
+  if (a < 0.05) return 'bg-emerald-500 dark:bg-emerald-400';
+  if (a < 0.12) return 'bg-lime-500 dark:bg-lime-400';
+  if (a < 0.2) return 'bg-amber-500 dark:bg-amber-400';
+  return 'bg-red-500 dark:bg-red-400';
 }
 
 function clamp01(x: number): number {
@@ -50,12 +50,12 @@ export function StatePanel({ internalState, baselines, pendingLowLevel }: StateP
   // Prefer the live in-flight state if available so bars react during a turn.
   const live = pendingLowLevel?.state ?? internalState;
   return (
-    <section className="rounded-lg bg-white border border-ink-200 p-4">
-      <h3 className="text-xs uppercase tracking-widest font-mono text-ink-500 mb-3">
+    <section className="rounded-lg bg-white border border-ink-200 dark:bg-zinc-900 dark:border-zinc-800 p-4">
+      <h3 className="text-xs uppercase tracking-widest font-mono text-ink-500 dark:text-zinc-400 mb-3">
         internal state
       </h3>
       {!live && (
-        <p className="text-xs text-ink-400 font-mono">상태 로드 중...</p>
+        <p className="text-xs text-ink-400 dark:text-zinc-500 font-mono">상태 로드 중...</p>
       )}
       {live && (
         <ul className="space-y-2.5">
@@ -67,23 +67,23 @@ export function StatePanel({ internalState, baselines, pendingLowLevel }: StateP
             return (
               <li key={key}>
                 <div className="flex items-center justify-between text-xs font-mono mb-1">
-                  <span className="text-ink-700">{PARAM_LABEL[key]}</span>
-                  <span className="text-ink-500 tabular-nums">
+                  <span className="text-ink-700 dark:text-zinc-300">{PARAM_LABEL[key]}</span>
+                  <span className="text-ink-500 dark:text-zinc-400 tabular-nums">
                     {value.toFixed(2)}
-                    <span className="ml-1 text-ink-400">
+                    <span className="ml-1 text-ink-400 dark:text-zinc-500">
                       ({delta >= 0 ? '+' : ''}
                       {delta.toFixed(2)})
                     </span>
                   </span>
                 </div>
-                <div className="relative h-2 rounded-full bg-ink-100 overflow-hidden">
+                <div className="relative h-2 rounded-full bg-ink-100 dark:bg-zinc-800 overflow-hidden">
                   <div
                     className={cn('absolute inset-y-0 left-0 rounded-full transition-all', color)}
                     style={{ width: `${value * 100}%` }}
                   />
                   {/* Baseline marker */}
                   <div
-                    className="absolute inset-y-0 w-px bg-ink-500"
+                    className="absolute inset-y-0 w-px bg-ink-500 dark:bg-zinc-400"
                     style={{ left: `calc(${baseline * 100}% - 0.5px)` }}
                     aria-hidden
                   />
