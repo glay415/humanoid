@@ -106,3 +106,47 @@ def test_constructor_defaults():
     om = OtherModel()
     assert om.general_weight == pytest.approx(0.8)
     assert om.min_observations == 10
+
+
+# ---------------------------------------------------------------------------
+# audit γ1 — 보호 키 포이즈닝 방어
+# ---------------------------------------------------------------------------
+
+def test_update_observation_ignores_protected_observation_count():
+    """관찰 dict 가 observation_count 를 들고와도 카운터를 덮어쓰면 안 된다."""
+    om = OtherModel()
+    om.update_observation({})  # 1
+    om.update_observation({'observation_count': 0})  # 들고와도 무시 → 2
+
+    assert om.data['observation_count'] == 2
+
+
+def test_update_observation_ignores_protected_threat_streak():
+    om = OtherModel()
+    om.record_threat(True)
+    om.record_threat(True)
+    assert om.data['threat_streak'] == 2
+
+    # 외부에서 streak 을 들고와도 무시
+    om.update_observation({'threat_streak': 0, 'narrative': 'noisy'})
+    assert om.data['threat_streak'] == 2
+    assert om.data['narrative'] == 'noisy'  # 비보호 키는 정상 반영
+
+
+def test_update_observation_ignores_protected_threshold():
+    om = OtherModel()
+    om.update_observation({'threat_streak_threshold': 1})
+    assert om.data['threat_streak_threshold'] == 3  # 초기값 유지
+
+
+def test_update_observation_still_merges_normal_keys():
+    """보호 키 외 평범한 필드는 여전히 병합된다 (회귀 방지)."""
+    om = OtherModel()
+    om.update_observation({
+        'narrative': '친절',
+        'confidence': 0.7,
+        'observation_count': 99,  # 무시되어야 함
+    })
+    assert om.data['narrative'] == '친절'
+    assert om.data['confidence'] == pytest.approx(0.7)
+    assert om.data['observation_count'] == 1  # 자체 증가만 반영

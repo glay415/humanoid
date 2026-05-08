@@ -8,6 +8,7 @@ flat 형태로만 저장 가능하므로 emotion_tag 는 valence/arousal/labels(
 from __future__ import annotations
 
 import json
+import math
 from typing import Any
 
 import chromadb
@@ -23,7 +24,10 @@ def _flatten_record(record: dict) -> dict[str, Any]:
         if key == "emotion_tag" and isinstance(value, dict):
             metadata["emotion_valence"] = float(value.get("valence", 0.0))
             metadata["emotion_arousal"] = float(value.get("arousal", 0.0))
-            metadata["emotion_labels"] = json.dumps(list(value.get("labels", [])))
+            # audit γ6: labels 가 None / 잘못된 타입이면 빈 리스트로 강제.
+            raw_labels = value.get("labels")
+            labels = raw_labels if isinstance(raw_labels, list) else []
+            metadata["emotion_labels"] = json.dumps(labels)
             continue
         # bool 도 chroma 가 허용. 리스트/딕트는 직렬화.
         if isinstance(value, (str, int, float, bool)) or value is None:
@@ -115,13 +119,20 @@ class VectorDB:
 
         if mood_bias is not None:
             mood_v = float(mood_bias.get("valence", 0.0))
+            # audit γ5: NaN/Inf 거리는 정렬을 깨뜨리므로 mood-bias rerank 단계에서 스킵.
+            #          (정상 값으로 복구 불가능 → 결과 후보에서 제외하는 게 안전.)
+            cleaned: list[dict] = []
             for entry in results:
-                semantic_score = 1.0 / (1.0 + entry["distance"])
+                dist = entry["distance"]
+                if math.isnan(dist) or math.isinf(dist):
+                    continue
+                semantic_score = 1.0 / (1.0 + dist)
                 emo_v = float(entry.get("emotion_valence", 0.0))
                 mood_match = 1.0 - abs(mood_v - emo_v) / 2.0
                 entry["_score"] = semantic_score + 0.5 * mood_match
-            results.sort(key=lambda e: -e["_score"])
-            results = results[:k]
+                cleaned.append(entry)
+            cleaned.sort(key=lambda e: -e["_score"])
+            results = cleaned[:k]
         else:
             results = results[:k]
 

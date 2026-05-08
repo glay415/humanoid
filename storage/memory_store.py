@@ -115,12 +115,16 @@ class EpisodicMemory:
     def _reconsolidate(self, memory: dict, core_affect: dict) -> None:
         """재고정화: new_tag = α × core_affect + (1-α) × original."""
         orig = memory['emotion_tag']
+        # audit γ6: legacy 메모리 일부는 labels=None 으로 직렬화되어 있어
+        # 다음 단계 _flatten_record 에서 list(None) → TypeError 가 났다.
+        # 'or []' 로 None / 빈문자열 / 누락 모두를 빈 리스트로 정규화.
+        labels = orig.get('labels') or []
         memory['emotion_tag'] = {
             'valence': self.alpha * core_affect['valence']
                        + (1 - self.alpha) * orig['valence'],
             'arousal': self.alpha * core_affect['arousal']
                        + (1 - self.alpha) * orig['arousal'],
-            'labels': orig.get('labels', []),
+            'labels': labels,
         }
         memory['retrieval_count'] += 1
         memory['reconsolidated'] = True

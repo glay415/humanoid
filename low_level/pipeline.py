@@ -62,8 +62,9 @@ class LowLevelPipeline:
             state_dict, drive_status, raw_core_affect
         )
 
-        # 기질 표류 (매 턴)
+        # 기질 표류 (매 턴) + InternalState 기저선 동기화 (audit α1)
         self.temperament.drift(self.internal_state.state)
+        self.internal_state.set_baselines(self.temperament.baselines)
 
         return {
             'state': state_dict,

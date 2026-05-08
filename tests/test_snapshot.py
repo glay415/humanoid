@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from storage.snapshot import SnapshotManager
 
 
@@ -13,17 +15,20 @@ def test_freeze_populates_snapshot():
     assert mgr.read('bar') == {'x': 2}
 
 
-def test_freeze_clears_prior_pending_writes():
-    """이전 턴의 스테이징은 freeze 호출 시 폐기된다."""
+def test_freeze_raises_when_pending_writes_remain():
+    """audit γ7 — 이전 턴 스테이징이 남아 있으면 freeze 가 RuntimeError.
+
+    이전 동작 (조용히 폐기) 은 commit/rollback 을 잊은 호출자의 데이터를
+    소리 없이 잃게 만들어 위험했다. 이제는 명시적 실패로 즉시 노출된다.
+    """
     mgr = SnapshotManager()
     mgr.stage_write('a', {'v': 1})
 
-    calls = []
-    mgr.freeze({})
-    mgr.commit(lambda k, v: calls.append((k, v)))
+    with pytest.raises(RuntimeError, match="uncommitted writes"):
+        mgr.freeze({})
 
-    assert calls == []
-    assert mgr._pending_writes == []
+    # 실패한 freeze 가 스테이징을 망치지 않았다.
+    assert mgr._pending_writes == [('a', {'v': 1})]
 
 
 def test_read_returns_none_for_missing_key():
@@ -87,18 +92,23 @@ def test_rollback_clears_staged_writes():
 
 
 def test_multiple_freeze_cycles():
-    """freeze → stage → freeze → 새 스냅샷 반영, 펜딩 비움."""
+    """freeze → stage → commit → freeze → 새 스냅샷 반영.
+
+    audit γ7 이후로는 commit/rollback 없는 freeze 가 허용되지 않는다.
+    """
     mgr = SnapshotManager()
     mgr.freeze({'a': 1})
     assert mgr.read('a') == 1
 
     mgr.stage_write('a', {'v': 'staged'})
-    mgr.freeze({'a': 2})
-
-    assert mgr.read('a') == 2
     calls: list = []
     mgr.commit(lambda k, v: calls.append((k, v)))
-    assert calls == []  # 두 번째 freeze가 펜딩 라이트를 폐기
+    assert calls == [('a', {'v': 'staged'})]
+
+    mgr.freeze({'a': 2})
+    assert mgr.read('a') == 2
+    # 두 번째 freeze 는 비어 있는 펜딩 위에서만 통과해야 한다.
+    assert mgr._pending_writes == []
 
 
 def test_stage_write_accepts_arbitrary_value_types():

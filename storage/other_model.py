@@ -6,6 +6,14 @@ Phase 2에서 구현.
 
 from __future__ import annotations
 
+# audit γ1: 외부 관찰이 절대 덮어쓸 수 없는 내부 상태 키.
+# update_observation 의 dict.update 가 카운터/스트릭을 직접 리셋하는 걸 막는다.
+_PROTECTED_KEYS: frozenset[str] = frozenset({
+    'observation_count',
+    'threat_streak',
+    'threat_streak_threshold',
+})
+
 
 class OtherModel:
     """타자 모델 관리."""
@@ -31,7 +39,9 @@ class OtherModel:
         # 가중치: 관찰 횟수에 따라 일반 모델 → 개별 모델 전환
         individual_weight = min(1.0 - self.general_weight, n / (n + self.min_observations))
         # Phase 5에서 상세 구현
-        self.data.update(observation)
+        # audit γ1: 보호 키를 제거한 뒤 병합 — 카운터/스트릭 포이즈닝 방지.
+        safe = {k: v for k, v in observation.items() if k not in _PROTECTED_KEYS}
+        self.data.update(safe)
 
     def record_threat(self, is_threat: bool) -> bool:
         """threat 연속 카운트. threshold 도달 시 True 반환 (관계 하강)."""

@@ -14,8 +14,18 @@ class SnapshotManager:
         self._snapshot: dict = {}
 
     def freeze(self, current_state: dict) -> None:
-        """저수준 처리 완료 후 스냅샷 고정."""
+        """저수준 처리 완료 후 스냅샷 고정.
+
+        audit γ7: 이전에는 _pending_writes 를 조용히 비웠으나, commit/rollback
+        을 잊은 호출자가 다음 freeze 에서 스테이징을 통째로 잃는 사고가 가능했다.
+        명시적으로 RuntimeError 를 올려 호출 측 실수를 즉시 노출한다.
+        """
+        if self._pending_writes:
+            raise RuntimeError(
+                "uncommitted writes; call commit() or rollback() first"
+            )
         self._snapshot = dict(current_state)
+        # _pending_writes 는 이미 비어 있으나 명확성을 위해 유지.
         self._pending_writes.clear()
 
     def read(self, key: str):

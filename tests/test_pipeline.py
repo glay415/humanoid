@@ -192,6 +192,27 @@ def test_multi_turn_mood_converges(pipeline):
         prev_mood_valence = cur_mood_v
 
 
+# ---------- 9b. InternalState.baselines 가 Temperament.baselines 와 동기 (audit α1) ----------
+
+def test_internal_state_baselines_track_temperament_drift(pipeline):
+    """50턴 후 두 기저선이 일치 — 기존 desync 버그 회귀."""
+    exp = {
+        'reward': 1.0,
+        'novelty': 1.0,
+        'threat': 0.0,
+        'social_reward': 1.0,
+        'goal_progress': 1.0,
+    }
+    for _ in range(50):
+        pipeline.run('', exp)
+
+    # 두 기저선이 같은 값이어야 한다.
+    for i, p in enumerate(pipeline.internal_state.PARAMS):
+        assert pipeline.internal_state.baselines[i] == pytest.approx(
+            pipeline.temperament.baselines[p], abs=1e-12
+        ), f"{p} desync: engine={pipeline.internal_state.baselines[i]} vs temp={pipeline.temperament.baselines[p]}"
+
+
 # ---------- 10. 반환 타입 검증 ----------
 
 def test_return_types(pipeline):

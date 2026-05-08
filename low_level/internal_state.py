@@ -59,6 +59,15 @@ class InternalState:
         # D: 자기 감쇠 대각 행렬. 모든 원소 > 0.
         self.D = np.diag(np.full(9, 0.1, dtype=np.float64))
 
+    def set_baselines(self, baselines: dict[str, float]) -> None:
+        """기질 표류 후 기저선 동기화 — Temperament.drift 직후에 호출.
+
+        audit α1: InternalState 가 init 때만 기저선 스냅샷을 잡으면
+        D 행렬이 옛 기저선 쪽으로 끌어당기는 desync 가 누적된다.
+        """
+        for i, p in enumerate(self.PARAMS):
+            self.baselines[i] = float(baselines[p])
+
     def update(self, experience_vector: np.ndarray) -> np.ndarray:
         """3행렬 상태 업데이트. 반환: 업데이트된 state (9,)."""
         deviation = self.state - self.baselines
