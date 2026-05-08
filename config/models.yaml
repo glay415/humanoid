@@ -1,25 +1,27 @@
 # LLM 모델 설정 (OpenAI via LiteLLM)
 # 환경변수: AGENT_OPENAI_API_KEY (런타임에 OPENAI_API_KEY로 매핑됨)
 # 2026-04 출시 gpt-5.5 올인 — 4o 시리즈는 legacy.
+# 주의: gpt-5.5 는 temperature 의 기본값(1.0)만 지원. 다른 값 지정 시 BadRequest.
+#       그래서 temperature 키는 명시하지 않거나 1.0 으로 고정.
 small_model:
   provider: "openai"
   model: "gpt-5.5"
   max_tokens: 1024
-  temperature: 0.7
+  temperature: 1.0
   timeout_ms: 12000
 
 large_model:
   provider: "openai"
   model: "gpt-5.5"
   max_tokens: 2048
-  temperature: 0.8
+  temperature: 1.0
   timeout_ms: 25000
 
 dmn_model:
   provider: "openai"
   model: "gpt-5.5"
   max_tokens: 1024
-  temperature: 0.9
+  temperature: 1.0
   timeout_ms: 15000
 
 # 구현 옵션 (최소/표준/풀)

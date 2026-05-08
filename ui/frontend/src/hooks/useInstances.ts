@@ -130,11 +130,22 @@ export function useInstances(): UseInstancesResult {
   // wave12: per-instance hard reset. Persona + jitter_seed preserved on the
   // server; the card returned has turn_number=0 and zeroed last_mood. We swap
   // the card in-place so the UI updates instantly.
+  // 또한 — 활성 인스턴스를 hard reset 한 경우 useChat 의 instance-effect 가 같은
+  // id 로는 재발동하지 않으므로 (Object.is(prev, next)), selectedId 를 잠깐 null 로
+  // 토글해서 useChat 이 messages 초기화 + refreshState 하도록 강제한다.
   const hardReset = useCallback(async (id: string): Promise<InstanceCard> => {
     const card = await hardResetInstance(id);
     setInstances((prev) =>
       prev.map((c) => (c.instance_id === id ? card : c)),
     );
+    setSelectedIdState((prev) => {
+      if (prev === id) {
+        // 다음 microtask 에 같은 id 로 다시 set — useChat 의 useEffect 재발동.
+        queueMicrotask(() => setSelectedIdState(id));
+        return null;
+      }
+      return prev;
+    });
     return card;
   }, []);
 

@@ -10,10 +10,48 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+Phase 1 audit-fix + observability wave (will become v0.3.0). Currently in progress on `main`; not yet promoted to `release`.
+
+### Added
+- **Persistent JSONL logging** per instance (`storage/logger.py`, Wave 14A): three append-only streams — `turns.jsonl` (one line per conversation turn, full state/mood/drives/emotion/action snapshot), `events.jsonl` (markers, fast_path, reappraisal, auto_encode, dmn_activity, llm_error), `drift.jsonl` (temperament drift per maintenance turn). Pydantic schemas at `storage/log_schemas.py`. Files live inside `instances/<uuid>/` and are tracked by git (per `_default` exception in `.gitignore`) so users can preserve / share / pandas-analyze a character's history.
+- **Per-instance asyncio.Lock** (`ui/backend/instance_manager.py`, audit δ3): serializes concurrent turns on the same instance; `turn_number` and internal_state mutations no longer race.
+- **SSE `CancelledError` handling** (`ui/backend/streaming.py`, audit δ4): client disconnect mid-stream now propagates cancel up the generator and stops further LLM calls.
+- **EventBus handler isolation** (`core/event_bus.py`, audit β10): one subscriber's exception no longer aborts publish — sync_points still receive remaining events.
+- **Production CORS guard** (`ui/backend/auth.py` + `app.py`, audit δ1): `HUMANOID_ENV=production` forces explicit `HUMANOID_ALLOWED_ORIGINS`. Methods narrowed from `["*"]` to explicit list.
+- **slowapi rate limit** (audit δ2): `10/minute` on `/api/instances/{id}/turn`, `5/minute` on destructive routes.
+- **Optional admin token** (audit δ8): `HUMANOID_ADMIN_TOKEN` env + `X-Admin-Token` header gate destructive routes (mandatory in production).
+- **uv setup** (Wave 14F): `uv.lock` (uv 0.7.12), `scripts/setup.sh` + `scripts/setup.ps1` cross-platform, optional `Justfile`. README and getting-started docs add `uv sync --extra dev --extra ui` quick path.
+- **Multi-turn e2e trend tests** (Wave 14C, `tests/e2e_trends/`): 5 trend invariants (relationship progression, metacognition recovery, marker lifecycle, temperament drift bounds, drift-vs-stimulus). 2 tests skipped pending optimization (mood_settles, logger_smoke).
+- **Pytest markers** registered: `scenario`, `trend`, `live`.
+
+### Changed
+- **InternalState ↔ Temperament drift now wired** (audit α1, CRITICAL): `set_baselines()` setter called from `pipeline.run()` after `temperament.drift()`; D matrix regression now tracks the live drifted baseline. Previously `InternalState` snapshotted baselines at init and never updated — drift was effectively dead code.
+- **Valence math is full-range linear** (audit α2): `2·(positive - negative + nw) / (1 + nw) - 1` replaces the old non-linear `(positive - negative)·2 - 1` that lost information past clamp boundaries.
+- **`OtherModel.update_observation` whitelisted** (audit γ1, CRITICAL): merging `observation` dict no longer overwrites `observation_count` / `threat_streak*` (parameter poisoning fix).
+- **`ProspectiveQueue.fetch_top` atomic** (audit γ3): SELECT + UPDATE wrapped in explicit transaction; concurrent fetches no longer double-consume.
+- **`VectorDB.search` NaN-safe** (audit γ5): NaN/Inf distances filtered before mood-bias re-rank.
+- **Reconsolidation `labels=None` safe** (audit γ6): defensive coercion in `_reconsolidate` and `_flatten_record` prevents `json.dumps(list(None))` TypeError on legacy memories.
+- **`SnapshotManager.freeze` raises on uncommitted writes** (audit γ7): silent data loss replaced with explicit `RuntimeError`.
+- **Persona narrative seeds**: removed forced "나는 사람은 아닌, 새로 만들어진 존재다" opener from `DEFAULT_NARRATIVE` and all 5 personas; candidate prompt's "본성 가이드" → "자기 정의는 자유" — each persona defines itself based on character, not top-down.
+- **Build backend fix**: `setuptools.backends._legacy:_Backend` (non-existent) → `setuptools.build_meta`; `pip install -e .` and `uv sync` now work.
+
+### Tests
+- 528 → **596 passed** + 2 skipped + 1 xfailed (+68 net). Active tests up by ~70: 21 data-integrity regressions, 7 concurrency, 15 security, 19 logging, 5 e2e trends, plus minor adjustments. 2 tests skipped pending follow-up (mood_settles needs unit-test rewrite or 20-turn cap; logger_smoke needs to use Pydantic `TurnLogEntry` instead of speculative dict API).
+
+### Notes
+- This is an audit-driven release: 12 critical / 13 high-major / 12 medium findings from a 5-team red-team audit, of which the data-integrity (α1, α2, γ*) and concurrency (δ3, δ4, β10) and security baseline (δ1, δ2, δ8) fixes landed in this Phase. Phase 2 (β1, β2, β12, β13 orchestrator) and 1.5 (matrix-decomposition deep-mode UI) and 3 (§8 enforcement, analyze.py, logs UI tab) are still in flight.
+
+---
+
+## [0.2.1] — 2026-05-08
+
+Wave 12 — destructive operations with safety bar.
+
 ### Added
 - **Per-instance hard reset** (`POST /api/instances/{id}/hard-reset`): wipes ChromaDB / SQLite (prospective queue) / `state.json` for one character; preserves persona + jitter_seed (deterministic respawn) and `instance_id` + `created_at`. UI: kebab menu on each instance card with confirmation overlay. (`ui/backend/instance_manager.py::hard_reset`, `ui/frontend/src/components/InstanceCard.tsx`)
 - **Global wipe** (`POST /api/admin/wipe`, body `{confirm: "WIPE"}`): deletes all instance directories and clears in-memory caches; legacy `/api/turn` auto-respawns `_default`. UI: gallery footer "전체 초기화" → `WipeConfirmModal` requires the typed token `WIPE` before the destructive button enables. (`ui/backend/instance_manager.py::wipe_all`, `ui/frontend/src/components/WipeConfirmModal.tsx`)
 - **`InstanceManager._release_storage_handles`**: explicit close of ProspectiveQueue sqlite + ChromaDB PersistentClient before `rmtree` to avoid Windows file-lock leaks during destructive ops.
+- **ADR-009**: Destructive-operation safety pattern (typed confirmation token + per-instance vs global scope distinction).
 
 ### Tests
 - 513 → **528 passed** (+15) + 1 skipped + 1 xfailed. New tests in `tests/test_instance_manager.py` (chroma/prospective/state wipe semantics, persona+seed preservation, wipe_all dir removal + respawn) and `tests/test_ui_backend_instances.py` (route 200/404/400, post-turn zero, legacy `_default` auto-respawn after wipe).
