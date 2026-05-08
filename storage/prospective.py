@@ -57,39 +57,55 @@ class ProspectiveQueue:
         return record_id
 
     def fetch_top(self, n: int = 3, consume: bool = True) -> list[dict]:
-        """우선순위 desc 로 상위 N 개 반환. consume=True 면 같은 트랜잭션에서 소비 처리."""
+        """우선순위 desc 로 상위 N 개 반환. consume=True 면 같은 트랜잭션에서 소비 처리.
+
+        audit γ3: SELECT 와 UPDATE 사이 race 를 막기 위해 BEGIN IMMEDIATE
+        로 쓰기 락을 먼저 잡고, consume 까지 같은 트랜잭션에 묶어서 커밋.
+        consume=False 라도 트랜잭션을 닫아 락을 해제한다.
+        """
         if n <= 0:
             return []
+        # 혹시 모를 implicit transaction 종료 후 명시 BEGIN IMMEDIATE 진입.
+        try:
+            self._conn.commit()
+        except sqlite3.Error:
+            pass
         cur = self._conn.cursor()
         try:
-            cur.execute(
-                """
-                SELECT id, content, priority, created_turn
-                FROM prospective
-                WHERE consumed = 0
-                ORDER BY priority DESC, created_turn ASC
-                LIMIT ?
-                """,
-                (int(n),),
-            )
-            rows = cur.fetchall()
-            items = [
-                {
-                    "id": rid,
-                    "content": content,
-                    "priority": float(priority),
-                    "created_turn": int(created_turn),
-                }
-                for (rid, content, priority, created_turn) in rows
-            ]
-            if consume and items:
-                ids = [item["id"] for item in items]
-                placeholders = ",".join("?" for _ in ids)
+            # 쓰기 락 즉시 획득 — 동시 fetch_top 호출이 같은 행을 두 번 소비하지 못하도록.
+            cur.execute("BEGIN IMMEDIATE")
+            try:
                 cur.execute(
-                    f"UPDATE prospective SET consumed = 1 WHERE id IN ({placeholders})",
-                    ids,
+                    """
+                    SELECT id, content, priority, created_turn
+                    FROM prospective
+                    WHERE consumed = 0
+                    ORDER BY priority DESC, created_turn ASC
+                    LIMIT ?
+                    """,
+                    (int(n),),
                 )
-            self._conn.commit()
+                rows = cur.fetchall()
+                items = [
+                    {
+                        "id": rid,
+                        "content": content,
+                        "priority": float(priority),
+                        "created_turn": int(created_turn),
+                    }
+                    for (rid, content, priority, created_turn) in rows
+                ]
+                if consume and items:
+                    ids = [item["id"] for item in items]
+                    placeholders = ",".join("?" for _ in ids)
+                    cur.execute(
+                        f"UPDATE prospective SET consumed = 1 WHERE id IN ({placeholders})",
+                        ids,
+                    )
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
         finally:
             cur.close()
         return items
