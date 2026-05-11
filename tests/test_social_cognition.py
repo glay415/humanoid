@@ -110,10 +110,11 @@ async def test_evaluate_uses_small_model():
 async def test_evaluate_passes_schema(monkeypatch):
     captured: dict = {}
 
-    async def fake_complete_json(messages, schema, model_name='small_model'):
+    async def fake_complete_json(messages, schema, model_name='small_model', reasoning_effort=None):
         captured['messages'] = messages
         captured['schema'] = schema
         captured['model_name'] = model_name
+        captured['reasoning_effort'] = reasoning_effort
         return SocialCognitionResult(**_VALID_PAYLOAD).model_dump()
 
     mock = MockLLMClient()

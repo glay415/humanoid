@@ -148,7 +148,8 @@ class TestReviewDecisionTree:
         assert 'social_threat_conflict' in out['reasons']
 
     def test_review_depth_limit_returns_converged(self):
-        m = Metacognition()
+        # depth=3 안전 상한 보장 — max_iterations 명시. 프로덕션 기본은 1 (ADR-011).
+        m = Metacognition(max_iterations=3)
         out = m.review(
             emotion_result=_emotion(valence=0.5),
             social_result=_social(),
@@ -160,6 +161,20 @@ class TestReviewDecisionTree:
         assert out['reasons'] == ['depth_limit']
         assert out['strategy'] is None
         assert out['iterations'] == 3
+
+    def test_review_default_max_iterations_is_one(self):
+        """ADR-011: gpt-5.5 reasoning latency 때문에 기본 cap = 1."""
+        m = Metacognition()
+        assert m.max_iterations == 1
+        # 첫 호출은 트리거되지만 두 번째는 cap 에 걸린다.
+        out2 = m.review(
+            emotion_result=_emotion(valence=0.5),
+            social_result=_social(),
+            low_result=_low(valence=-0.5),
+            prev_iterations=1,
+        )
+        assert out2['reasons'] == ['depth_limit']
+        assert out2['converged'] is True
 
     def test_review_resource_floor_suppresses_reappraisal(self):
         m = Metacognition()  # floor=0.1

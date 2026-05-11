@@ -305,6 +305,9 @@ async def test_reappraisal_loop_runs_at_most_three_times_in_one_turn(
 ):
     """metacognition.review 가 매번 needs_reappraisal=True 라도 reappraise 는 정확히 3회."""
     orch = _make_orch(tmp_path, mock_llm)
+    # ADR-011: 프로덕션 기본 max_iterations=1. 이 invariant 테스트는 cap=3 으로
+    # 명시 — 핵심은 "cap 까지만 도는가" 이지 정확한 cap 값이 아님.
+    orch.metacognition.max_iterations = 3
 
     # review stub — 항상 True (반복 횟수 추적용).
     review_calls = {'n': 0}

@@ -40,10 +40,25 @@ class MockLLMClient:
             return await self.response_fn(messages, model_name)
         raise LLMError("MockLLMClient exhausted: no responses queued and no response_fn set")
 
-    async def complete(self, messages, model_name: str = "small_model") -> str:
+    async def complete(
+        self,
+        messages,
+        model_name: str = "small_model",
+        reasoning_effort: str | None = None,
+    ) -> str:
+        # reasoning_effort 는 mock 에선 무시 — 실제 effect 는 OpenAI 측에서만.
+        # 시그니처 호환을 위해 받기만 한다.
+        del reasoning_effort
         return await self._resolve(messages, model_name)
 
-    async def complete_json(self, messages, schema, model_name: str = "small_model") -> dict:
+    async def complete_json(
+        self,
+        messages,
+        schema,
+        model_name: str = "small_model",
+        reasoning_effort: str | None = None,
+    ) -> dict:
+        del reasoning_effort
         text = await self._resolve(messages, model_name)
         try:
             payload = json.loads(text)

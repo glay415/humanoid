@@ -198,7 +198,7 @@ def _fmt_recent_dialogue(recent_dialogue: list | None) -> str:
 class CandidateGeneration:
     """후보 응답 생성 모듈 (큰 모델)."""
 
-    def __init__(self, llm_client: LLMClient | None = None, n_candidates: int = 4):
+    def __init__(self, llm_client: LLMClient | None = None, n_candidates: int = 3):
         self.llm = llm_client or LLMClient()
         self.template = load_prompt('candidate_generation')
         self.n_candidates = n_candidates

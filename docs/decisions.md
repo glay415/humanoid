@@ -146,6 +146,35 @@
 
 ---
 
+## ADR-011 (2026-05-11): Latency reduction — reasoning routing + reappraisal cap
+
+**Context**: gpt-5.5 reasoning 모델의 hidden thinking 단계가 모든 LLM 콜에서 5~15s latency 를 추가. 한 턴의 LLM 콜 4~5개 × 평균 7s = **턴 평균 30~50초**. 사용자 체감이 너무 느림. 측정 결과 (per-stage timing 로그) 병목은 (a) 단순 분류/선택 콜이 medium reasoning 으로 도는 것, (b) metacognition 재평가 루프가 depth=3 까지 도는 것 (트리거 자주 발생), (c) `final_judgment + tone_verification + tone_adjust` 직렬 2~3콜.
+
+**Decision**:
+1. **per-tier + per-call `reasoning_effort`** — `config/models.yaml` 에 default 도입 (small=low, large=medium, dmn=low). `social_cognition` 은 per-call `minimal` 강제 (단순 의도 분류).
+2. **reappraisal depth 3 → 1** — `Metacognition.max_iterations=1` 기본. 트리거 임계값 보강 (state_mismatch 0.4→0.5, social_threat 0.6→0.65). 안전 상한 3 은 옵션으로 보존 (테스트/실험용).
+3. **`final_judgment + output_postprocess` 1콜 통합** — `high_level/judge_finalize.py` 신설. 후보 선택 + 톤 정렬 + regenerate 결정을 한 LLM 콜로. legacy 직렬 2~3콜은 `judge_finalize=None` 빌드 시 fallback.
+4. **candidate 수 4 → 3** — `silence` 스타일 프롬프트에서 제외 (스키마 Literal 에는 잔류, legacy 데이터 호환).
+5. **OpenAI prompt caching** — `llm/prompts_meta.py::SHARED_PREAMBLE` 약 1100 token 의 운영 원칙을 모든 LLM 콜의 첫 system message 로 prepend. ≥1024 token prefix 캐시 hit → TTFT 30~50% 감소 + input token 50% 할인.
+6. **SSE response 텍스트 청크 스트리밍** — LLM 응답이 끝난 후 백엔드가 텍스트를 3자 단위로 25ms 간격으로 흘려보냄. 실측 latency 는 그대로지만 사용자 체감 시작 지연 ~50% 감소.
+
+**예상 효과** (gpt-5.5 reasoning latency 기준):
+- reasoning_effort 라우팅: 25~30s/턴 절감
+- reappraisal cap: 10~30s/턴 절감 (트리거되는 케이스)
+- final+postprocess 통합: 10~15s/턴 절감
+- 합계 평균 40~50초 → **15~20초** 목표.
+
+**Consequences**:
+- candidate `silence` 스타일 사라짐 — 침묵이 필요한 상황은 emotional/restrained 후보가 짧게 대응. 스키마 Literal 은 backward compat 위해 유지.
+- reappraisal cap=1 로 떨어져 초기 턴 (confidence 낮음) 의 감정 보정이 1회만 시도됨. 시뮬레이션 실험에서 cap=3 이 필요하면 `Metacognition(max_iterations=3)` 명시.
+- judge_finalize 가 single call 로 tone 정렬을 하므로 OutputPostprocess 의 별도 `_adjust_tone` 호출이 사라짐. legacy 경로 (`judge_finalize=None`) 는 보존되어 테스트 호환.
+- SHARED_PREAMBLE 변경 시 캐시 무효화 → 한 사이클(약 1시간)동안 TTFT 일시 회귀. 의도적으로 안정 텍스트로 작성하고 변경 시 ADR 갱신.
+- SSE chunk 흐름이 추가됨. 프론트엔드가 `response_chunk` 이벤트를 못 받으면 'done' 의 full response 로 정상 폴백 (backward compat).
+
+**Status**: accepted.
+
+---
+
 ## Future ADRs (placeholder)
 
 다음과 같은 결정이 일어나면 ADR 를 append:

@@ -105,6 +105,16 @@ class ToneEvent(BaseModel):
     recommended_delay_ms: int
 
 
+class ResponseChunkEvent(BaseModel):
+    """event: response_chunk — 최종 응답 텍스트를 점진 표시하기 위한 토큰 단위 청크.
+
+    SSE 가 백엔드에서 LLM 응답을 받아 완성된 후, UI 가 바로 전체 텍스트를 박는
+    대신 청크 단위로 흘려보내 체감 latency 를 줄인다. 'done' 이벤트에 동일한
+    full text 가 한 번 더 들어가므로 클라이언트가 chunk 를 못 받아도 안전.
+    """
+    text: str  # 누적이 아닌 이번 청크의 delta
+
+
 class DoneEvent(BaseModel):
     """event: done — 턴 마감 신호."""
     response: str

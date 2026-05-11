@@ -15,6 +15,7 @@ class Metacognition:
         floor: float = 0.1,
         recovery_rate: float = 0.05,
         regulation_capacity: float = 0.5,
+        max_iterations: int = 1,
     ):
         self.resource: float = 1.0
         self.sensitivity = sensitivity
@@ -23,6 +24,10 @@ class Metacognition:
         self.regulation_capacity = regulation_capacity
         self.confidence: float = 0.5
         self.goal_progress: float | None = None
+        # 재평가 깊이 상한. 기본 1 — gpt-5.5 reasoning 시간이 비싸서 multi-iter 가
+        # 의미 있는 품질 향상보다 latency 비용이 훨씬 큼. spec §1.4 의 depth=3 은
+        # 안전 상한이지 권장값이 아님. 테스트/실험에선 더 크게 설정 가능.
+        self.max_iterations = int(max_iterations)
 
     def consume(self, amount: float) -> None:
         """자원 소모. floor 이하로 안 내려감."""
@@ -54,8 +59,8 @@ class Metacognition:
         iterations = prev_iterations
         strategy: str | None = None
 
-        # spec §1.4: 재평가 깊이 한계 (depth=3) — 무한 루프 방지
-        if iterations >= 3:
+        # spec §1.4 (안전 상한 3) + 인스턴스 설정 (기본 1) — 무한 루프 방지.
+        if iterations >= self.max_iterations:
             return {
                 'needs_reappraisal': False,
                 'iterations': iterations,
@@ -64,10 +69,11 @@ class Metacognition:
                 'converged': True,
             }
 
-        # 1. state_mismatch — 고수준 valence 와 raw_core_affect valence 부호 불일치 + 큰 격차
+        # 1. state_mismatch — 고수준 valence 와 raw_core_affect valence 부호 불일치 + 큰 격차.
+        # 임계값 0.4 → 0.5 (작은 mismatch 까지 잡으면 reasoning 비용 대비 가치 낮음).
         raw_v = (low_result or {}).get('raw_core_affect', {}).get('valence', 0.0)
         high_v = (emotion_result or {}).get('valence', 0.0)
-        if (raw_v >= 0) != (high_v >= 0) and abs(raw_v - high_v) > 0.4:
+        if (raw_v >= 0) != (high_v >= 0) and abs(raw_v - high_v) > 0.5:
             reasons.append('state_mismatch')
             strategy = 'reframe'
 
@@ -77,10 +83,11 @@ class Metacognition:
             if strategy is None:
                 strategy = 'context'
 
-        # 3. social/threat 충돌 — 보상이 큰데 위협도 큼 → 거리두기 필요
+        # 3. social/threat 충돌 — 보상이 큰데 위협도 큼 → 거리두기 필요.
+        # 임계값 0.6 → 0.65 (강한 양립만 트리거).
         soc = (social_result or {}).get('social_reward', 0.0) if social_result else 0.0
         threat = (emotion_result or {}).get('experience_dimensions', {}).get('threat', 0.0)
-        if soc > 0.6 and threat > 0.6:
+        if soc > 0.65 and threat > 0.65:
             reasons.append('social_threat_conflict')
             if strategy is None:
                 strategy = 'distance'

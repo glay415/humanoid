@@ -403,6 +403,10 @@ class TestScenario07ShamePride:
 
         rfn = make_response_fn(emotion=emotion_payload, reappraise=emotion_payload)
         orch = _build_mocked_orchestrator(tmp_path, response_fn=rfn, config_path=cfg)
+        # ADR-011: 프로덕션 기본 max_iterations=1. 이 시나리오는 reappraise 가 두
+        # 번 돌면서 (1st→negative, 2nd→positive) 정서가 뒤집히는 invariant 를
+        # 검증 — cap 을 3 으로 명시.
+        orch.metacognition.max_iterations = 3
 
         # 사전조건: 초기 raw_core_affect.valence > 0.
         # (baseline 양성 → state_dict 기반 raw_v 양수)

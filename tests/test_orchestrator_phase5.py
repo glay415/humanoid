@@ -278,6 +278,9 @@ async def test_reappraisal_loop_respects_depth_3(tmp_path, mock_llm):
         confidence = 0.5
         goal_progress = None
         regulation_capacity = 0.5
+        # ADR-011: 프로덕션 기본 cap=1. 이 테스트는 invariant "review True 반복해도
+        # cap 까지만 호출" 을 검증 — cap 값을 3 으로 명시.
+        max_iterations = 3
 
         def __init__(self):
             self.review_calls = 0

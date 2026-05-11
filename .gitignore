@@ -43,6 +43,9 @@ Thumbs.db
 *.log
 *.stackdump
 
+# Claude Code runtime (ScheduleWakeup lock, telemetry)
+.claude/
+
 # Legacy single-instance paths (pre Wave 11 / instance manager)
 chroma_db/
 storage_data/

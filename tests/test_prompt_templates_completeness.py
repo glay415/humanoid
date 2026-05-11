@@ -211,8 +211,12 @@ def test_tone_verification_template_outputs_valid_json_block():
 # ---------------------------------------------------------------------------
 
 def test_candidate_generation_template_lists_required_styles():
-    """후보 생성 프롬프트는 4개의 style enum (emotional/restrained/humor/silence) 을 모두 언급."""
+    """후보 생성 프롬프트는 3개의 style enum (emotional/restrained/humor) 을 모두 언급.
+
+    silence 는 schema 의 Literal 에는 남아있으나 (legacy data 호환) 프롬프트
+    템플릿에서는 제거됨 — 후보 수 4→3 단축 (latency 절감).
+    """
     tpl = load_prompt('candidate_generation')
     out = tpl.render(**CANDIDATE_VARS)
-    for style in ('emotional', 'restrained', 'humor', 'silence'):
+    for style in ('emotional', 'restrained', 'humor'):
         assert style in out, f"candidate_generation prompt missing style: {style}"

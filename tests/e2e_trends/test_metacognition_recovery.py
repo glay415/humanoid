@@ -34,6 +34,9 @@ async def test_meta_resource_depletes_then_recovers(tmp_path):
     """
     rfn = constant_emotion_fn(valence=0.5, arousal=0.4, reward=0.5, threat=0.0)
     orch = _build_mocked_orchestrator(tmp_path, response_fn=rfn)
+    # ADR-011: 프로덕션 기본 max_iterations=1. 이 트렌드 테스트는 자원 소모/회복을
+    # 30턴 × 3 reappraise 가정으로 짠 거라 cap 을 3 으로 명시 회복.
+    orch.metacognition.max_iterations = 3
     initial = orch.metacognition.resource
 
     # 매 턴 review() 가 강제로 reappraise 발동.

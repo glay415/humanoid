@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from high_level.candidate_generation import CandidateGeneration
     from high_level.final_judgment import FinalJudgment
     from high_level.output_postprocess import OutputPostprocess
+    from high_level.judge_finalize import JudgeFinalize
     from high_level.metacognition import Metacognition
     from high_level.dmn import DMN
     from storage.memory_store import EpisodicMemory
@@ -46,6 +47,41 @@ def _iso_now() -> str:
         .replace(microsecond=0, tzinfo=None)
         .isoformat() + 'Z'
     )
+
+
+def _compute_response_delay_ms(arousal: float) -> int:
+    """각성도 → 권장 응답 지연 (ms).
+
+    각성 1.0 → ~50ms (즉답), 0.0 → ~1550ms (느린 응답). 선형 역상관.
+    output_postprocess.OutputPostprocess._compute_delay 의 로직과 동일 — judge_finalize
+    경로에서 LLM 콜 없이 동일한 곡선을 쓰기 위해 모듈 레벨로 추출.
+    """
+    a = max(0.0, min(1.0, float(arousal)))
+    delay = 1500.0 * (1.0 - a) + 50.0
+    return int(max(50.0, min(1550.0, delay)))
+
+
+class _Stopwatch:
+    """턴 1회 동안 스테이지별 누적 ms 를 모은다.
+
+    같은 키로 두 번 record() 하면 합산 (예: reappraisal 3 iteration 누적).
+    """
+
+    __slots__ = ('data', 'counts')
+
+    def __init__(self) -> None:
+        self.data: dict[str, float] = {}
+        self.counts: dict[str, int] = {}
+
+    @staticmethod
+    def start() -> int:
+        return time.perf_counter_ns()
+
+    def record(self, key: str, t0_ns: int) -> float:
+        dur_ms = (time.perf_counter_ns() - t0_ns) / 1e6
+        self.data[key] = self.data.get(key, 0.0) + dur_ms
+        self.counts[key] = self.counts.get(key, 0) + 1
+        return dur_ms
 
 
 class Orchestrator:
@@ -66,6 +102,9 @@ class Orchestrator:
         candidate_generation: 'CandidateGeneration | None' = None,
         final_judgment: 'FinalJudgment | None' = None,
         output_postprocess: 'OutputPostprocess | None' = None,
+        # ④+⑤ 통합. 지정되면 final_judgment+output_postprocess 의 LLM 콜을
+        # 1콜로 대체. 지정 안 되면 legacy 경로 사용.
+        judge_finalize: 'JudgeFinalize | None' = None,
         metacognition: 'Metacognition | None' = None,
         dmn: 'DMN | None' = None,
         episodic_memory: 'EpisodicMemory | None' = None,
@@ -97,6 +136,7 @@ class Orchestrator:
         self.candidate_generation = candidate_generation
         self.final_judgment = final_judgment
         self.output_postprocess = output_postprocess
+        self.judge_finalize = judge_finalize
         self.metacognition = metacognition
         self.dmn = dmn
 
@@ -144,9 +184,13 @@ class Orchestrator:
 
         # Wave 14A — 턴 측정 시작.
         _t_start = time.perf_counter_ns()
+        # 스테이지별 latency 누적기. 턴 끝에 TurnLogEntry.timings_ms 로 박힌다.
+        timings = _Stopwatch()
 
         # 0. 저수준 파이프라인 (동기, prev_experience 반영)
+        _ts = timings.start()
         low_result = self.low_level.run(user_input, self.prev_experience)
+        timings.record('low_level', _ts)
 
         # 빠른 경로 발동 시 이벤트 기록.
         if self.logger is not None and low_result.get('fast_path_triggered'):
@@ -155,6 +199,7 @@ class Orchestrator:
             })
 
         # 1. 감정 평가 (LLM 실패 시 raw_core_affect 기반 fallback)
+        _ts = timings.start()
         if self.emotion_appraisal is not None:
             try:
                 emotion_result = await self.emotion_appraisal.evaluate(
@@ -169,6 +214,11 @@ class Orchestrator:
                     })
         else:
             emotion_result = self._emotion_fallback(low_result['raw_core_affect'])
+        _emotion_ms = timings.record('emotion_appraisal', _ts)
+        self._log_event_safe('stage_timing', {
+            'stage': 'emotion_appraisal',
+            'duration_ms': round(_emotion_ms, 2),
+        })
 
         await self.event_bus.publish(
             Event('emotion_appraised', emotion_result, 'emotion', self.turn_number)
@@ -212,6 +262,7 @@ class Orchestrator:
         else:
             memory_task = None
 
+        _ts = timings.start()
         if social_task is not None and memory_task is not None:
             social_result, memory_result = await asyncio.gather(social_task, memory_task)
         elif social_task is not None:
@@ -223,6 +274,11 @@ class Orchestrator:
         else:
             social_result = self._default_social_result()
             memory_result = self._empty_memory_result()
+        _smp_ms = timings.record('social_memory_parallel', _ts)
+        self._log_event_safe('stage_timing', {
+            'stage': 'social_memory_parallel',
+            'duration_ms': round(_smp_ms, 2),
+        })
 
         await self.event_bus.publish(
             Event('other_model_updated', social_result, 'social', self.turn_number)
@@ -248,14 +304,20 @@ class Orchestrator:
         converged = True
         iterations = 0
         if self.metacognition is not None:
-            while iterations < 3:
+            # Metacognition.max_iterations (기본 1). 인스턴스가 그 키를 안 들고
+            # 있어도 (Phase 5 stub / 테스트용 fake) 안전하게 1 로 폴백.
+            _max_iter = int(getattr(self.metacognition, 'max_iterations', 1))
+            while iterations < _max_iter:
                 review = self._invoke_review(
                     emotion_result, social_result, low_result, iterations
                 )
                 if not review.get('needs_reappraisal'):
                     converged = True
                     break
-                # 재평가 시도
+                # 재평가 시도. 실패도 시간 측정에 포함 — 실패한 호출도 latency 비용은
+                # 똑같이 발생했기 때문 (재시도 + timeout). finally 로 항상 기록.
+                _ts_re = timings.start()
+                _reappraise_failed = False
                 try:
                     emotion_result = await self.emotion_appraisal.reappraise(
                         prev_result=emotion_result,
@@ -294,12 +356,21 @@ class Orchestrator:
                     # asyncio.TimeoutError (상위 타임아웃) 도 graceful 종료.
                     # 일반 Exception 은 잡지 않는다 — 진짜 버그를 가린다.
                     converged = False
+                    _reappraise_failed = True
                     if self.logger is not None:
                         self._log_event_safe('llm_error', {
                             'stage': 'reappraisal',
                             'message': str(exc),
                         })
                     break
+                finally:
+                    _re_ms = timings.record('reappraisal', _ts_re)
+                    self._log_event_safe('stage_timing', {
+                        'stage': 'reappraisal',
+                        'duration_ms': round(_re_ms, 2),
+                        'iteration': iterations,  # 성공 시 방금 끝낸 iter, 실패 시 이전 iter
+                        'success': not _reappraise_failed,
+                    })
             else:
                 # depth 3 도달 — 수렴 실패 표기
                 converged = bool(review.get('converged', False))
@@ -340,6 +411,7 @@ class Orchestrator:
             if (self.low_level and self.low_level.temperament) else None
         )
 
+        _ts = timings.start()
         if self.candidate_generation is not None:
             try:
                 candidates = await self.candidate_generation.generate(
@@ -363,10 +435,131 @@ class Orchestrator:
                     })
         else:
             candidates = [{'style': 'restrained', 'text': '(stub)'}]
+        _cg_ms = timings.record('candidate_generation', _ts)
+        self._log_event_safe('stage_timing', {
+            'stage': 'candidate_generation',
+            'duration_ms': round(_cg_ms, 2),
+        })
 
-        # 4. 최종 판단
+        # 4+5. 최종 판단 + 출력 후처리.
+        # final_core_affect 는 두 경로 모두 필요 — 먼저 계산.
         confidence = self.metacognition.confidence if self.metacognition else 0.5
-        if self.final_judgment is not None and candidates:
+        meta_resource = self.metacognition.resource if self.metacognition else 1.0
+        final_core_affect = self.signal_rise.apply_meta_correction(
+            low_result['raw_core_affect'], meta_resource
+        )
+
+        regenerated = False
+        if self.judge_finalize is not None and candidates:
+            # 통합 경로: 1 LLM 콜로 final_judgment + tone_verification + tone_adjust.
+            # 기존 직렬 2~3콜 → 1콜로 단축. (gpt-5.5 reasoning latency 10~15s 절감)
+            _ts = timings.start()
+            try:
+                judge = await self.judge_finalize.decide(
+                    candidates=candidates,
+                    marker_signal=marker_signal,
+                    confidence=confidence,
+                    final_core_affect=final_core_affect,
+                    user_input=user_input,
+                )
+                final = {
+                    'selected_index': judge['selected_index'],
+                    'text': judge['text'],
+                    'rationale': judge['rationale'],
+                    'marker_match': judge['marker_match'],
+                }
+                response_text = judge['text']
+                action = judge['action']
+                tone_eval = {
+                    'response_valence': judge['response_valence'],
+                    'response_arousal': judge['response_arousal'],
+                }
+            except LLMError as exc:
+                final = {
+                    'selected_index': 0,
+                    'text': candidates[0]['text'],
+                    'rationale': 'fallback',
+                    'marker_match': 'none',
+                }
+                response_text = final['text']
+                action = 'pass'
+                tone_eval = {}
+                if self.logger is not None:
+                    self._log_event_safe('llm_error', {
+                        'stage': 'judge_finalize',
+                        'message': str(exc),
+                    })
+            _jf_ms = timings.record('judge_finalize', _ts)
+            self._log_event_safe('stage_timing', {
+                'stage': 'judge_finalize',
+                'duration_ms': round(_jf_ms, 2),
+            })
+            delay_ms = _compute_response_delay_ms(final_core_affect.get('arousal', 0.0))
+
+            # regenerate cycle (1회 캡) — 통합 경로 버전.
+            if action == 'regenerate' and not regenerated and self.candidate_generation is not None:
+                regenerated = True
+                _ts_regen = timings.start()
+                if self.logger is not None:
+                    self._log_event_safe('regenerate_cycle', {
+                        'reason': 'judge_finalize_regenerate',
+                    })
+                try:
+                    candidates = await self.candidate_generation.generate(
+                        emotion_result=emotion_result,
+                        social_result=social_result,
+                        memory_result=memory_result,
+                        self_model=self_model_dict,
+                        mood=low_result['mood'],
+                        marker_signal=marker_signal,
+                        user_input=user_input,
+                        recent_dialogue=list(self.dialogue_buffer),
+                        internal_state=ll_state,
+                        baselines=ll_baselines,
+                    )
+                except LLMError as exc:
+                    if self.logger is not None:
+                        self._log_event_safe('llm_error', {
+                            'stage': 'candidate_generation_regen',
+                            'message': str(exc),
+                        })
+                if candidates:
+                    try:
+                        judge = await self.judge_finalize.decide(
+                            candidates=candidates,
+                            marker_signal=marker_signal,
+                            confidence=confidence,
+                            final_core_affect=final_core_affect,
+                            user_input=user_input,
+                        )
+                        final = {
+                            'selected_index': judge['selected_index'],
+                            'text': judge['text'],
+                            'rationale': judge['rationale'],
+                            'marker_match': judge['marker_match'],
+                        }
+                        response_text = judge['text']
+                        # regen 사이클은 1회 캡 — action 무시.
+                        action = 'pass' if judge['action'] != 'regenerate' else 'pass'
+                        tone_eval = {
+                            'response_valence': judge['response_valence'],
+                            'response_arousal': judge['response_arousal'],
+                        }
+                    except LLMError as exc:
+                        if self.logger is not None:
+                            self._log_event_safe('llm_error', {
+                                'stage': 'judge_finalize_regen',
+                                'message': str(exc),
+                            })
+                _rg_ms = timings.record('regenerate_cycle', _ts_regen)
+                self._log_event_safe('stage_timing', {
+                    'stage': 'regenerate_cycle',
+                    'duration_ms': round(_rg_ms, 2),
+                })
+
+        elif self.final_judgment is not None and candidates:
+            # Legacy 경로 — judge_finalize 가 없는 빌드 (테스트 / 부분 시뮬).
+            _ts = timings.start()
             try:
                 final = await self.final_judgment.select(
                     candidates, marker_signal, confidence, user_input
@@ -383,6 +576,15 @@ class Orchestrator:
                         'stage': 'final_judgment',
                         'message': str(exc),
                     })
+            _fj_ms = timings.record('final_judgment', _ts)
+            self._log_event_safe('stage_timing', {
+                'stage': 'final_judgment',
+                'duration_ms': round(_fj_ms, 2),
+            })
+            response_text = final['text']
+            action = 'pass'
+            tone_eval = {}
+            delay_ms = 0
         else:
             final = {
                 'selected_index': 0,
@@ -390,15 +592,14 @@ class Orchestrator:
                 'rationale': '',
                 'marker_match': 'none',
             }
+            response_text = final['text']
+            action = 'pass'
+            tone_eval = {}
+            delay_ms = 0
 
-        # 5. 출력 후처리 — 인터페이스 보정된 final_core_affect 사용
-        meta_resource = self.metacognition.resource if self.metacognition else 1.0
-        final_core_affect = self.signal_rise.apply_meta_correction(
-            low_result['raw_core_affect'], meta_resource
-        )
-
-        regenerated = False
-        if self.output_postprocess is not None:
+        # legacy 경로의 output_postprocess (judge_finalize 가 있으면 건너뜀)
+        if self.output_postprocess is not None and self.judge_finalize is None:
+            _ts = timings.start()
             try:
                 post = await self.output_postprocess.process(final, final_core_affect)
                 response_text = post['text']
@@ -416,6 +617,11 @@ class Orchestrator:
                         'stage': 'output_postprocess',
                         'message': str(exc),
                     })
+            _op_ms = timings.record('output_postprocess', _ts)
+            self._log_event_safe('stage_timing', {
+                'stage': 'output_postprocess',
+                'duration_ms': round(_op_ms, 2),
+            })
 
             # β13: action='regenerate' 가 떨어지면 candidate_generation +
             # final_judgment 를 한 번 더 돌리고 postprocess 를 재실행한다.
@@ -428,6 +634,7 @@ class Orchestrator:
                 and self.final_judgment is not None
             ):
                 regenerated = True
+                _ts_regen = timings.start()
                 if self.logger is not None:
                     self._log_event_safe('regenerate_cycle', {
                         'reason': 'tone_polarity_mismatch',
@@ -491,11 +698,13 @@ class Orchestrator:
                             'stage': 'output_postprocess_regen',
                             'message': str(exc),
                         })
-        else:
-            response_text = final['text']
-            action = 'pass'
-            tone_eval = {}
-            delay_ms = 0
+                _rg_ms = timings.record('regenerate_cycle', _ts_regen)
+                self._log_event_safe('stage_timing', {
+                    'stage': 'regenerate_cycle',
+                    'duration_ms': round(_rg_ms, 2),
+                })
+        # legacy postprocess 가 없을 때의 디폴트는 위쪽 final_judgment-only /
+        # stub 분기에서 이미 설정됨. judge_finalize 경로도 자체적으로 설정함.
 
         # 메타인지 자원 소모 (대화 턴 1회당 작은 양; recover 는 정비 사이클에서)
         if self.metacognition is not None:
@@ -520,6 +729,7 @@ class Orchestrator:
 
         # Wave 14A — 턴 1줄 JSONL 기록.
         _duration_ms = int(round((time.perf_counter_ns() - _t_start) / 1e6))
+        timings.data['total'] = float(_duration_ms)
         if self.logger is not None:
             try:
                 self._log_turn_safe(
@@ -532,6 +742,7 @@ class Orchestrator:
                     final=final,
                     delay_ms=int(delay_ms),
                     duration_ms=_duration_ms,
+                    timings_ms=timings.data,
                 )
             except Exception:
                 # 로깅 실패는 turn 진행을 막지 않는다.
@@ -947,6 +1158,7 @@ class Orchestrator:
         final: dict,
         delay_ms: int,
         duration_ms: int,
+        timings_ms: dict[str, float] | None = None,
     ) -> None:
         """TurnLogEntry 1줄 기록."""
         if self.logger is None:
@@ -997,6 +1209,7 @@ class Orchestrator:
             marker_match=str(final.get('marker_match', 'none')),
             recommended_delay_ms=int(delay_ms),
             duration_ms=int(duration_ms),
+            timings_ms={k: round(float(v), 2) for k, v in (timings_ms or {}).items()},
         )
         self.logger.log_turn(entry)
 

@@ -148,6 +148,10 @@ async def test_reappraisal_depth_capped_when_review_returns_malformed_dict(
         confidence = 0.5
         goal_progress = None
         regulation_capacity = 0.5
+        # 이 테스트의 핵심 invariant 는 "review 가 잘못된 dict 를 줘도 무한 루프
+        # 안 돈다" — 정확한 cap 값보다 cap 자체가 동작하는지가 중요. ADR-011 로
+        # 프로덕션 기본은 1 이지만 의도된 cap 거동 테스트는 3 으로 유지.
+        max_iterations = 3
 
         def review(self, emo, soc, low, prev_iterations=0):
             # 의도적으로 'iterations' 키 누락 — 이전 코드라면 iter가 0에 머물러

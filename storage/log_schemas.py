@@ -40,6 +40,11 @@ class TurnLogEntry(BaseModel):
     llm_calls: int = 0
     tokens_input: int = 0
     tokens_output: int = 0
+    # 스테이지별 누적 시간 (ms). 키 예: low_level, emotion_appraisal, reappraisal,
+    # social_memory_parallel, candidate_generation, final_judgment,
+    # output_postprocess, regenerate_cycle, total. 누락된 키는 해당 스테이지가
+    # 이번 턴에 안 실행됐다는 뜻 (예: 메타인지 트리거 안 됨 → reappraisal 없음).
+    timings_ms: dict[str, float] = Field(default_factory=dict)
 
 
 class EventLogEntry(BaseModel):
@@ -61,6 +66,9 @@ class EventLogEntry(BaseModel):
         'dmn_activity',
         'auto_encode',
         'llm_error',
+        'stage_timing',     # payload: {stage, duration_ms, ...} — 스테이지 단위 latency
+        'llm_call',         # payload: {model, duration_ms, attempt, success} — LLM 콜 단위 latency
+        'regenerate_cycle', # 이미 orchestrator 가 emit 중이었으나 Literal 에서 누락
     ]
     payload: dict = Field(default_factory=dict)
     turn: int = 0  # 발화 시점의 turn 번호

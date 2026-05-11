@@ -8,6 +8,7 @@ const KNOWN_EVENTS: ReadonlyArray<TurnEventName> = [
   'candidates',
   'final',
   'tone',
+  'response_chunk',
   'done',
   'error',
 ];

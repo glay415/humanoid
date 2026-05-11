@@ -52,7 +52,6 @@ DEFAULT_RESPONSES = {
             {"style": "emotional", "text": "정말 좋네"},
             {"style": "restrained", "text": "괜찮네"},
             {"style": "humor", "text": "재밌네"},
-            {"style": "silence", "text": "..."},
         ]
     }),
     'final': json.dumps({
@@ -497,14 +496,14 @@ def test_scenario_16_identity_crisis_preservation_deficit(tmp_path):
 
 
 async def test_scenario_17_artistic_creation_diverse_styles(tmp_path):
-    """후보 생성이 4개의 서로 다른 style 을 만들어내고, 최종 선택이 가능해야 한다.
+    """후보 생성이 3개의 서로 다른 style 을 만들어내고, 최종 선택이 가능해야 한다.
 
-    "결이 다른 응답" 의 핵심: emotional / restrained / humor / silence 4스타일 모두 등장.
+    "결이 다른 응답" 의 핵심: emotional / restrained / humor 3스타일 모두 등장.
     final_judgment 는 non-zero index (humor) 도 선택할 수 있어야 한다 — 단조선택 금지.
     """
     orch, _ = _make_orch(tmp_path)
 
-    # 후보 단계 직접 호출해서 4스타일 다 등장하는지 확인 — pipeline 다양성의 본질
+    # 후보 단계 직접 호출해서 3스타일 다 등장하는지 확인 — pipeline 다양성의 본질
     candidates = await orch.candidate_generation.generate(
         emotion_result={'valence': 0.3, 'arousal': 0.4, 'preliminary_labels': []},
         social_result=None,
@@ -516,10 +515,10 @@ async def test_scenario_17_artistic_creation_diverse_styles(tmp_path):
     )
 
     styles = [c['style'] for c in candidates]
-    assert len(candidates) == 4
-    assert set(styles) == {'emotional', 'restrained', 'humor', 'silence'}
-    # 순서도 spec 강제: emotional → restrained → humor → silence
-    assert styles == ['emotional', 'restrained', 'humor', 'silence']
+    assert len(candidates) == 3
+    assert set(styles) == {'emotional', 'restrained', 'humor'}
+    # 순서도 spec 강제: emotional → restrained → humor
+    assert styles == ['emotional', 'restrained', 'humor']
 
     # final_judgment 가 humor (index=2) 를 선택할 수 있는지 — non-zero index 검증.
     # MockLLMClient 에 직접 큐로 final 응답 박아 라우팅 우회.

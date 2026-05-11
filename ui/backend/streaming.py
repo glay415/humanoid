@@ -27,6 +27,7 @@ from core.event_bus import Event
 from core.turn import TurnType
 from llm.client import LLMError
 from low_level.internal_state import InternalState
+import asyncio as _asyncio
 from ui.backend.sse_events import (
     CandidateItem,
     DoneEvent,
@@ -40,6 +41,7 @@ from ui.backend.sse_events import (
     MatrixDecomposition,
     MemoryEvent,
     MoodStepTrace,
+    ResponseChunkEvent,
     ToneEvent,
     ValenceArousal,
 )
@@ -49,6 +51,31 @@ _log = logging.getLogger(__name__)
 
 
 SSEMessage = dict[str, str]  # {'event': str, 'data': str}
+
+
+# 응답 텍스트 청크 사이의 간격 (초). 짧을수록 자연스럽지만 네트워크 부담 ↑.
+# 한국어 평균 음절 발화 속도 (~3 음/sec) 보다 살짝 빠르게 — 흐름은 유지하되
+# 답답하지 않게.
+_CHUNK_INTERVAL_S = 0.025
+# 한 청크에 묶는 글자 수. 1 이면 글자 한 자씩 (자수 많음), 너무 크면 streaming 효과
+# 없어짐. 한국어 기준 2~3 이 자연스러운 표시 속도.
+_CHUNK_SIZE = 3
+
+
+async def _chunk_response_text(text: str):
+    """response_text 를 작은 청크로 잘라 async sleep 끼워가며 yield.
+
+    LLM 콜 자체는 이미 끝난 상태 — '체감 latency' 만 줄이는 simulated streaming.
+    실측 시간은 chunk_size/interval 곱만큼 늘어나지만 사용자는 한 덩어리 표시
+    대신 흐름을 본다. 빈 문자열이면 한 번도 yield 안 함.
+    """
+    if not text:
+        return
+    for i in range(0, len(text), _CHUNK_SIZE):
+        chunk = text[i:i + _CHUNK_SIZE]
+        if chunk:
+            yield chunk
+            await _asyncio.sleep(_CHUNK_INTERVAL_S)
 
 
 def _msg(event: str, payload) -> SSEMessage:
@@ -504,6 +531,11 @@ async def _stream_turn_pipeline(
     # ----- 6. 메타인지 자원 소모 -----
     if orch.metacognition is not None:
         orch.metacognition.consume(0.05)
+
+    # ----- 7. response_chunk — 점진 표시. 전체 텍스트는 'done' 에도 들어가므로
+    # 클라이언트가 청크 핸들러 없이도 정상 동작 (backward compat).
+    async for chunk in _chunk_response_text(response_text):
+        yield _msg('response_chunk', ResponseChunkEvent(text=chunk))
 
     # ----- done -----
     yield _msg('done', DoneEvent(

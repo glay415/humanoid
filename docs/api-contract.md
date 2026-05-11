@@ -111,6 +111,7 @@ Array<{
   text: string,
 }>
 ```
+> ADR-011: 프로덕션 프롬프트는 `emotional / restrained / humor` 3개만 요청. `silence` 는 스키마 Literal 에 잔류 (legacy 데이터 호환) 하지만 새 응답엔 안 나옴.
 
 #### `event: final` — `FinalEvent`
 ```ts
@@ -130,6 +131,16 @@ Array<{
   recommended_delay_ms: number,                 // arousal 기반
 }
 ```
+> ADR-011: judge_finalize 경로에선 tone_adjust 가 LLM 인라인으로 처리되므로 `action` 은 사실상 `pass` 또는 `regenerate` 둘. legacy 경로는 그대로 3가지.
+
+#### `event: response_chunk` — `ResponseChunkEvent` *(ADR-011)*
+```ts
+{
+  text: string,                                 // 이번 청크의 delta (누적 아님)
+}
+```
+LLM 응답이 끝난 후 백엔드가 최종 텍스트를 작은 청크로 흘려보낸다 (체감 latency 단축).
+`tone` 직후에 N 회 발사, 그 뒤 `done` 발사. `done.response` 에 full text 가 다시 들어 있으므로 클라이언트가 청크를 못 받아도 정상 폴백.
 
 #### `event: done` — `DoneEvent`
 ```ts
@@ -143,7 +154,7 @@ Array<{
 #### `event: error` — `ErrorEvent`
 ```ts
 {
-  stage: 'emotion' | 'candidates' | 'final' | 'tone',
+  stage: 'emotion' | 'candidates' | 'final' | 'tone' | 'judge_finalize',
   message: string,                              // repr(exc)
 }
 ```

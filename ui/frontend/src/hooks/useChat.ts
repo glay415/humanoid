@@ -62,6 +62,7 @@ type Action =
   | { type: 'EVENT_CANDIDATES'; data: CandidatesEvent }
   | { type: 'EVENT_FINAL'; data: FinalEvent }
   | { type: 'EVENT_TONE'; data: ToneEvent }
+  | { type: 'EVENT_RESPONSE_CHUNK'; data: { text: string } }
   | { type: 'EVENT_DONE'; data: { response: string; turn_number: number } }
   | { type: 'EVENT_ERROR'; data: ErrorEvent }
   | { type: 'TURN_ABORTED' }
@@ -171,7 +172,39 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, currentStage: 'final', pendingFinal: action.data };
     case 'EVENT_TONE':
       return { ...state, currentStage: 'tone', pendingTone: action.data };
-    case 'EVENT_DONE':
+    case 'EVENT_RESPONSE_CHUNK': {
+      // 백엔드가 시뮬레이션 스트리밍으로 흘려보내는 텍스트 청크. 첫 청크에 빈
+      // assistant 메시지를 push, 이후 청크에서 마지막 메시지에 append.
+      const last = state.messages[state.messages.length - 1];
+      const hasStreamingAssistant = last && last.role === 'assistant' && last.turn === undefined;
+      if (hasStreamingAssistant) {
+        const updated = state.messages.slice(0, -1).concat({
+          ...last,
+          text: last.text + action.data.text,
+        });
+        return { ...state, messages: updated };
+      }
+      return {
+        ...state,
+        messages: [
+          ...state.messages,
+          { role: 'assistant', text: action.data.text },
+        ],
+      };
+    }
+    case 'EVENT_DONE': {
+      // done 시점 — chunk 누적과 무관하게 full response 로 마지막 assistant 텍스트
+      // 를 권위적 값으로 덮어쓴다 (chunk 가 누락된 경우에도 화면 정합 보장).
+      const last = state.messages[state.messages.length - 1];
+      const hasStreamingAssistant = last && last.role === 'assistant' && last.turn === undefined;
+      if (hasStreamingAssistant) {
+        const updated = state.messages.slice(0, -1).concat({
+          ...last,
+          text: action.data.response,
+          turn: action.data.turn_number,
+        });
+        return { ...state, currentStage: 'idle', messages: updated };
+      }
       return {
         ...state,
         currentStage: 'idle',
@@ -184,6 +217,7 @@ function reducer(state: AppState, action: Action): AppState {
           },
         ],
       };
+    }
     case 'EVENT_ERROR':
       return {
         ...state,
@@ -290,6 +324,9 @@ export function useChat(instanceId: string | null, deep: boolean = false) {
             break;
           case 'tone':
             dispatch({ type: 'EVENT_TONE', data: event.data });
+            break;
+          case 'response_chunk':
+            dispatch({ type: 'EVENT_RESPONSE_CHUNK', data: event.data });
             break;
           case 'done':
             dispatch({

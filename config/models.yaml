@@ -3,11 +3,18 @@
 # 2026-04 출시 gpt-5.5 올인 — 4o 시리즈는 legacy.
 # 주의: gpt-5.5 는 temperature 의 기본값(1.0)만 지원. 다른 값 지정 시 BadRequest.
 #       그래서 temperature 키는 명시하지 않거나 1.0 으로 고정.
+#
+# reasoning_effort: minimal | low | medium | high
+#   gpt-5.5 reasoning 모델은 generation 전 hidden thinking 단계가 있어서 effort
+#   를 낮추면 그 단계가 거의 0 이 된다. 단순 분류/선택 콜은 minimal, 창작/
+#   다차원 판단은 medium 이상으로. 호출부에서 reasoning_effort 인자로 per-call
+#   override 가능 (LLMClient.complete_json 참고).
 small_model:
   provider: "openai"
   model: "gpt-5.5"
   max_tokens: 1024
   temperature: 1.0
+  reasoning_effort: low
   timeout_ms: 12000
 
 large_model:
@@ -15,6 +22,7 @@ large_model:
   model: "gpt-5.5"
   max_tokens: 2048
   temperature: 1.0
+  reasoning_effort: medium
   timeout_ms: 25000
 
 dmn_model:
@@ -22,6 +30,7 @@ dmn_model:
   model: "gpt-5.5"
   max_tokens: 1024
   temperature: 1.0
+  reasoning_effort: low
   timeout_ms: 15000
 
 # 구현 옵션 (최소/표준/풀)

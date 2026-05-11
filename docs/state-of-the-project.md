@@ -2,12 +2,12 @@
 
 > Living document. Wave 머지 / 중요 결정 / baseline 변동 시마다 갱신한다. 규칙은 [`CLAUDE.md`](../CLAUDE.md) 참조.
 
-## Current baseline (as of 2026-05-08, Wave 12 merged)
+## Current baseline (as of 2026-05-11, latency optimization in progress)
 
-- Tests: **528 passed + 1 skipped + 1 xfailed** (`pytest tests/ -q`, ~110s)
-- Branch: `main` at commit `87501cd` (Wave 11 docs_handoff merge head; Wave 12 머지 직후 갱신 예정)
-- Release: `release` branch at `v0.1.0` (pre-Wave-11). v0.2.0 promotion 예정.
-- LLM tier: `small` / `large` / `dmn` 모두 `gpt-5.5` (2026-04-23 출시, 4o 시리즈는 legacy)
+- Tests: **643 passed + 1 skipped** (`pytest tests/ -q`, ~3min)
+- Branch: `main` past v0.3.0 (commit `41a8dd6` + ADR-011 후속 작업)
+- Release: `release` branch at `v0.3.0` (Phase 3 / §8 enforcement / analyze.py / logs UI tab).
+- LLM tier: `small` / `large` / `dmn` 모두 `gpt-5.5`. `reasoning_effort` per-tier (small=low, large=medium, dmn=low). 콜별 override 가능 — ADR-011.
 - Repo: https://github.com/glay415/humanoid
 
 ## Implementation status
@@ -56,7 +56,7 @@ Phase 단위는 spec §13 implementation roadmap 기준. Wave 는 실제 작업 
 
 ## Active work
 
-(없음 — Wave 12 머지 완료. 다음 wave 계획 시 여기 갱신.)
+**Latency reduction sprint** (2026-05-11, ADR-011): gpt-5.5 reasoning latency 가 dominant cost 로 측정됨 (턴 평균 40~50s). 다축 변경 진행 중 — `reasoning_effort` per-tier, reappraisal depth 3→1, `final_judgment + tone_verification + tone_adjust` 1콜 통합 (`high_level/judge_finalize.py`), prompt caching prefix, SSE response_chunk streaming, candidate 4→3. 목표 15~20s/턴.
 
 ## Next candidates
 

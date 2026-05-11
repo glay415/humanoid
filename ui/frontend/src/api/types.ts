@@ -217,6 +217,10 @@ export type ErrorEvent = {
   message: string;
 };
 
+export type ResponseChunkEvent = {
+  text: string;
+};
+
 // Discriminated union for the SSE stream.
 export type TurnEvent =
   | { type: 'low_level'; data: LowLevelEvent }
@@ -225,6 +229,7 @@ export type TurnEvent =
   | { type: 'candidates'; data: CandidatesEvent }
   | { type: 'final'; data: FinalEvent }
   | { type: 'tone'; data: ToneEvent }
+  | { type: 'response_chunk'; data: ResponseChunkEvent }
   | { type: 'done'; data: DoneEvent }
   | { type: 'error'; data: ErrorEvent };
 

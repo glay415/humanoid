@@ -158,6 +158,10 @@ def build_full_orchestrator(
     candidate_generation = CandidateGeneration(llm_client=llm_client)
     final_judgment = FinalJudgment(llm_client=llm_client)
     output_postprocess = OutputPostprocess(llm_client=llm_client)
+    # ADR-012: final_judgment + output_postprocess 의 직렬 2~3 LLM 콜을 1콜로 합친
+    # 통합 경로. 프로덕션 기본. 미지정 (None) 으로 빌드하면 legacy 2~3콜 경로 사용.
+    from high_level.judge_finalize import JudgeFinalize
+    judge_finalize = JudgeFinalize(llm_client=llm_client)
     metacognition = Metacognition(
         sensitivity=cfg.get('metacognition_sensitivity', 0.5),
         floor=cfg.get('metacognition_floor', 0.1),
@@ -193,6 +197,7 @@ def build_full_orchestrator(
         candidate_generation=candidate_generation,
         final_judgment=final_judgment,
         output_postprocess=output_postprocess,
+        judge_finalize=judge_finalize,
         metacognition=metacognition,
         dmn=dmn,
         episodic_memory=episodic,
@@ -200,6 +205,13 @@ def build_full_orchestrator(
         other_model=other_model,
     )
     orch.register_default_triggers()
+
+    # LLM 콜 단위 latency 도 events.jsonl 에 흘려보낸다. logger 가 set_logger 로
+    # 나중에 붙더라도 _log_event_safe 가 None 체크하므로 안전.
+    def _llm_event_sink(payload: dict) -> None:
+        orch._log_event_safe('llm_call', payload)
+    llm_client.event_recorder = _llm_event_sink
+
     return orch
 
 
