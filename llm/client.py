@@ -40,7 +40,8 @@ class ModelConfig:
     max_tokens: int
     temperature: float
     timeout_ms: int
-    # 'minimal' | 'low' | 'medium' | 'high' — gpt-5.5 reasoning 모델 한정.
+    # 'low' | 'medium' | 'high' — gpt-5.5 reasoning 모델 한정.
+    # ('minimal' 은 gpt-5.5 미지원 — litellm UnsupportedParamsError.)
     # None 이면 litellm 에 안 보냄 (모델 default 사용).
     reasoning_effort: str | None = None
 

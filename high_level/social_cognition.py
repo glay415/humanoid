@@ -66,12 +66,12 @@ class SocialCognition:
         ]
         try:
             # social_cognition 은 의도/감정 추정 분류 정도 — reasoning 거의 불필요.
-            # minimal 로 강제해서 latency 7~10s → 1~3s.
+            # gpt-5.5 가 'minimal' 을 거부하므로 'low' 사용 (litellm 검증 통과).
             return await self.llm.complete_json(
                 messages,
                 schema=SocialCognitionResult,
                 model_name='small_model',
-                reasoning_effort='minimal',
+                reasoning_effort='low',
             )
         except LLMError:
             # Wave 4 fallback — orchestrator 의 기본 흐름을 보존.

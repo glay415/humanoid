@@ -4,7 +4,7 @@ ADR-011 v2 — 진짜 LLM token streaming:
   - decide(): JSON 결정 (selected_index, action, marker_match, response_v/a).
     reasoning_effort=low. ~2~4s.
   - stream_text(): 선택된 후보 텍스트를 톤 정렬하면서 평문 stream.
-    reasoning_effort=minimal. 첫 토큰 ~500ms, 이후 token-by-token.
+    reasoning_effort=low (gpt-5.5 는 'minimal' 미지원). 첫 토큰 ~1s.
 
 기존 1콜 통합 (ADR-011 v1) 보다 LLM 콜 1개 늘었지만 TTFT 가 짧아져
 체감 latency 가 훨씬 좋다. text 컨텐츠는 candidate 의 minor edit 수준이라
@@ -108,8 +108,8 @@ class JudgeFinalize:
         """선택된 후보 텍스트를 톤 정렬하며 토큰별 yield. async generator.
 
         호출부 (orchestrator → streaming.py) 는 매 토큰을 SSE response_chunk 로
-        흘려보낸다. reasoning_effort=minimal — rewrite 정도이므로 thinking 거의 없음
-        → 첫 토큰 ~500ms 안에 도착.
+        흘려보낸다. reasoning_effort=low (gpt-5.5 는 minimal 미지원). 첫 토큰
+        ~1s 안에 도착.
 
         Args:
             self_narrative: 페르소나의 자기 서사. 페르소나 톤·인격 유지에 필수
@@ -137,6 +137,6 @@ class JudgeFinalize:
         async for chunk in self.llm.complete_streaming(
             messages,
             model_name='small_model',
-            reasoning_effort='minimal',
+            reasoning_effort='low',
         ):
             yield chunk
