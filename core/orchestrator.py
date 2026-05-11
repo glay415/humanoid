@@ -610,6 +610,11 @@ class Orchestrator:
                     ):
                         response_parts.append(token)
                         await _emit('response_chunk', {'text': token})
+                        # asyncio task switch 강제 — SSE generator 가 dequeue +
+                        # ASGI send 를 즉시 처리하도록 양보. 이게 없으면 같은
+                        # microtask 안에서 다음 token await 으로 바로 가서
+                        # ASGI write 가 큰 batch 로 flush 될 수 있다.
+                        await asyncio.sleep(0)
                 except LLMError as exc:
                     if self.logger is not None:
                         self._log_event_safe('llm_error', {

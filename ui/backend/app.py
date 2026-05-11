@@ -240,7 +240,12 @@ async def post_turn(request: Request, req: TurnRequest):
         ):
             yield msg
 
-    return EventSourceResponse(event_generator())
+    # SSE buffering 방지 헤더 — Nginx / Vite dev proxy / 일부 ASGI 미들웨어가
+    # 청크를 모으는 걸 막아 진짜 token streaming UX 보장.
+    return EventSourceResponse(event_generator(), headers={
+        'X-Accel-Buffering': 'no',
+        'Cache-Control': 'no-cache, no-transform',
+    })
 
 
 @app.post("/api/reset", status_code=204)
@@ -350,7 +355,10 @@ async def turn_for_instance(request: Request, instance_id: str, body: TurnReques
             # 저장 실패는 응답을 막지 않는다.
             pass
 
-    return EventSourceResponse(event_generator())
+    return EventSourceResponse(event_generator(), headers={
+        'X-Accel-Buffering': 'no',
+        'Cache-Control': 'no-cache, no-transform',
+    })
 
 
 @app.post("/api/instances/{instance_id}/reset", status_code=204)

@@ -18,6 +18,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import time as _time
 from typing import Any, AsyncGenerator
 
 import numpy as np
@@ -301,6 +303,10 @@ async def _stream_turn_body(
         finally:
             await event_queue.put((_SENTINEL, None))
 
+    _dbg = os.environ.get('HUMANOID_DEBUG_STREAM') == '1'
+    _t0 = _time.perf_counter_ns()
+    _chunk_idx = 0
+
     turn_task = asyncio.create_task(run_turn())
     try:
         while True:
@@ -312,6 +318,11 @@ async def _stream_turn_body(
                 raise data
             msg = _convert(name, data, orch)
             if msg is not None:
+                if _dbg and name == 'response_chunk':
+                    _el_ms = (_time.perf_counter_ns() - _t0) / 1e6
+                    text = (data or {}).get('text', '')
+                    print(f"[STREAM/sse] chunk#{_chunk_idx:03d} +{_el_ms:7.1f}ms len={len(text)} {text!r}", flush=True)
+                    _chunk_idx += 1
                 yield msg
     except asyncio.CancelledError:
         # 클라이언트가 SSE 를 닫으면 starlette 가 generator 를 cancel.

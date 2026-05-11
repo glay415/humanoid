@@ -325,9 +325,16 @@ export function useChat(instanceId: string | null, deep: boolean = false) {
           case 'tone':
             dispatch({ type: 'EVENT_TONE', data: event.data });
             break;
-          case 'response_chunk':
+          case 'response_chunk': {
+            // streaming 진단 — DevTools 콘솔에서 청크 도착 timing 확인.
+            // 정상이면 청크가 50~200ms 간격, 모이는 거면 모두 같은 ms.
+            if (typeof window !== 'undefined' && (window as any).__HUMANOID_DEBUG_STREAM__) {
+              // eslint-disable-next-line no-console
+              console.log('[STREAM/ui]', performance.now().toFixed(1), event.data.text);
+            }
             dispatch({ type: 'EVENT_RESPONSE_CHUNK', data: event.data });
             break;
+          }
           case 'done':
             dispatch({
               type: 'EVENT_DONE',

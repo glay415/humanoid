@@ -207,6 +207,10 @@ class LLMClient:
             self._emit_call_event(cfg, t0, 1, success=False, error=str(exc))
             raise LLMError(f"streaming LLM call failed: {exc!r}") from exc
 
+        # HUMANOID_DEBUG_STREAM=1 일 때 매 chunk 의 도착 시간 stdout 로 print —
+        # 진짜 stream 인지 mass-yield 인지 진단용. production 에선 환경변수 미설정.
+        _dbg = os.environ.get('HUMANOID_DEBUG_STREAM') == '1'
+        _idx = 0
         try:
             async for chunk in stream:
                 # litellm/openai async stream — chunk.choices[0].delta.content 가 토큰 (str|None).
@@ -215,6 +219,10 @@ class LLMClient:
                 except (AttributeError, IndexError):
                     continue
                 if delta:
+                    if _dbg:
+                        _elapsed_ms = (time.perf_counter_ns() - t0) / 1e6
+                        print(f"[STREAM/llm] chunk#{_idx:03d} +{_elapsed_ms:7.1f}ms len={len(delta)} {delta!r}", flush=True)
+                        _idx += 1
                     yield delta
         except asyncio.CancelledError:
             raise
