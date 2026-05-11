@@ -252,21 +252,11 @@ async def test_turn_emits_full_sse_sequence(mocked_app):
     mock.responses = _full_turn_responses()
     events = await _post_turn_collect(app_, "오늘 발표 잘 끝났어")
     names = [e['event'] for e in events]
-    # 정확한 순서 (response_chunk 는 tone~done 사이에 N개 끼어듬, ADR-011).
-    canonical = [n for n in names if n != 'response_chunk']
+    # legacy 경로 — judge_finalize 빌드 안 됨. response_chunk 없음 (ADR-011 v2:
+    # token streaming 은 judge_finalize 경로 전용).
     expected = ['low_level', 'emotion', 'memory', 'candidates', 'final', 'tone', 'done']
-    # error 가 끼어들면 안 됨 (정상 경로)
     assert 'error' not in names, f"unexpected error event in {names}"
-    assert canonical == expected, f"got {canonical}"
-    # response_chunk 는 최소 한 번 이상 — 백엔드가 응답 텍스트를 청크로 흘려보냄.
-    assert 'response_chunk' in names, "expected response_chunk events (ADR-011)"
-    # 청크 순서: tone 이후, done 이전.
-    tone_idx = names.index('tone')
-    done_idx = names.index('done')
-    chunk_indices = [i for i, n in enumerate(names) if n == 'response_chunk']
-    assert all(tone_idx < i < done_idx for i in chunk_indices), (
-        f"response_chunk 위치가 tone~done 사이가 아님: {names}"
-    )
+    assert names == expected, f"got {names}"
     # done 이벤트 페이로드 검증
     done = json.loads(events[-1]['data'])
     assert isinstance(done['response'], str) and done['response']

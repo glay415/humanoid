@@ -24,10 +24,10 @@ from typing import AsyncGenerator
 import numpy as np
 
 from core.event_bus import Event
+from core.orchestrator import _compute_response_delay_ms
 from core.turn import TurnType
 from llm.client import LLMError
 from low_level.internal_state import InternalState
-import asyncio as _asyncio
 from ui.backend.sse_events import (
     CandidateItem,
     DoneEvent,
@@ -51,31 +51,6 @@ _log = logging.getLogger(__name__)
 
 
 SSEMessage = dict[str, str]  # {'event': str, 'data': str}
-
-
-# 응답 텍스트 청크 사이의 간격 (초). 짧을수록 자연스럽지만 네트워크 부담 ↑.
-# 한국어 평균 음절 발화 속도 (~3 음/sec) 보다 살짝 빠르게 — 흐름은 유지하되
-# 답답하지 않게.
-_CHUNK_INTERVAL_S = 0.025
-# 한 청크에 묶는 글자 수. 1 이면 글자 한 자씩 (자수 많음), 너무 크면 streaming 효과
-# 없어짐. 한국어 기준 2~3 이 자연스러운 표시 속도.
-_CHUNK_SIZE = 3
-
-
-async def _chunk_response_text(text: str):
-    """response_text 를 작은 청크로 잘라 async sleep 끼워가며 yield.
-
-    LLM 콜 자체는 이미 끝난 상태 — '체감 latency' 만 줄이는 simulated streaming.
-    실측 시간은 chunk_size/interval 곱만큼 늘어나지만 사용자는 한 덩어리 표시
-    대신 흐름을 본다. 빈 문자열이면 한 번도 yield 안 함.
-    """
-    if not text:
-        return
-    for i in range(0, len(text), _CHUNK_SIZE):
-        chunk = text[i:i + _CHUNK_SIZE]
-        if chunk:
-            yield chunk
-            await _asyncio.sleep(_CHUNK_INTERVAL_S)
 
 
 def _msg(event: str, payload) -> SSEMessage:
@@ -459,83 +434,147 @@ async def _stream_turn_pipeline(
         for c in candidates
     ])
 
-    # ----- 4. 최종 판단 -----
+    # ----- 4+5. 최종 판단 + 출력 텍스트 (judge_finalize 우선 / legacy fallback) -----
     confidence = orch.metacognition.confidence if orch.metacognition else 0.5
-    final_error: str | None = None
-    if orch.final_judgment is not None and candidates:
-        try:
-            final = await orch.final_judgment.select(
-                candidates, marker_signal, confidence, user_input
-            )
-        except LLMError as exc:
-            final_error = repr(exc)
-            final = {
-                'selected_index': 0,
-                'text': candidates[0]['text'],
-                'rationale': 'fallback',
-                'marker_match': 'none',
-            }
-    else:
-        final = {
-            'selected_index': 0,
-            'text': candidates[0]['text'] if candidates else '',
-            'rationale': '',
-            'marker_match': 'none',
-        }
-
-    if final_error is not None:
-        yield _msg('error', ErrorEvent(stage='final', message=final_error))
-
-    yield _msg('final', FinalEvent(
-        selected_index=int(final['selected_index']),
-        text=str(final['text']),
-        rationale=str(final.get('rationale', '')),
-        marker_match=str(final.get('marker_match', 'none')),
-    ))
-
-    # ----- 5. 출력 후처리 -----
     meta_resource = orch.metacognition.resource if orch.metacognition else 1.0
     final_core_affect = orch.signal_rise.apply_meta_correction(
         low_result['raw_core_affect'], meta_resource
     )
 
-    tone_error: str | None = None
-    if orch.output_postprocess is not None:
+    if orch.judge_finalize is not None and candidates:
+        # ADR-011 v2: 진짜 LLM token streaming 경로.
+        #  (a) decide() — JSON 결정만 (~2~4s, large_model reasoning_effort=low)
+        #  (b) stream_text() — 평문 stream (~첫 토큰 500ms, small_model minimal)
+        # 사용자는 LLM 끝나기 전에 첫 토큰을 본다.
+        decide_error: str | None = None
         try:
-            post = await orch.output_postprocess.process(final, final_core_affect)
-            response_text = post['text']
-            action = post['action']
-            tone_eval = post['tone_eval']
-            delay_ms = post['recommended_delay_ms']
+            judge = await orch.judge_finalize.decide(
+                candidates=candidates,
+                marker_signal=marker_signal,
+                confidence=confidence,
+                final_core_affect=final_core_affect,
+                user_input=user_input,
+            )
         except LLMError as exc:
-            tone_error = repr(exc)
+            decide_error = repr(exc)
+            judge = {
+                'selected_index': 0,
+                'rationale': 'fallback',
+                'marker_match': 'none',
+                'response_valence': 0.0,
+                'response_arousal': 0.3,
+                'action': 'pass',
+            }
+        if decide_error is not None:
+            yield _msg('error', ErrorEvent(stage='judge_finalize', message=decide_error))
+
+        sel = int(judge['selected_index'])
+        chosen = candidates[sel] if 0 <= sel < len(candidates) else candidates[0]
+        chosen_text = str(chosen.get('text', ''))
+        chosen_style = str(chosen.get('style', 'restrained'))
+        action = str(judge['action'])
+        tone_eval = {
+            'response_valence': float(judge['response_valence']),
+            'response_arousal': float(judge['response_arousal']),
+            'rationale': str(judge.get('rationale', '')),
+        }
+        delay_ms = _compute_response_delay_ms(final_core_affect.get('arousal', 0.0))
+
+        # final 이벤트 — text 는 placeholder (stream 의 첫 chunk 가 곧 도착).
+        yield _msg('final', FinalEvent(
+            selected_index=sel,
+            text=chosen_text,
+            rationale=str(judge.get('rationale', '')),
+            marker_match=str(judge.get('marker_match', 'none')),
+        ))
+        # tone 이벤트 — judge 가 결정한 톤 메타.
+        yield _msg('tone', ToneEvent(
+            action=action,
+            tone_eval=tone_eval,
+            recommended_delay_ms=int(delay_ms),
+        ))
+
+        # 메타인지 자원 소모 — text streaming 시작 전 (legacy 와 동일 시점).
+        if orch.metacognition is not None:
+            orch.metacognition.consume(0.05)
+
+        # 본격 token streaming.
+        response_parts: list[str] = []
+        try:
+            async for token in orch.judge_finalize.stream_text(
+                chosen_text=chosen_text,
+                chosen_style=chosen_style,
+                final_core_affect=final_core_affect,
+                user_input=user_input,
+            ):
+                response_parts.append(token)
+                yield _msg('response_chunk', ResponseChunkEvent(text=token))
+        except LLMError as exc:
+            yield _msg('error', ErrorEvent(stage='response_text', message=repr(exc)))
+        response_text = ''.join(response_parts) if response_parts else chosen_text
+
+    else:
+        # Legacy 경로 — final_judgment + output_postprocess. token streaming 없음.
+        final_error: str | None = None
+        if orch.final_judgment is not None and candidates:
+            try:
+                final = await orch.final_judgment.select(
+                    candidates, marker_signal, confidence, user_input
+                )
+            except LLMError as exc:
+                final_error = repr(exc)
+                final = {
+                    'selected_index': 0,
+                    'text': candidates[0]['text'],
+                    'rationale': 'fallback',
+                    'marker_match': 'none',
+                }
+        else:
+            final = {
+                'selected_index': 0,
+                'text': candidates[0]['text'] if candidates else '',
+                'rationale': '',
+                'marker_match': 'none',
+            }
+        if final_error is not None:
+            yield _msg('error', ErrorEvent(stage='final', message=final_error))
+        yield _msg('final', FinalEvent(
+            selected_index=int(final['selected_index']),
+            text=str(final['text']),
+            rationale=str(final.get('rationale', '')),
+            marker_match=str(final.get('marker_match', 'none')),
+        ))
+
+        tone_error: str | None = None
+        if orch.output_postprocess is not None:
+            try:
+                post = await orch.output_postprocess.process(final, final_core_affect)
+                response_text = post['text']
+                action = post['action']
+                tone_eval = post['tone_eval']
+                delay_ms = post['recommended_delay_ms']
+            except LLMError as exc:
+                tone_error = repr(exc)
+                response_text = final['text']
+                action = 'pass'
+                tone_eval = {}
+                delay_ms = 0
+        else:
             response_text = final['text']
             action = 'pass'
             tone_eval = {}
             delay_ms = 0
-    else:
-        response_text = final['text']
-        action = 'pass'
-        tone_eval = {}
-        delay_ms = 0
 
-    if tone_error is not None:
-        yield _msg('error', ErrorEvent(stage='tone', message=tone_error))
+        if tone_error is not None:
+            yield _msg('error', ErrorEvent(stage='tone', message=tone_error))
+        yield _msg('tone', ToneEvent(
+            action=action,
+            tone_eval=tone_eval,
+            recommended_delay_ms=int(delay_ms),
+        ))
 
-    yield _msg('tone', ToneEvent(
-        action=action,
-        tone_eval=tone_eval,
-        recommended_delay_ms=int(delay_ms),
-    ))
-
-    # ----- 6. 메타인지 자원 소모 -----
-    if orch.metacognition is not None:
-        orch.metacognition.consume(0.05)
-
-    # ----- 7. response_chunk — 점진 표시. 전체 텍스트는 'done' 에도 들어가므로
-    # 클라이언트가 청크 핸들러 없이도 정상 동작 (backward compat).
-    async for chunk in _chunk_response_text(response_text):
-        yield _msg('response_chunk', ResponseChunkEvent(text=chunk))
+        if orch.metacognition is not None:
+            orch.metacognition.consume(0.05)
 
     # ----- done -----
     yield _msg('done', DoneEvent(

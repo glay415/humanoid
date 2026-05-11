@@ -12,8 +12,9 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 - **Per-stage + per-LLM-call latency logging** (`storage/log_schemas.py`, `core/orchestrator.py`, `llm/client.py`): `events.jsonl` 에 새 이벤트 타입 `stage_timing` (per orchestrator stage) + `llm_call` (per LLM API attempt, includes retry count, model, success flag). `turns.jsonl::TurnLogEntry.timings_ms` dict 도 추가 — 한 줄로 turn 의 stage breakdown 확인 가능.
-- **`judge_finalize` module** (`high_level/judge_finalize.py`): final_judgment + tone_verification + tone_adjust 를 1 LLM 콜로 합친 통합 모듈. spec §2.2 ④+⑤ 단축. legacy 직렬 2~3콜 경로는 `judge_finalize=None` 빌드 시 fallback 으로 보존.
-- **SSE `response_chunk` event**: 응답 텍스트를 3자 단위 25ms 간격으로 흘려보내는 simulated streaming. `done.response` 에 full text 동일 포함 → 청크 핸들러 없는 클라이언트도 정상 동작 (ADR-011).
+- **`judge_finalize` module** (`high_level/judge_finalize.py`, ADR-011 v2): `decide()` (JSON 결정 — selected_index/action/marker_match/response_v·a, large_model reasoning_effort=low, ~2~4s) + `stream_text()` (선택된 후보 텍스트를 톤 정렬하며 토큰별 yield 하는 async generator, small_model reasoning_effort=minimal, 첫 토큰 ~500ms). 기존 final_judgment + tone_verification + tone_adjust 직렬 2~3콜을 대체. legacy 경로는 `judge_finalize=None` 빌드 시 fallback 으로 보존.
+- **`LLMClient.complete_streaming()`** (`llm/client.py`): `stream=True` 로 litellm 호출, async generator 가 토큰 청크 yield. MockLLMClient 도 시그니처 호환 (전체 응답을 한 번에 yield).
+- **SSE `response_chunk` event** (ADR-011 v2): backend simulated chunking 제거 → judge_finalize 의 `stream_text()` 가 yield 한 *실제 LLM 토큰* 을 그대로 흘려보냄. `done.response` 에 누적 full text 동일 포함 → 청크 핸들러 없는 클라이언트도 정상 동작.
 - **VSCode tasks** (`.vscode/tasks.json`): backend / frontend / dev (both) / test 변형 task 등록. `Ctrl+Shift+B` 로 dev 페어 한 번에 실행.
 - **ADR-011** (`docs/decisions.md`): latency 단축 다축 변경의 rationale + 예상 효과.
 
@@ -22,7 +23,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - **Reappraisal depth 기본 3→1** (`high_level/metacognition.py::Metacognition.max_iterations`): gpt-5.5 reasoning latency 가 비싸 multi-iter 비용 > 품질 이득. spec §1.4 의 depth=3 안전상한은 옵션으로 보존. trigger 임계값도 보강 (state_mismatch 0.4→0.5, social_threat 0.6→0.65).
 - **Candidate 수 4→3** (`high_level/candidate_generation.py`, `prompts/candidate_generation.txt`): `silence` 스타일 프롬프트에서 제거. 스키마 Literal 은 backward compat 유지.
 - **OpenAI prompt caching** (`llm/prompts_meta.py::SHARED_PREAMBLE`): 약 1100 token 의 운영 원칙 system message 를 모든 LLM 콜 첫 메시지로 prepend. ≥1024 token prefix 캐시 hit → TTFT 30~50% 단축 + input token 50% 할인.
-- **Orchestrator section 4+5 refactor** (`core/orchestrator.py`): judge_finalize 우선 / legacy fallback 분기. regenerate 사이클은 양 경로 모두 1회 캡.
+- **Orchestrator section 4+5 refactor** (`core/orchestrator.py`): judge_finalize 우선 / legacy fallback 분기. regenerate 사이클은 양 경로 모두 1회 캡. CLI / 비-SSE 호출 경로에선 `_collect_stream_text()` 가 stream 토큰을 모아 response_text 완성; SSE 경로는 `ui/backend/streaming.py` 가 토큰을 직접 SSE 로 흘려보냄.
 - **setuptools explicit packages** (`pyproject.toml`): flat-layout 자동 탐색이 `chroma_db/`, `instances/`, `storage_data/`, `config/`, `prompts/` 까지 패키지로 오인해서 `uv sync` 가 깨지던 버그 수정. `[tool.setuptools.packages.find]` 으로 import 루트만 명시.
 - **release.py 두 버그 수정** (`scripts/release.py`): (a) `split_changelog` 가 `[Unreleased]` 헤더를 head 에 남겨 promote 후 헤더가 두 개로 찍히던 문제. (b) Windows cp949 stdout 이 unicode 글리프 못 받아 promote 직후 죽던 문제.
 

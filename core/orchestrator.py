@@ -451,8 +451,9 @@ class Orchestrator:
 
         regenerated = False
         if self.judge_finalize is not None and candidates:
-            # 통합 경로: 1 LLM 콜로 final_judgment + tone_verification + tone_adjust.
-            # 기존 직렬 2~3콜 → 1콜로 단축. (gpt-5.5 reasoning latency 10~15s 절감)
+            # ADR-011 v2: decide() (JSON, ~2~4s) + stream_text() (평문 stream).
+            # CLI / 비SSE 호출 경로 — stream 토큰을 모아 response_text 완성.
+            # SSE 경로는 ui/backend/streaming.py 가 직접 호출하므로 본 블록 미사용.
             _ts = timings.start()
             try:
                 judge = await self.judge_finalize.decide(
@@ -462,13 +463,20 @@ class Orchestrator:
                     final_core_affect=final_core_affect,
                     user_input=user_input,
                 )
+                _sel = int(judge['selected_index'])
+                _chosen = candidates[_sel] if 0 <= _sel < len(candidates) else candidates[0]
+                response_text = await self._collect_stream_text(
+                    chosen_text=str(_chosen.get('text', '')),
+                    chosen_style=str(_chosen.get('style', 'restrained')),
+                    final_core_affect=final_core_affect,
+                    user_input=user_input,
+                )
                 final = {
-                    'selected_index': judge['selected_index'],
-                    'text': judge['text'],
-                    'rationale': judge['rationale'],
-                    'marker_match': judge['marker_match'],
+                    'selected_index': _sel,
+                    'text': response_text,
+                    'rationale': judge.get('rationale', ''),
+                    'marker_match': judge.get('marker_match', 'none'),
                 }
-                response_text = judge['text']
                 action = judge['action']
                 tone_eval = {
                     'response_valence': judge['response_valence'],
@@ -532,15 +540,22 @@ class Orchestrator:
                             final_core_affect=final_core_affect,
                             user_input=user_input,
                         )
+                        _sel = int(judge['selected_index'])
+                        _chosen = candidates[_sel] if 0 <= _sel < len(candidates) else candidates[0]
+                        response_text = await self._collect_stream_text(
+                            chosen_text=str(_chosen.get('text', '')),
+                            chosen_style=str(_chosen.get('style', 'restrained')),
+                            final_core_affect=final_core_affect,
+                            user_input=user_input,
+                        )
                         final = {
-                            'selected_index': judge['selected_index'],
-                            'text': judge['text'],
-                            'rationale': judge['rationale'],
-                            'marker_match': judge['marker_match'],
+                            'selected_index': _sel,
+                            'text': response_text,
+                            'rationale': judge.get('rationale', ''),
+                            'marker_match': judge.get('marker_match', 'none'),
                         }
-                        response_text = judge['text']
                         # regen 사이클은 1회 캡 — action 무시.
-                        action = 'pass' if judge['action'] != 'regenerate' else 'pass'
+                        action = 'pass'
                         tone_eval = {
                             'response_valence': judge['response_valence'],
                             'response_arousal': judge['response_arousal'],
@@ -1129,6 +1144,41 @@ class Orchestrator:
     # ------------------------------------------------------------------
     # Wave 14A — JSONL 로깅 헬퍼
     # ------------------------------------------------------------------
+
+    async def _collect_stream_text(
+        self,
+        *,
+        chosen_text: str,
+        chosen_style: str,
+        final_core_affect: dict[str, float],
+        user_input: str,
+    ) -> str:
+        """judge_finalize.stream_text 의 토큰을 모두 모아 평문으로 반환.
+
+        CLI / 비-SSE 호출 경로 전용 — SSE generator 는 streaming.py 에서 직접
+        async for 으로 토큰을 받아 response_chunk 이벤트로 흘려보낸다.
+        실패 시 chosen_text 폴백 (스트리밍 중간에 실패하면 부분 결과 폴백).
+        """
+        if self.judge_finalize is None:
+            return chosen_text
+        parts: list[str] = []
+        try:
+            async for token in self.judge_finalize.stream_text(
+                chosen_text=chosen_text,
+                chosen_style=chosen_style,
+                final_core_affect=final_core_affect,
+                user_input=user_input,
+            ):
+                parts.append(token)
+        except LLMError as exc:
+            if self.logger is not None:
+                self._log_event_safe('llm_error', {
+                    'stage': 'judge_finalize_stream_text',
+                    'message': str(exc),
+                })
+            if not parts:
+                return chosen_text
+        return ''.join(parts) if parts else chosen_text
 
     def _log_event_safe(self, event_type: str, payload: dict) -> None:
         """Logger 가 있을 때 EventLogEntry 1건 기록. 실패는 무시."""

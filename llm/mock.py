@@ -51,6 +51,23 @@ class MockLLMClient:
         del reasoning_effort
         return await self._resolve(messages, model_name)
 
+    async def complete_streaming(
+        self,
+        messages,
+        model_name: str = "small_model",
+        reasoning_effort: str | None = None,
+    ):
+        """LLMClient.complete_streaming 의 mock — 응답을 한 번에 한 청크로 yield.
+
+        실제 OpenAI stream 의 chunk-by-chunk 거동을 흉내내려면 더 정교하게 짤
+        수 있지만, 대부분의 테스트는 stream 의 부분 도착을 검증하지 않는다.
+        호환을 위해 단순히 전체 응답을 한 번에 yield.
+        """
+        del reasoning_effort
+        text = await self._resolve(messages, model_name)
+        if text:
+            yield text
+
     async def complete_json(
         self,
         messages,

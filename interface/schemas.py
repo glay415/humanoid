@@ -81,14 +81,13 @@ class FinalResponse(BaseModel):
 
 
 class JudgeFinalizeResponse(BaseModel):
-    """final_judgment + output_postprocess 통합 출력. spec §2.2 ④+⑤ 한 LLM 콜.
+    """final_judgment decision-only. spec §2.2 ④ 결정 phase 1콜.
 
-    별도의 tone_adjust 콜 없이 LLM 이 인라인으로 톤 정렬을 마친 final text 를 낸다.
-    action 은 'pass' 가 다수 — tone_adjust 는 본 모듈이 자체 처리하므로 외부 신호로는
-    안 나가고, 후보 자체가 부호 반대 + 큰 격차일 때만 'regenerate' 가 나온다.
+    ADR-011 v2 (token streaming): text 필드 제거. 응답 텍스트는 후속 stream
+    LLM 콜 (judge_finalize_text.txt) 에서 토큰별로 생성된다 — JudgeFinalize.stream_text.
+    action 은 'pass' 가 다수, 'regenerate' 는 후보 모두 톤 충돌인 드문 케이스만.
     """
     selected_index: int
-    text: str
     rationale: str
     marker_match: Literal['approach', 'avoid', 'none']
     response_valence: float

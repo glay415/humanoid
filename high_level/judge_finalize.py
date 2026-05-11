@@ -1,17 +1,17 @@
-"""④+⑤ 통합 — Final Judgment + Output Postprocess 단일 LLM 콜.
+"""④+⑤ 통합 — Final Judgment 결정 (1콜) + 응답 텍스트 stream (1콜).
 
-기존 직렬 3콜 (final_judgment → tone_verification → tone_adjust) 을 1콜로 합쳐
-gpt-5.5 reasoning latency 를 한 턴 기준 10~15초 절감한다.
+ADR-011 v2 — 진짜 LLM token streaming:
+  - decide(): JSON 결정 (selected_index, action, marker_match, response_v/a).
+    reasoning_effort=low. ~2~4s.
+  - stream_text(): 선택된 후보 텍스트를 톤 정렬하면서 평문 stream.
+    reasoning_effort=minimal. 첫 토큰 ~500ms, 이후 token-by-token.
 
-설계:
-  - 후보 + marker_signal + confidence + final_core_affect → 선택 + 톤 정렬된 final text
-  - 톤 mismatch 가 크지 않은 정상 케이스는 LLM 이 인라인으로 minor edit → action='pass'
-  - 부호 반대 + 큰 격차의 극단 케이스만 action='regenerate' 신호로 회기.
-  - 응답 지연 (delay_ms) 은 arousal 만의 결정함수 — 오케스트레이터가 후처리.
+기존 1콜 통합 (ADR-011 v1) 보다 LLM 콜 1개 늘었지만 TTFT 가 짧아져
+체감 latency 가 훨씬 좋다. text 컨텐츠는 candidate 의 minor edit 수준이라
+minimal effort 로 충분.
 
-backward compatibility:
-  - 기존 FinalJudgment / OutputPostprocess 는 그대로 유지 — legacy 테스트와
-    judge_finalize=None 으로 빌드된 오케스트레이터에서 fallback 으로 사용.
+legacy fallback (FinalJudgment + OutputPostprocess) 은 그대로 유지 —
+judge_finalize=None 으로 빌드된 오케스트레이터에서 사용.
 """
 from __future__ import annotations
 
@@ -22,23 +22,31 @@ from llm.client import LLMClient, LLMError
 from llm.prompts import load_prompt
 
 
-_SYSTEM_MESSAGE = (
-    "당신은 인지 아키텍처의 '통합 판단(judge + finalize)' 모듈이다. "
-    "Damasio as-if loop 으로 marker_signal 의 접근/회피 단서를 후보와 매칭해 하나를 "
-    "선택하거나 하이브리드를 작성하고, 동시에 응답 텍스트의 톤(valence/arousal)을 "
-    "현재 코어어펙트와 정렬하기 위해 의미는 유지한 채 어휘·어미만 minor edit 한다. "
-    "출력은 오직 한 개의 JSON 객체이며 자연어 설명·마크다운 코드펜스·추가 키를 금지한다. "
-    "selected_index 는 유효 인덱스(0~N-1) 이거나 하이브리드 시 -1, "
-    "marker_match 는 approach|avoid|none, action 은 pass|regenerate 셋 중 하나여야 한다."
+_DECIDE_SYSTEM_MESSAGE = (
+    "당신은 인지 아키텍처의 '최종 판단(judge)' 모듈이다. "
+    "Damasio as-if loop 으로 marker_signal 의 접근/회피 단서를 후보와 매칭해 "
+    "하나를 선택하고, 응답이 정렬되어야 할 톤(valence/arousal)을 보고한다. "
+    "실제 응답 텍스트는 후속 stream 콜이 만들 것이므로 본 콜에서는 텍스트를 "
+    "직접 작성하지 말고 메타 정보(selected_index, action, marker_match, "
+    "response_valence, response_arousal, rationale)만 결정한다. "
+    "출력은 오직 한 개의 JSON 객체이며 자연어 설명·마크다운 코드펜스·추가 키 금지."
+)
+
+_TEXT_SYSTEM_MESSAGE = (
+    "당신은 인지 아키텍처의 '응답 텍스트 정렬' 모듈이다. "
+    "선택된 후보 텍스트를 현재 코어어펙트 valence/arousal 에 정렬된 톤으로 "
+    "minor edit 만 해서 출력한다. 의미는 보존, 새 정보 추가 금지, 한국어. "
+    "출력은 응답 본문 평문만 — JSON / 마크다운 / 따옴표 / 라벨 / 메타 문구 금지."
 )
 
 
 class JudgeFinalize:
-    """통합 ④+⑤ 모듈."""
+    """통합 ④+⑤ 모듈 — decision + text streaming."""
 
     def __init__(self, llm_client: LLMClient | None = None):
         self.llm = llm_client or LLMClient()
         self.template = load_prompt('judge_finalize')
+        self.text_template = load_prompt('judge_finalize_text')
 
     async def decide(
         self,
@@ -48,10 +56,10 @@ class JudgeFinalize:
         final_core_affect: dict[str, float],
         user_input: str = "",
     ) -> dict:
-        """후보 선택 + 톤 정렬을 1콜로.
+        """후보 선택 + 액션 결정 (text 없음). spec §2.2 ④ phase.
 
         Returns:
-            JudgeFinalizeResponse dict — selected_index, text, rationale, marker_match,
+            JudgeFinalizeResponse dict — selected_index, rationale, marker_match,
             response_valence, response_arousal, action.
 
         Raises:
@@ -66,15 +74,15 @@ class JudgeFinalize:
             final_arousal=final_core_affect.get('arousal', 0.0),
         )
         messages = [
-            {"role": "system", "content": _SYSTEM_MESSAGE},
+            {"role": "system", "content": _DECIDE_SYSTEM_MESSAGE},
             {"role": "user", "content": rendered},
         ]
         result = await self.llm.complete_json(
             messages,
             schema=JudgeFinalizeResponse,
             model_name='large_model',
-            # large_model 의 기본 reasoning_effort=medium 을 그대로 사용 — 후보 매칭 +
-            # 톤 정렬은 가벼운 추론이 필요한 영역이라 minimal 은 품질 회귀 위험.
+            # decision 만 — text 가 빠져서 reasoning 부담 적음. low 면 충분.
+            reasoning_effort='low',
         )
 
         # 스키마는 타입만 검사. 인덱스 범위 보강.
@@ -85,3 +93,37 @@ class JudgeFinalize:
                 f"len(candidates)={len(candidates)}"
             )
         return result
+
+    async def stream_text(
+        self,
+        chosen_text: str,
+        chosen_style: str,
+        final_core_affect: dict[str, float],
+        user_input: str = "",
+    ):
+        """선택된 후보 텍스트를 톤 정렬하며 토큰별 yield. async generator.
+
+        호출부 (orchestrator → streaming.py) 는 매 토큰을 SSE response_chunk 로
+        흘려보낸다. reasoning_effort=minimal — rewrite 정도이므로 thinking 거의 없음
+        → 첫 토큰 ~500ms 안에 도착.
+
+        Yields:
+            str — LLM 의 partial content delta (보통 1~4 글자).
+        """
+        rendered = self.text_template.render(
+            user_input=user_input,
+            chosen_text=chosen_text,
+            chosen_style=chosen_style,
+            final_valence=final_core_affect.get('valence', 0.0),
+            final_arousal=final_core_affect.get('arousal', 0.0),
+        )
+        messages = [
+            {"role": "system", "content": _TEXT_SYSTEM_MESSAGE},
+            {"role": "user", "content": rendered},
+        ]
+        async for chunk in self.llm.complete_streaming(
+            messages,
+            model_name='small_model',
+            reasoning_effort='minimal',
+        ):
+            yield chunk

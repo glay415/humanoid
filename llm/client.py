@@ -159,6 +159,67 @@ class LLMClient:
             # 로깅 실패는 LLM 흐름을 막지 않는다.
             pass
 
+    async def complete_streaming(
+        self,
+        messages: list[dict],
+        model_name: str = "small_model",
+        reasoning_effort: str | None = None,
+    ):
+        """litellm stream=True. async generator — 토큰 청크 (str) 를 순차 yield.
+
+        plain text 응답에만 사용. JSON 구조화 응답은 partial parsing 위험으로
+        complete_json 유지. 호출부는 `async for chunk in self.llm.complete_streaming(...)`
+        로 토큰을 받아 즉시 SSE 로 흘려보낼 수 있다.
+
+        retry 는 stream 모드에서 의미가 약함 (한 번 흘러가기 시작하면 끊지 못함) →
+        단일 시도. 실패 시 LLMError 즉시 raise.
+        """
+        cfg = self.get_config(model_name)
+        timeout_s = cfg.timeout_ms / 1000.0
+        extra: dict[str, Any] = {'stream': True}
+        re_value = reasoning_effort or cfg.reasoning_effort
+        if re_value is not None:
+            extra['reasoning_effort'] = re_value
+        # SHARED_PREAMBLE prepend (complete_json/complete 와 동일 정책 — prompt cache hit).
+        if not (messages and messages[0].get('role') == 'system'
+                and messages[0].get('content') == SHARED_PREAMBLE):
+            messages = [
+                {'role': 'system', 'content': SHARED_PREAMBLE},
+                *messages,
+            ]
+
+        t0 = time.perf_counter_ns()
+        try:
+            stream = await asyncio.wait_for(
+                litellm.acompletion(
+                    model=f"{cfg.provider}/{cfg.model}",
+                    messages=messages,
+                    max_tokens=cfg.max_tokens,
+                    temperature=cfg.temperature,
+                    **extra,
+                ),
+                timeout=timeout_s,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            self._emit_call_event(cfg, t0, 1, success=False, error=str(exc))
+            raise LLMError(f"streaming LLM call failed: {exc!r}") from exc
+
+        try:
+            async for chunk in stream:
+                # litellm/openai async stream — chunk.choices[0].delta.content 가 토큰 (str|None).
+                try:
+                    delta = chunk.choices[0].delta.content
+                except (AttributeError, IndexError):
+                    continue
+                if delta:
+                    yield delta
+        except asyncio.CancelledError:
+            raise
+        finally:
+            self._emit_call_event(cfg, t0, 1, success=True)
+
     async def complete(
         self,
         messages: list[dict],
