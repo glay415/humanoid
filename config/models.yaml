@@ -34,5 +34,18 @@ dmn_model:
   reasoning_effort: low
   timeout_ms: 15000
 
+# stream_model: non-reasoning 빠른 모델. judge_finalize.stream_text 전용.
+#   gpt-5.5 같은 reasoning 모델은 stream 모드에서 thinking phase (~3~5s) 가 끝나야
+#   토큰을 흘려서 "전체 결과 나온 후 와다다" UX 가 됨. stream_text 는 단순 톤
+#   정렬 rewrite 작업이라 reasoning 불필요 → non-reasoning 모델로 분리.
+#   gpt-4o-mini 는 stream 첫 토큰 ~200ms, 안정적 평문 출력.
+stream_model:
+  provider: "openai"
+  model: "gpt-4o-mini"
+  max_tokens: 512
+  temperature: 0.7
+  timeout_ms: 10000
+  # reasoning_effort 없음 — non-reasoning 모델은 이 키 자체를 받지 않는다.
+
 # 구현 옵션 (최소/표준/풀)
 call_config: "standard"
