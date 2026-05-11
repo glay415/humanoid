@@ -36,6 +36,13 @@ analyze = [
 requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.packages.find]
+# 명시적으로 import 가능한 패키지만 잡는다. setuptools 의 flat-layout 자동탐색은
+# config/, prompts/, chroma_db/, instances/, storage_data/ 같은 데이터/런타임
+# 디렉토리까지 "top-level package" 로 오인해서 빌드를 막는다.
+include = ["core*", "high_level*", "low_level*", "interface*", "llm*", "storage*", "ui*"]
+exclude = ["tests*", "scripts*", "docs*", ".venv*", "instances*", "chroma_db*", "storage_data*"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
