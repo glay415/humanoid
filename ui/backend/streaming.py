@@ -292,9 +292,16 @@ async def _stream_turn_body(
 
     async def run_turn() -> None:
         try:
-            await orch.process_conversation_turn(
-                user_input, on_event=on_event, debug=debug,
-            )
+            # ADR-012 v2: unified_response 가 있으면 단일 stream 경로 (ChatGPT-like).
+            # 없으면 다층 process_conversation_turn fallback.
+            if getattr(orch, 'unified_response', None) is not None:
+                await orch.stream_unified_turn(
+                    user_input, on_event=on_event, debug=debug,
+                )
+            else:
+                await orch.process_conversation_turn(
+                    user_input, on_event=on_event, debug=debug,
+                )
         except asyncio.CancelledError:
             raise
         except Exception as exc:

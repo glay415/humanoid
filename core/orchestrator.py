@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from high_level.final_judgment import FinalJudgment
     from high_level.output_postprocess import OutputPostprocess
     from high_level.judge_finalize import JudgeFinalize
+    from high_level.unified_response import UnifiedResponse
     from high_level.metacognition import Metacognition
     from high_level.dmn import DMN
     from storage.memory_store import EpisodicMemory
@@ -151,6 +152,11 @@ class Orchestrator:
         # ④+⑤ 통합. 지정되면 final_judgment+output_postprocess 의 LLM 콜을
         # 1콜로 대체. 지정 안 되면 legacy 경로 사용.
         judge_finalize: 'JudgeFinalize | None' = None,
+        # ADR-012: 단일 stream LLM 콜로 통합 응답 생성. emotion + candidate +
+        # judge_finalize 직렬 4 콜 (~26s) → 1 stream 콜 (~첫 토큰 1s).
+        # stream_unified_turn 메서드에서 사용. 없으면 process_conversation_turn
+        # 의 다층 경로 그대로.
+        unified_response: 'UnifiedResponse | None' = None,
         metacognition: 'Metacognition | None' = None,
         dmn: 'DMN | None' = None,
         episodic_memory: 'EpisodicMemory | None' = None,
@@ -183,6 +189,7 @@ class Orchestrator:
         self.final_judgment = final_judgment
         self.output_postprocess = output_postprocess
         self.judge_finalize = judge_finalize
+        self.unified_response = unified_response
         self.metacognition = metacognition
         self.dmn = dmn
 
@@ -971,6 +978,243 @@ class Orchestrator:
             'experience_vector': experience_vector,
             'turn_number': self.turn_number,
             'regenerated': regenerated,
+        }
+
+    async def stream_unified_turn(
+        self,
+        user_input: str,
+        *,
+        on_event: 'Callable[[str, dict], Awaitable[None]] | None' = None,
+        debug: bool = False,
+    ) -> dict:
+        """ADR-012 — ChatGPT-like 단일 stream 응답.
+
+        기존 process_conversation_turn 의 emotion → candidate → judge_finalize
+        직렬 ~26s 를 단일 stream LLM 콜로 단축. 사용자에게 첫 토큰 ~1s.
+
+        emotion_appraisal 은 응답 stream 끝난 후 동기로 평가 — 다음 턴의
+        prev_experience 결정에만 영향. 사용자는 응답 표시 후 그 시간 활용.
+
+        unified_response 가 None 이면 fallback 으로 process_conversation_turn
+        호출 (다층 경로).
+        """
+        if self.unified_response is None:
+            return await self.process_conversation_turn(
+                user_input, on_event=on_event, debug=debug,
+            )
+
+        self.turn_number += 1
+        self.current_turn_type = TurnType.CONVERSATION
+        _t_start = time.perf_counter_ns()
+        timings = _Stopwatch()
+
+        async def _emit(name: str, data: dict) -> None:
+            if on_event is None:
+                return
+            try:
+                await on_event(name, data)
+            except Exception:
+                pass
+
+        # 0. 저수준 파이프라인.
+        _pre_snap = _snapshot_pre_low_level(self) if debug else None
+        _ts = timings.start()
+        low_result = self.low_level.run(user_input, self.prev_experience)
+        timings.record('low_level', _ts)
+        await _emit('low_level', {
+            'state': dict(low_result.get('state', {})),
+            'raw_core_affect': dict(low_result.get('raw_core_affect', {})),
+            'mood': dict(low_result['mood']),
+            'drives': dict(low_result.get('drives', {})),
+            'fast_path_triggered': bool(low_result.get('fast_path_triggered', False)),
+            'pre_snapshot': _pre_snap,
+            'baselines_after': (
+                {k: float(v) for k, v in self.low_level.temperament.baselines.items()}
+                if (self.low_level and self.low_level.temperament) else None
+            ),
+        })
+
+        if self.logger is not None and low_result.get('fast_path_triggered'):
+            self._log_event_safe('fast_path_match', {
+                'raw_core_affect': dict(low_result.get('raw_core_affect', {})),
+            })
+
+        # 1. 기억 인출 — LLM 없음, ChromaDB + sentence-transformers.
+        _ts = timings.start()
+        emotion_stub_for_memory = {
+            'valence': float(low_result['raw_core_affect'].get('valence', 0.0)),
+            'arousal': float(low_result['raw_core_affect'].get('arousal', 0.0)),
+            'preliminary_labels': [],
+            'experience_dimensions': {'reward': 0.0, 'threat': 0.0, 'novelty': 0.0},
+        }
+        if self.memory_retrieval is not None:
+            try:
+                memory_result = await self.memory_retrieval.retrieve(
+                    user_input,
+                    emotion_stub_for_memory,
+                    low_result['mood'],
+                    low_result['raw_core_affect'],
+                )
+            except Exception:
+                memory_result = self._empty_memory_result()
+        else:
+            memory_result = self._empty_memory_result()
+        timings.record('memory_retrieval', _ts)
+        await _emit('memory', {
+            'memories': list(memory_result.get('memories', [])),
+            'prospective_items': list(memory_result.get('prospective_items', [])),
+            'retrieval_context': dict(memory_result.get('retrieval_context', {})),
+        })
+
+        # 2. marker signal + 컨텍스트 빌드.
+        marker_list = (
+            list(self.low_level.markers.markers.values())
+            if self.low_level.markers else []
+        )
+        marker_signal = self.signal_rise.generate_marker_signal(marker_list)
+        self_model_dict = (
+            self.self_model.to_dict() if self.self_model
+            else {'narrative': '', 'confidence': 0.1}
+        )
+        ll_state = low_result.get('state') if isinstance(low_result, dict) else None
+        ll_baselines = (
+            self.low_level.temperament.baselines
+            if (self.low_level and self.low_level.temperament) else None
+        )
+
+        # candidate_generation 의 private formatter 재사용.
+        from high_level.candidate_generation import (
+            _fmt_internal_state as _cg_fmt_internal_state,
+            _fmt_memory as _cg_fmt_memory,
+        )
+        internal_state_summary = _cg_fmt_internal_state(ll_state, ll_baselines)
+        memory_summary = _cg_fmt_memory(memory_result)
+
+        # 3. unified stream — 단일 LLM 콜로 페르소나 응답 생성. 첫 토큰 ~1s.
+        _ts = timings.start()
+        response_parts: list[str] = []
+        try:
+            async for token in self.unified_response.stream(
+                user_input=user_input,
+                self_narrative=self_model_dict.get('narrative', ''),
+                recent_dialogue_text=_fmt_recent_dialogue_for_stream(self.dialogue_buffer),
+                mood_text=_fmt_mood_for_stream(low_result['mood']),
+                raw_valence=float(low_result['raw_core_affect'].get('valence', 0.0)),
+                raw_arousal=float(low_result['raw_core_affect'].get('arousal', 0.0)),
+                internal_state_summary=internal_state_summary,
+                marker_signal=marker_signal,
+                memory_summary=memory_summary,
+            ):
+                response_parts.append(token)
+                await _emit('response_chunk', {'text': token})
+                # ASGI send flush 양보 — 같은 microtask 에 다음 token 들어가지 않도록.
+                await asyncio.sleep(0)
+        except LLMError as exc:
+            if self.logger is not None:
+                self._log_event_safe('llm_error', {
+                    'stage': 'unified_response',
+                    'message': str(exc),
+                })
+            await _emit('error', {'stage': 'unified_response', 'message': repr(exc)})
+        _ur_ms = timings.record('unified_response', _ts)
+        self._log_event_safe('stage_timing', {
+            'stage': 'unified_response',
+            'duration_ms': round(_ur_ms, 2),
+        })
+        response_text = ''.join(response_parts) if response_parts else "..."
+
+        # 4. dialogue buffer 갱신 — 다음 턴 컨텍스트.
+        self.dialogue_buffer.append({'user': user_input, 'assistant': response_text})
+        if len(self.dialogue_buffer) > self.dialogue_buffer_max:
+            self.dialogue_buffer = self.dialogue_buffer[-self.dialogue_buffer_max:]
+
+        # 5. emotion appraisal — 응답 후 background-ish. 사용자가 응답을 보는 동안
+        # 처리되어 다음 턴의 prev_experience 결정. LLM 콜 1개라 ~3~5s.
+        _ts = timings.start()
+        if self.emotion_appraisal is not None:
+            try:
+                emotion_result = await self.emotion_appraisal.evaluate(
+                    user_input, low_result['raw_core_affect']
+                )
+            except (LLMError, AttributeError, KeyError):
+                emotion_result = self._emotion_fallback(low_result['raw_core_affect'])
+        else:
+            emotion_result = self._emotion_fallback(low_result['raw_core_affect'])
+        timings.record('emotion_appraisal_post', _ts)
+
+        # 6. experience_vector 합성 + prev_experience 갱신.
+        goal_progress = self.metacognition.goal_progress if self.metacognition else None
+        social_result = self._default_social_result()  # unified mode 는 social LLM 콜 없음
+        experience_vector = self.experience_descent.assemble(
+            emotion_result, social_result, goal_progress
+        )
+        self.prev_experience = experience_vector
+
+        # 7. 자동 부호화 (감정 강도 임계 초과 시).
+        if self.episodic_memory is not None:
+            intensity = abs(emotion_result['valence']) + emotion_result['arousal']
+            if intensity > self.auto_encoding_threshold:
+                try:
+                    await self.episodic_memory.auto_encode(
+                        user_input, emotion_result, self.turn_number
+                    )
+                except Exception:
+                    pass
+
+        # 8. 메타인지 자원 소모 + self_model sync.
+        if self.metacognition is not None:
+            self.metacognition.consume(0.05)
+        if self.metacognition is not None and self.self_model is not None:
+            try:
+                self.self_model.update(
+                    {'confidence': float(self.metacognition.confidence)}
+                )
+            except Exception:
+                pass
+
+        # 9. turn log.
+        _duration_ms = int(round((time.perf_counter_ns() - _t_start) / 1e6))
+        timings.data['total'] = float(_duration_ms)
+        final_dict = {
+            'selected_index': 0,
+            'text': response_text,
+            'rationale': 'unified_response',
+            'marker_match': 'none',
+        }
+        if self.logger is not None:
+            try:
+                self._log_turn_safe(
+                    user_input=user_input,
+                    response_text=response_text,
+                    low_result=low_result,
+                    emotion_result=emotion_result,
+                    experience_vector=experience_vector,
+                    action='pass',
+                    final=final_dict,
+                    delay_ms=0,
+                    duration_ms=_duration_ms,
+                    timings_ms=timings.data,
+                )
+            except Exception:
+                pass
+
+        # 10. done event.
+        await _emit('done', {
+            'response': response_text,
+            'turn_number': self.turn_number,
+            'experience_vector': dict(experience_vector or {}),
+        })
+
+        return {
+            'response': response_text,
+            'action': 'pass',
+            'tone_eval': {},
+            'recommended_delay_ms': 0,
+            'low_level': low_result,
+            'emotion': emotion_result,
+            'experience_vector': experience_vector,
+            'turn_number': self.turn_number,
+            'regenerated': False,
         }
 
     def _invoke_review(

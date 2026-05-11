@@ -158,10 +158,14 @@ def build_full_orchestrator(
     candidate_generation = CandidateGeneration(llm_client=llm_client)
     final_judgment = FinalJudgment(llm_client=llm_client)
     output_postprocess = OutputPostprocess(llm_client=llm_client)
-    # ADR-012: final_judgment + output_postprocess 의 직렬 2~3 LLM 콜을 1콜로 합친
+    # ADR-012 v1: final_judgment + output_postprocess 의 직렬 2~3 LLM 콜을 1콜로 합친
     # 통합 경로. 프로덕션 기본. 미지정 (None) 으로 빌드하면 legacy 2~3콜 경로 사용.
     from high_level.judge_finalize import JudgeFinalize
     judge_finalize = JudgeFinalize(llm_client=llm_client)
+    # ADR-012 v2: emotion + candidate + judge_finalize 직렬 ~26s 를 단일 stream
+    # LLM 콜로 단축 — ChatGPT-like UX. SSE 가 orch.stream_unified_turn 호출.
+    from high_level.unified_response import UnifiedResponse
+    unified_response = UnifiedResponse(llm_client=llm_client)
     metacognition = Metacognition(
         sensitivity=cfg.get('metacognition_sensitivity', 0.5),
         floor=cfg.get('metacognition_floor', 0.1),
@@ -198,6 +202,7 @@ def build_full_orchestrator(
         final_judgment=final_judgment,
         output_postprocess=output_postprocess,
         judge_finalize=judge_finalize,
+        unified_response=unified_response,
         metacognition=metacognition,
         dmn=dmn,
         episodic_memory=episodic,

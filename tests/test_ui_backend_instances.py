@@ -274,8 +274,10 @@ async def test_turn_for_instance_streams_full_sse(isolated_manager):
     names = [e['event'] for e in events]
     assert names[-1] == 'done', f"got names={names}"
     assert 'low_level' in names
-    assert 'emotion' in names
-    assert 'final' in names
+    # ADR-012: production 빌드는 unified_response 경로 — SSE 시퀀스는
+    # low_level → memory → response_chunk* → done. emotion / final / tone 은
+    # legacy 다층 경로에서만 emit. 두 시나리오 모두 통과시킨다.
+    assert 'memory' in names or 'emotion' in names
 
     # 메타가 turn_number 1 로 갱신되어야 함.
     meta = mgr.get_metadata(iid)

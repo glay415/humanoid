@@ -175,6 +175,33 @@
 
 ---
 
+## ADR-012 (2026-05-11): Single-call unified stream response — ChatGPT-like UX
+
+**Context**: ADR-011 v2 의 4 콜 직렬 파이프라인 (emotion → candidate → judge_finalize.decide → stream_text, ~26s 누적) 이 stream_text 의 token streaming 효과를 무력화. 사용자 입장: ~26s 멍 대기 → 마지막 1.7s 동안 토큰 와다다 → "다른 LLM 서비스와 다름". 측정 데이터 `instances/<id>/events.jsonl` 의 stage_timing 으로 확인.
+
+**Decision**: 새 모듈 `high_level/unified_response.py` 도입. 단일 stream LLM 콜로 모든 cognitive context (페르소나 narrative, 직전 대화, mood, 9-dim state, marker_signal, memory 회상) 를 prompt 로 통합해 plain text 응답을 token 단위 stream. 사용자에게 첫 토큰 ~1s.
+
+  - `prompts/unified_response.txt`: 통합 prompt — 페르소나 못 박기, 메타·카탈로그 톤 금지, 사람답게 한계 인정 명시.
+  - `core/orchestrator.py::stream_unified_turn`: low_level → memory → unified stream → 그 후 동기 emotion appraisal (다음 턴 prev_experience 결정) → done.
+  - `ui/backend/streaming.py`: `orch.unified_response` 가 있으면 `stream_unified_turn` 호출, 없으면 다층 `process_conversation_turn` fallback.
+
+SSE event 시퀀스 변화 (unified path): low_level → memory → response_chunk* → done. emotion / candidates / final / tone 이벤트 emit 안 함 (분석은 응답 후 background-동기 처리, SSE 로 안 노출).
+
+**Trade-off**:
+- 잃는 것: emotion_appraisal 의 *명시적 multi-stage decomposition* (relevance / implications / preliminary_labels JSON), candidate diversity (3 styles), judge_finalize 의 marker matching JSON. 모두 stream 콜 prompt 안에서 LLM 이 한 번에 처리.
+- 얻는 것: 사용자 첫 토큰 ~26s → ~1s. ChatGPT-like UX. token streaming 실제 동작.
+- 보존: low_level pipeline (9-dim state / mood / marker / temperament drift) + memory_retrieval (ChromaDB) + emotion_appraisal (응답 후 background, 다음 턴의 prev_experience). spec §1 의 저수준-고수준 이중계층은 유지, §2.2 ②~⑤ 의 다층 LLM 처리는 단일 콜로 압축.
+
+**Consequences**:
+- 사용자 응답 stream 이 ChatGPT 수준의 즉시성.
+- 다층 cognitive analysis 가 prompt 통합 안에 묻혀 *외부에서 보이지 않음*. UI 의 `final / tone / candidates` 패널이 unified path 에서 비어 있을 수 있음 (legacy path 빌드만 채워짐).
+- 다음 턴의 prev_experience 는 응답 후 emotion_appraisal 결과로 갱신 — 한 턴 지연. cognitive 측에서 의미 있는 변화는 아님 (prev_experience 는 어차피 이전 턴 결과).
+- legacy 다층 경로는 `unified_response=None` 으로 빌드하면 fallback 유지 — tests / CLI / 다층 모드 실험에서 사용.
+
+**Status**: accepted.
+
+---
+
 ## Future ADRs (placeholder)
 
 다음과 같은 결정이 일어나면 ADR 를 append:
