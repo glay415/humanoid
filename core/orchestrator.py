@@ -1094,6 +1094,10 @@ class Orchestrator:
         _ts = timings.start()
         response_parts: list[str] = []
         try:
+            # metacog 자원을 prompt 에 inject — 부재의 자각 색채를 동적으로.
+            _metacog_resource = (
+                float(self.metacognition.resource) if self.metacognition else 1.0
+            )
             async for token in self.unified_response.stream(
                 user_input=user_input,
                 self_narrative=self_model_dict.get('narrative', ''),
@@ -1104,6 +1108,7 @@ class Orchestrator:
                 internal_state_summary=internal_state_summary,
                 marker_signal=marker_signal,
                 memory_summary=memory_summary,
+                metacog_resource=_metacog_resource,
             ):
                 response_parts.append(token)
                 await _emit('response_chunk', {'text': token})

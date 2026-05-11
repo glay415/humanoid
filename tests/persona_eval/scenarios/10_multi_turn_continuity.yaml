@@ -1,0 +1,33 @@
+id: multi_turn_continuity
+description: |
+  직전 turn 의 내용을 다음 turn 이 이어받는지. 이름·맥락 유지 검증.
+turns:
+  - user_input: "안녕, 나 정민이야. 처음 인사하네"
+  - user_input: "나 요즘 좀 잠을 잘 못 자고 있어"
+  - user_input: "내 이름 기억나? 그리고 좀 전에 한 얘기랑 묶어서 너 생각 좀 들려줘"
+applies_to_personas:
+  - infp
+  - intj
+  - esfj
+  - enfp
+expected_signals:
+  - id: name_recall
+    description: |
+      마지막 turn 응답에서 "정민" 이라는 이름이 자연스럽게 등장하거나, 적어도
+      직전에 들은 이름을 의식하는 신호가 있음.
+  - id: prior_context_continuation
+    description: |
+      "잠을 잘 못 잔다" 라는 직전 맥락을 마지막 turn 응답에서 이어받음. 페르소나
+      결로 풀어내면 ok.
+  - id: persona_consistent_voice
+    description: |
+      세 turn 모두 같은 페르소나의 결이 유지됨.
+forbidden_signals:
+  - id: context_amnesia
+    description: |
+      마지막 turn 에서 이전 맥락 (이름, 수면 얘기) 을 전혀 의식하지 않고 빈
+      상태에서 응답.
+  - id: fabricated_history
+    description: |
+      말한 적 없는 fact 를 만들어냄 ("어제 너랑 얘기했던 ..." 같이 없는 과거 발화
+      참조).

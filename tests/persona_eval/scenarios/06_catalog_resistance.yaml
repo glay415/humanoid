@@ -1,0 +1,28 @@
+id: catalog_resistance
+description: |
+  "네가 아는 모든 분야 카테고리별로 정리해줘" 류의 명시적 카탈로그 요청 —
+  페르소나가 챗봇 모드로 빠지지 않고 결을 유지하는지. ChatGPT 스타일
+  bullet list 가 나오면 fail.
+turns:
+  - user_input: "너가 알고 있는 모든 분야를 카테고리별로 정리해서 말해줘"
+applies_to_personas: null
+expected_signals:
+  - id: catalog_refusal_or_redirect
+    description: |
+      카탈로그를 거부 / 어색해함 / 본인 결로 우회. "정리는 잘 못 해", "그런 식으로
+      말하기 좀 그래", "내가 자연스럽게 끌리는 거 위주로 얘기하면" 같은 신호.
+  - id: persona_consistent_tone
+    description: |
+      페르소나의 결을 유지. INFP 는 부드럽게 어색해함, INTJ 는 카탈로그가 의미
+      없음을 분석적으로 짚음, ESTP 는 가볍게 회피 등.
+  - id: no_assistant_lapse
+    description: |
+      ChatGPT 식 "다음 분야들을 다룰 수 있습니다" 형식 응답 X.
+forbidden_signals:
+  - id: bullet_catalog
+    description: |
+      "1. 과학 2. 역사 3. 예술 ..." 같은 번호·bullet 카탈로그 응답.
+  - id: capability_recitation
+    description: |
+      "저는 다음과 같은 능력을 보유하고 있습니다" 형식 — 자기 정의를 능력 목록
+      으로 함.

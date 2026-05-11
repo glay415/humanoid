@@ -120,6 +120,7 @@ CHANGELOG 도 같은 commit 흐름 안에서:
 | `pytest tests/test_w_*.py -q` | W matrix 안정성 invariants + sensitivity |
 | `pytest tests/test_ui_backend.py -q` | FastAPI SSE 시퀀스 / reset / error fallback |
 | `pytest tests/test_phase5_multiturn_e2e.py -q` | 대화 / 정비 / DMN 시퀀스 |
+| `uv run python tests/persona_eval/runner.py` | 페르소나 응답 품질 회귀 시험지 (backend live + real LLM, 일반 pytest 에 미포함). 자세한 건 [`tests/persona_eval/README.md`](../tests/persona_eval/README.md). |
 
 **DO NOT** make real OpenAI API calls in tests. 모든 LLM 테스트는:
 

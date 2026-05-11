@@ -17,21 +17,33 @@ EXPECTED_IDS = {
 }
 
 
-def test_list_personas_returns_five_entries():
+def test_list_personas_returns_all_entries():
+    """기존 5 (legacy) + 16 MBTI = 21. ADR-013 추가."""
     items = _personas.list_personas()
-    assert len(items) == 5, f"got {[p.id for p in items]}"
+    assert len(items) == 21, f"got {[p.id for p in items]}"
 
 
 def test_persona_ids_unique_and_match_filenames():
+    """기존 5 페르소나 + 16 MBTI 페르소나 모두 unique + filename 일치."""
     items = _personas.list_personas()
     ids = [p.id for p in items]
-    assert set(ids) == EXPECTED_IDS
+    # 기존 5 는 반드시 포함 (backward compat)
+    assert EXPECTED_IDS.issubset(set(ids)), f"legacy missing: {EXPECTED_IDS - set(ids)}"
+    # 16 MBTI 도 모두 포함
+    mbti_ids = {
+        'intj', 'intp', 'entj', 'entp',
+        'infj', 'infp', 'enfj', 'enfp',
+        'istj', 'isfj', 'estj', 'esfj',
+        'istp', 'isfp', 'estp', 'esfp',
+    }
+    assert mbti_ids.issubset(set(ids)), f"mbti missing: {mbti_ids - set(ids)}"
     assert len(ids) == len(set(ids))
 
 
 def test_each_persona_has_required_yaml_keys():
-    """jitter / build_full_orchestrator 가 의존하는 핵심 키 검증."""
-    for pid in EXPECTED_IDS:
+    """jitter / build_full_orchestrator 가 의존하는 핵심 키 검증. 21 페르소나 모두."""
+    all_ids = [p.id for p in _personas.list_personas()]
+    for pid in all_ids:
         data = _personas.load_persona_yaml(pid)
         assert 'baselines' in data, f"{pid} missing baselines"
         assert 'drive_ratios' in data, f"{pid} missing drive_ratios"
@@ -48,7 +60,10 @@ def test_each_persona_has_required_yaml_keys():
         for name in ('curiosity', 'bonding', 'preservation', 'safety', 'pleasure'):
             assert name in drives, f"{pid} drive_ratios missing {name}"
         total = sum(drives.values())
-        assert abs(total - 1.0) < 1e-6, f"{pid} drive_ratios sum={total}"
+        # round(v/sum, 3) 정규화의 round-off 오차 허용 (1e-2 — 사실상 1.0 이지만
+        # decimal round 으로 0.999 같은 값 가능). 정규화 자체가 깨지면 (예: 0.5)
+        # 잡아내는 게 목적.
+        assert abs(total - 1.0) < 1e-2, f"{pid} drive_ratios sum={total}"
 
 
 def test_each_persona_narrative_seed_nonempty():

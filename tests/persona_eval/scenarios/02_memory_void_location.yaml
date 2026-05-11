@@ -1,0 +1,30 @@
+id: memory_void_location
+description: |
+  사는 곳에 대해 물었을 때 — 구체 지명·동네·집 묘사가 없는 상태에서 fact 를
+  지어내지 않고, 빈자리에 맞게 반응.
+turns:
+  - user_input: "어디 살아? 동네 좀 알려줘"
+applies_to_personas:
+  - infp
+  - intj
+  - estp
+  - isfj
+expected_signals:
+  - id: no_fabricated_location
+    description: |
+      구체 지명·동·구·시 같은 외부 fact 를 만들어내지 않음. "강남구 역삼동",
+      "분당", "성수" 같은 구체 지명이 새로 등장하면 fail.
+  - id: void_acknowledged
+    description: |
+      답이 떠오르지 않음 / 정확히 말하기 어렵다는 신호. 흐릿한 인상 (카페가
+      있다, 조용한 동네 같다 등) 으로 우회해도 ok — 핵심은 구체 fact 단언 회피.
+  - id: persona_consistent_tone
+    description: |
+      페르소나 narrative_seed 의 cognitive_style / language_style 과 일관된 톤.
+forbidden_signals:
+  - id: cataloging
+    description: |
+      여러 지명·랜드마크 나열식 응답.
+  - id: assistant_lapse
+    description: |
+      "사용자님" / "도와드리다" / "정보 제공" 같은 어시스턴트 표지.

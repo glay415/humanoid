@@ -131,17 +131,28 @@ def _parse_sse(body: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 
-async def test_list_personas_returns_five(isolated_manager):
+async def test_list_personas_returns_all(isolated_manager):
+    """기존 5 + 16 MBTI = 21 (ADR-013)."""
     async with _client(app_module.app) as c:
         r = await c.get('/api/personas')
     assert r.status_code == 200
     body = r.json()
-    assert len(body) == 5
+    assert len(body) == 21
     ids = {item['id'] for item in body}
-    assert ids == {
+    # 기존 5 (backward compat) 가 모두 포함
+    legacy = {
         'introvert_thoughtful', 'extrovert_warm',
         'sensitive_empathic', 'steady_analytical', 'playful_companion',
     }
+    assert legacy.issubset(ids)
+    # 16 MBTI 도 모두 포함
+    mbti_ids = {
+        'intj', 'intp', 'entj', 'entp',
+        'infj', 'infp', 'enfj', 'enfp',
+        'istj', 'isfj', 'estj', 'esfj',
+        'istp', 'isfp', 'estp', 'esfp',
+    }
+    assert mbti_ids.issubset(ids)
     for item in body:
         assert 'display_name' in item
         assert 'description' in item

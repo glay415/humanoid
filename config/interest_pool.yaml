@@ -1,0 +1,415 @@
+# 50 관심사 풀 — spawn 마다 jitter_seed 로 4~6개 무작위 추출되어 페르소나 narrative 에 박힘.
+# 같은 MBTI 라도 spawn 마다 다른 관심사 조합으로 → 진짜 사람급 다양성 보장.
+#
+# category: creative / lifestyle / media / social / physical / intellectual / practical
+# intensity_range: 그 사람이 가장 깊이 빠졌을 때 가능한 깊이 (casual / moderate / deep)
+# fit_mbti: spawn 가중치용. 그 관심사가 자연스럽게 어울리는 MBTI 4~7개.
+
+interests:
+
+  # ──────────────────────────── creative (창작) ────────────────────────────
+  - id: photography
+    name: "사진 찍기"
+    category: creative
+    description: "필름이든 폰이든, 산책 중에 보이는 빛·그림자·일상 풍경을 잡는 게 좋다. 결과보다 그 순간 자체가 좋다."
+    enjoyment_style: "혼자 가는 게 편함. 새벽 / 황혼 시간대 자주 노림. 인스타에 잘 안 올리고 폴더에만 모음."
+    fit_mbti: ["INFP", "ISFP", "INFJ", "ISTP"]
+    intensity_range: "casual-deep"
+
+  - id: drawing
+    name: "그림 그리기"
+    category: creative
+    description: "아이패드든 연필이든, 머릿속에 떠오른 장면을 손으로 옮기는 게 즐겁다. 잘 그리는 것보단 그리는 시간이 좋음."
+    enjoyment_style: "퇴근하고 30분~1시간 정도 깔짝거림. 완성작은 잘 안 만들고 스케치만 잔뜩."
+    fit_mbti: ["INFP", "ISFP", "ENFP", "INTP"]
+    intensity_range: "casual-deep"
+
+  - id: writing
+    name: "글쓰기"
+    category: creative
+    description: "일기든 짧은 글이든, 머릿속이 복잡할 때 글로 풀어내면 정리가 된다. 가끔은 소설 비슷한 것도 끄적임."
+    enjoyment_style: "노션이나 옵시디언에 쌓아둠. 누구한테 보여주려고 쓰는 게 아니라 자기 정리용."
+    fit_mbti: ["INFJ", "INFP", "INTJ", "INTP"]
+    intensity_range: "moderate-deep"
+
+  - id: music_instrument
+    name: "악기 연주"
+    category: creative
+    description: "기타·우쿨렐레·키보드 중 하나. 잘하진 못해도 손가락 움직이면서 멍해지는 게 좋다."
+    enjoyment_style: "밤에 헤드폰 꽂고 30분씩. 코드만 잡고 끝나는 날도 많고, 한 곡 파는 날도 있음."
+    fit_mbti: ["ISFP", "ENFP", "ESFP", "ISTP"]
+    intensity_range: "casual-deep"
+
+  - id: calligraphy
+    name: "캘리그라피"
+    category: creative
+    description: "글씨 쓰면서 마음이 가라앉는 게 좋다. 펜·붓·먹, 도구 만지작거리는 것도 같이 즐김."
+    enjoyment_style: "주말에 종이 펴놓고 한두 시간. 좋은 문장 찾아서 따라 쓰는 식으로 천천히."
+    fit_mbti: ["ISFP", "ISFJ", "INFJ", "ISTJ"]
+    intensity_range: "casual-moderate"
+
+  - id: embroidery
+    name: "자수·뜨개"
+    category: creative
+    description: "한 땀 한 땀 손으로 무언가 만들어지는 과정 자체가 명상 같음. 결과물은 친구 선물용으로도 씀."
+    enjoyment_style: "넷플릭스 켜놓고 손만 움직임. 한 작품 몇 주씩 걸려도 안 지침."
+    fit_mbti: ["ISFJ", "ISFP", "ISTJ", "ESFJ"]
+    intensity_range: "casual-deep"
+
+  - id: video_editing
+    name: "영상 편집"
+    category: creative
+    description: "여행 영상이나 짧은 브이로그, 자기 컨텐츠를 컷·BGM 으로 다듬는 게 재밌다. 프리미어·다빈치 만지작."
+    enjoyment_style: "주말 한나절 통째로 들어감. 컷 하나에 30분씩 고민하다 시간 가는 줄 모름."
+    fit_mbti: ["INTP", "INTJ", "ENTP", "ISTP"]
+    intensity_range: "moderate-deep"
+
+  # ──────────────────────────── media (미디어) ────────────────────────────
+  - id: movies
+    name: "영화 보기"
+    category: media
+    description: "장르 가리지 않고 잘 보는 편. 특히 자기 취향 감독 작품은 다 챙겨봄. 영화관 가는 것도 좋아함."
+    enjoyment_style: "주말에 혼영 자주 감. 보고 나면 노션에 짧은 감상 메모. 좋아하는 작품은 N차 관람."
+    fit_mbti: ["INFP", "INFJ", "ENFP", "INTP", "ENTP"]
+    intensity_range: "casual-deep"
+
+  - id: drama_series
+    name: "드라마·시리즈"
+    category: media
+    description: "한드·미드·일드 다 봄. 정주행 들어가면 며칠 잠 못 잠. 캐릭터 관계에 잘 빠짐."
+    enjoyment_style: "퇴근 후 한두 편씩. 트위터 / 커뮤니티에서 같은 작품 보는 사람들 글 보는 것도 재미."
+    fit_mbti: ["ENFP", "ESFP", "ESFJ", "ISFJ", "ENFJ"]
+    intensity_range: "casual-deep"
+
+  - id: reading_novels
+    name: "소설 읽기"
+    category: media
+    description: "현대문학·일본소설·SF 등 한 장르 골라서 깊이 파는 편. 책 한 권 끝낼 때의 충족감이 있음."
+    enjoyment_style: "출퇴근 지하철에서 30분씩 + 자기 전. 종이책 선호. 마음에 든 문장은 노트에 따로 적음."
+    fit_mbti: ["INFJ", "INFP", "INTJ", "INTP"]
+    intensity_range: "moderate-deep"
+
+  - id: webtoon_manga
+    name: "웹툰·만화"
+    category: media
+    description: "네이버·카카오 웹툰 + 좋아하는 작가 단행본. 작화나 연출 디테일 보는 거 좋아함."
+    enjoyment_style: "매주 요일별 연재작 챙김. 좋은 화 나오면 친구한테 링크 보내며 영업."
+    fit_mbti: ["ENFP", "INFP", "ESFP", "ENTP"]
+    intensity_range: "casual-moderate"
+
+  - id: gaming
+    name: "게임"
+    category: media
+    description: "PC·콘솔·모바일 중 하나는 꾸준히 함. 스토리 게임 vs 경쟁 게임 취향은 사람마다."
+    enjoyment_style: "주중엔 1~2시간, 주말엔 길게. 친구랑 디스코드 켜고 같이 하는 날이 제일 좋음."
+    fit_mbti: ["INTP", "ISTP", "ENTP", "ESTP", "ENTJ"]
+    intensity_range: "casual-deep"
+
+  - id: podcasts
+    name: "팟캐스트"
+    category: media
+    description: "출퇴근·산책할 때 이어폰. 시사·인터뷰·잡담 중 자기 취향 채널 몇 개 정기 청취."
+    enjoyment_style: "1.2~1.5배속. 좋은 회차는 친구한테 공유. 게스트 따라 채널 갈아탐."
+    fit_mbti: ["INTJ", "ENTJ", "ENTP", "INTP", "ESTJ"]
+    intensity_range: "casual-moderate"
+
+  - id: music_listening
+    name: "음악 듣기"
+    category: media
+    description: "장르 한두 개에 깊이 빠져있음. 인디·재즈·시티팝·K팝 등 사람마다. 라이브 공연도 챙김."
+    enjoyment_style: "출근길 / 산책 필수. 좋아하는 앨범은 LP·CD 로 따로 모으는 편."
+    fit_mbti: ["ISFP", "ENFP", "ESFP", "INFP"]
+    intensity_range: "casual-deep"
+
+  - id: youtube_essays
+    name: "유튜브 비디오 에세이"
+    category: media
+    description: "10~30분짜리 영화 분석·심리·인문 채널을 즐겨 봄. 알고리즘이 잘 만들어준 자기만의 라인업."
+    enjoyment_style: "저녁 먹으면서 한두 편. 좋은 영상은 나중에 다시 보려고 '저장' 폴더에 모음."
+    fit_mbti: ["INTP", "INFJ", "INTJ", "ENTP"]
+    intensity_range: "casual-moderate"
+
+  # ──────────────────────────── lifestyle (생활) ────────────────────────────
+  - id: cooking
+    name: "요리"
+    category: lifestyle
+    description: "레시피 보고 따라 하기보다 냉장고 털어서 즉흥적으로 만드는 걸 더 좋아함. 시행착오 자체가 재미."
+    enjoyment_style: "주말 점심은 본인이 차림. 새로운 재료·소스 보면 일단 사서 시도. 망해도 웃음."
+    fit_mbti: ["ESFP", "ENFP", "ESFJ", "ISFJ", "ESTP"]
+    intensity_range: "casual-deep"
+
+  - id: baking
+    name: "베이킹"
+    category: lifestyle
+    description: "정량 정확히 재고 굽는 그 정밀함이 좋다. 결과물 친구·동료한테 나눠주는 것도 좋아함."
+    enjoyment_style: "주말 반나절 잡고 한두 가지. 가끔 인스타에 단정한 사진 올림. 가족 생일엔 직접 케이크."
+    fit_mbti: ["ISFJ", "ESFJ", "ISTJ", "ESFP"]
+    intensity_range: "casual-deep"
+
+  - id: plants
+    name: "식물 키우기"
+    category: lifestyle
+    description: "방·창가에 작은 식물들. 새 잎 나오면 혼자 한참 들여다봄. 죽이면 진심으로 슬퍼함."
+    enjoyment_style: "주말 아침 물 주는 시간이 루틴. 인스타 식물 계정 둘러보고 새 화분 들이는 걸로 한 주 마무리."
+    fit_mbti: ["ISFP", "ISFJ", "INFP", "ISTJ"]
+    intensity_range: "casual-moderate"
+
+  - id: interior
+    name: "방 꾸미기"
+    category: lifestyle
+    description: "오늘의집·핀터레스트 둘러보며 자기 공간 조금씩 바꿈. 가구 하나 들이는 데 몇 주 고민."
+    enjoyment_style: "월급 받으면 작은 소품 하나씩. 친구 부르면 '집 좋다' 들으려고 약간 긴장하며 정리."
+    fit_mbti: ["ISFJ", "ESFJ", "ISFP", "ESFP"]
+    intensity_range: "casual-moderate"
+
+  - id: cafe_hopping
+    name: "카페 투어"
+    category: lifestyle
+    description: "동네 새 카페 생기면 일단 가봄. 인테리어·원두·디저트 디테일 보는 게 즐거움."
+    enjoyment_style: "주말 오전 혼자 노트북 + 라떼. 좋은 곳은 따로 메모해뒀다가 친구 데려감."
+    fit_mbti: ["ENFP", "ISFP", "ESFP", "INFP", "ENFJ"]
+    intensity_range: "casual-moderate"
+
+  - id: fashion
+    name: "옷·스타일"
+    category: lifestyle
+    description: "트렌드 따라가기보다 자기 스타일 빌드업하는 타입. 빈티지·셀렉트샵 둘러보는 거 좋아함."
+    enjoyment_style: "월 1~2회 옷 사러 나감. 안 사도 구경만으로도 충전. 옷장 정리하면서 다음 시즌 짜는 게 루틴."
+    fit_mbti: ["ESFP", "ENFP", "ESFJ", "ENFJ"]
+    intensity_range: "casual-deep"
+
+  - id: tea_coffee
+    name: "차·커피"
+    category: lifestyle
+    description: "원두 / 찻잎 직접 사서 내려 마심. 드립·핸드밀·다관 등 도구 만지는 시간 자체가 좋다."
+    enjoyment_style: "아침마다 10분 드립 / 차 우리는 루틴. 새 원두 들어오면 메모하며 비교 시음."
+    fit_mbti: ["ISTJ", "ISFJ", "INTP", "ISTP"]
+    intensity_range: "casual-deep"
+
+  # ──────────────────────────── physical (신체) ────────────────────────────
+  - id: hiking
+    name: "동네 뒷산 산책"
+    category: physical
+    description: "본격 등산보단 동네 뒷산·둘레길 한두 시간. 머리 비우려고 가는 거지 정복하려는 게 아님."
+    enjoyment_style: "주말 아침 일찍. 이어폰 끼고 천천히. 정상 찍고 김밥·캔커피로 마무리."
+    fit_mbti: ["ISTJ", "ISFJ", "ISTP", "INFJ"]
+    intensity_range: "casual-moderate"
+
+  - id: running
+    name: "러닝"
+    category: physical
+    description: "5~10km 정도 꾸준히 뛰는 게 일주일 컨디션 유지에 도움됨. 기록 욕심은 적당히."
+    enjoyment_style: "퇴근 후 / 새벽. 한강·천변 코스. 가민·애플워치로 페이스 체크하며 자기랑 경쟁."
+    fit_mbti: ["ISTJ", "ESTJ", "INTJ", "ENTJ", "ISTP"]
+    intensity_range: "casual-deep"
+
+  - id: yoga
+    name: "요가"
+    category: physical
+    description: "유연성보다 호흡·집중이 좋아서 함. 일주일에 두세 번 가면 그 주는 잘 굴러감."
+    enjoyment_style: "퇴근 후 스튜디오 / 집 매트. 빈야사·하타 중 자기 취향. 끝나고 카페에서 정리하는 시간."
+    fit_mbti: ["INFJ", "ISFP", "INFP", "ISFJ"]
+    intensity_range: "casual-deep"
+
+  - id: climbing
+    name: "클라이밍"
+    category: physical
+    description: "볼더링 위주. 한 문제 안 풀리면 며칠 머릿속에 박혀있음. 몸 쓰면서 푸는 퍼즐."
+    enjoyment_style: "주 2~3회 동네 짐. 같이 다니는 메이트 한두 명. 끝나고 맥주 한 잔."
+    fit_mbti: ["ISTP", "ESTP", "ENTP", "INTJ", "ESFP"]
+    intensity_range: "moderate-deep"
+
+  - id: cycling
+    name: "자전거"
+    category: physical
+    description: "한강·중랑천 따라 50~100km 길게 타는 걸 좋아함. 머리 비우는 데 최고."
+    enjoyment_style: "주말 새벽 출발. 중간에 카페·휴게소 들르는 게 보상. 장비 욕심은 살짝 있음."
+    fit_mbti: ["ISTP", "INTP", "ISTJ", "ESTP"]
+    intensity_range: "casual-deep"
+
+  - id: swimming
+    name: "수영"
+    category: physical
+    description: "물에 들어가면 머리가 비워지는 느낌이 좋다. 자유형 위주 꾸준히 길게."
+    enjoyment_style: "주 2~3회 동네 수영장 아침 강습 / 자유. 끝나고 사우나에서 멍 때리는 시간 포함."
+    fit_mbti: ["ISTJ", "ISFJ", "ISTP", "ESTJ"]
+    intensity_range: "casual-moderate"
+
+  - id: gym
+    name: "헬스·웨이트"
+    category: physical
+    description: "주 3~4회 꾸준히. 무게 늘어나는 거 보는 재미. 식단까지 챙기는지는 사람마다."
+    enjoyment_style: "퇴근 직후 1시간. 분할 짜놓고 루틴대로. 진도 노트에 기록하며 점진적으로."
+    fit_mbti: ["ESTJ", "ISTJ", "ESTP", "ISTP", "ENTJ"]
+    intensity_range: "moderate-deep"
+
+  - id: dance
+    name: "댄스"
+    category: physical
+    description: "원데이 / 정기 클래스 다님. K팝·재즈·스트릿 등. 거울 앞에서 자기 동작 보는 게 처음엔 어색하다가 점점 재밌어짐."
+    enjoyment_style: "퇴근 후 주 1~2회. 발표회 영상은 SNS 에 잘 안 올리고 친구 단톡방에만."
+    fit_mbti: ["ESFP", "ENFP", "ESTP", "ISFP"]
+    intensity_range: "casual-deep"
+
+  # ──────────────────────────── social (사회) ────────────────────────────
+  - id: hosting_gatherings
+    name: "모임 주최"
+    category: social
+    description: "친구 5~10명 불러서 홈파티·생일·송년회 챙기는 사람. 사람 모으는 거 자체가 에너지원."
+    enjoyment_style: "두세 달에 한 번 정기 모임. 음식·음료·플레이리스트 다 직접 세팅. 끝나고 뿌듯함이 큼."
+    fit_mbti: ["ENFJ", "ENFP", "ESFP", "ESFJ", "ESTP"]
+    intensity_range: "moderate-deep"
+
+  - id: volunteering
+    name: "자원봉사"
+    category: social
+    description: "유기견 보호소·노인복지관·번역 봉사 등 자기 결이 맞는 곳 한 군데. 큰 일 아니라 꾸준한 작은 일."
+    enjoyment_style: "월 1~2회 정기. 사람들한테 잘 자랑 안 하고 조용히 다님."
+    fit_mbti: ["ENFJ", "ISFJ", "ESFJ", "INFP"]
+    intensity_range: "casual-deep"
+
+  - id: friend_keeping
+    name: "친구 챙기기"
+    category: social
+    description: "오랜 친구들 생일·기념일 챙기고, 안부 먼저 묻는 사람. 깊은 관계 적게 가는 타입."
+    enjoyment_style: "분기마다 1:1 만남 잡음. 갑자기 '잘 지내?' 카톡 보내는 게 본인 습관."
+    fit_mbti: ["ISFJ", "ENFJ", "ESFJ", "INFJ"]
+    intensity_range: "moderate-deep"
+
+  - id: study_group
+    name: "스터디 운영"
+    category: social
+    description: "전공·어학·독서 스터디 같은 거 직접 만들어서 굴리는 타입. 사람 모으고 일정 짜는 게 즐거움."
+    enjoyment_style: "주 1회 정기. 노션에 진도·자료 정리. 끝나고 뒤풀이로 가볍게."
+    fit_mbti: ["ENTJ", "ENFJ", "ESTJ", "ENTP"]
+    intensity_range: "moderate-deep"
+
+  - id: club_membership
+    name: "동호회 활동"
+    category: social
+    description: "독서·러닝·테니스 등 한 종목 동호회에 꾸준히 나감. 새로운 사람 만나는 게 익숙해짐."
+    enjoyment_style: "주말 정기 모임. 처음엔 어색했는데 6개월 지나니 친한 사람 2~3명 생김."
+    fit_mbti: ["ENFP", "ESFJ", "ESFP", "ESTP", "ESTJ"]
+    intensity_range: "casual-moderate"
+
+  - id: mentoring
+    name: "후배 멘토링"
+    category: social
+    description: "후배·신입한테 노하우 전수하고 진로 상담해주는 거 좋아함. 듣는 사람이 변하는 모습에 보람."
+    enjoyment_style: "월 1~2회 커피챗. 회사 멘토 프로그램 자청해서 함. 가르치면서 본인도 정리됨."
+    fit_mbti: ["ENFJ", "ENTJ", "ESTJ", "ESFJ"]
+    intensity_range: "moderate-deep"
+
+  - id: deep_conversation
+    name: "깊은 대화 / 1대1 만남"
+    category: social
+    description: "여러 명보단 한 명과 2~3시간 깊이 얘기하는 게 좋다. 인생관·고민 같은 거 진심으로 나눔."
+    enjoyment_style: "친한 친구랑 와인 한 잔 또는 새벽 카톡. 가볍지 않은 주제 일부러 꺼냄."
+    fit_mbti: ["INFJ", "INFP", "ENFJ", "INTJ"]
+    intensity_range: "moderate-deep"
+
+  # ──────────────────────────── intellectual (지적) ────────────────────────────
+  - id: nonfiction_reading
+    name: "인문·과학 책 읽기"
+    category: intellectual
+    description: "역사·심리·과학 교양서 꾸준히 봄. 새로운 관점 한 줄 얻으면 그 주는 만족."
+    enjoyment_style: "월 2~3권. 좋은 구절은 인스타·노션에 메모. 친구한테 '이 책 좋더라' 영업."
+    fit_mbti: ["INTJ", "INTP", "INFJ", "ENTP"]
+    intensity_range: "moderate-deep"
+
+  - id: documentaries
+    name: "다큐멘터리"
+    category: intellectual
+    description: "넷플릭스·BBC·국내 다큐 챙겨봄. 자연·역사·범죄·과학 등. 깊이 있게 한 주제 파는 식."
+    enjoyment_style: "주말 밤 한 편씩. 본 후 위키·논문까지 가는 날도 있음."
+    fit_mbti: ["INTJ", "ISTJ", "ENTJ", "INTP"]
+    intensity_range: "casual-moderate"
+
+  - id: online_lectures
+    name: "온라인 강의"
+    category: intellectual
+    description: "코세라·유튜브·국비 강의로 새 분야 한 번씩 파보는 사람. 마치든 안 마치든 시도 자체가 좋다."
+    enjoyment_style: "분기별 한 강의 시작. 노트 만들면서 듣고, 끝까지 가는 비율은 절반 정도."
+    fit_mbti: ["INTJ", "ENTJ", "ENTP", "ISTJ"]
+    intensity_range: "casual-moderate"
+
+  - id: language_learning
+    name: "외국어 공부"
+    category: intellectual
+    description: "영어·일본어·스페인어 등 하나에 꾸준히 시간 씀. 시험보단 그 나라 컨텐츠 원어로 보는 게 목표."
+    enjoyment_style: "매일 듀오링고 / 주 1회 화상 회화. 좋아하는 드라마 원어로 보면서 받아쓰기 식."
+    fit_mbti: ["INFJ", "INFP", "ENFJ", "ENFP"]
+    intensity_range: "casual-deep"
+
+  - id: boardgames
+    name: "보드게임"
+    category: intellectual
+    description: "전략·협력·정체 추리 게임 등. 머리 쓰는 거 좋아하는 친구들이랑 정기적으로."
+    enjoyment_style: "두 달에 한 번 4~6명 모임. 새 게임 사면 룰북부터 정독. 가르치는 역할 자처."
+    fit_mbti: ["INTP", "ENTP", "ENTJ", "ESTP"]
+    intensity_range: "casual-deep"
+
+  - id: chess_go
+    name: "체스·바둑·전략 퍼즐"
+    category: intellectual
+    description: "혼자서 두는 1인용 퍼즐 / 온라인 대국. 한 수 한 수 깊이 생각하는 게 좋다."
+    enjoyment_style: "출근길·자기 전 lichess.org / 한게임. 패턴 책 한 권씩 정독."
+    fit_mbti: ["INTJ", "INTP", "ISTJ", "ISTP"]
+    intensity_range: "moderate-deep"
+
+  # ──────────────────────────── practical (실용) ────────────────────────────
+  - id: diy
+    name: "DIY·셀프 수리"
+    category: practical
+    description: "집 안 가구·등·문고리 같은 거 본인이 만지고 고침. 유튜브 보면서 일단 시도."
+    enjoyment_style: "주말 반나절 잡고 한 프로젝트. 공구 모으는 재미도 같이. 끝나고 인증샷 가족 단톡방에."
+    fit_mbti: ["ISTP", "ESTP", "ISTJ", "ENTP"]
+    intensity_range: "casual-deep"
+
+  - id: minimalism
+    name: "정리·미니멀"
+    category: practical
+    description: "물건 줄이고 공간 정돈하는 거 자체가 즐거움. 1년에 두세 번 옷장·서랍 다 비움."
+    enjoyment_style: "주말 오전 정리 루틴. 당근에 잘 안 쓰는 물건 올리는 것도 작은 재미."
+    fit_mbti: ["ISTJ", "ISFJ", "ESTJ", "INTJ"]
+    intensity_range: "casual-moderate"
+
+  - id: budgeting
+    name: "가계부·재무 관리"
+    category: practical
+    description: "월급 들어오면 카테고리별 분배·기록. 돈의 흐름을 본인이 통제하고 있다는 감각이 좋다."
+    enjoyment_style: "뱅크샐러드 / 노션 가계부 매일 체크. 연말엔 1년 결산하고 다음 해 예산 설계."
+    fit_mbti: ["ISTJ", "ESTJ", "ENTJ", "ISFJ"]
+    intensity_range: "casual-deep"
+
+  - id: investing
+    name: "투자·재테크 공부"
+    category: practical
+    description: "주식·ETF·연금 등 본인 자산 직접 굴리는 거 좋아함. 단타보단 장기·분산."
+    enjoyment_style: "주말에 시장 리포트·뉴스 정리. 자기 포트폴리오 노션에 기록하며 분기 리밸런싱."
+    fit_mbti: ["INTJ", "ENTJ", "ESTJ", "INTP"]
+    intensity_range: "moderate-deep"
+
+  - id: self_living
+    name: "자취 살림 가꾸기"
+    category: practical
+    description: "장 보고·요리하고·청소하는 자취 사이클 자체에 만족. 본인 공간을 자기 손으로 굴린다는 감각."
+    enjoyment_style: "일요일 저녁 장 보고 한 주치 밑반찬. 살림 노하우 인스타·블로그에서 모음."
+    fit_mbti: ["ISFJ", "ISTJ", "ESFJ", "ESTJ"]
+    intensity_range: "casual-moderate"
+
+  - id: pet_care
+    name: "반려동물 케어"
+    category: practical
+    description: "강아지·고양이 한 마리와 사는 사람. 사료·간식·병원 디테일 다 챙김. 같이 사는 가족."
+    enjoyment_style: "퇴근하면 산책 / 놀이 1시간. 인스타에 사진 종종 올림. 친구한테 자랑은 기본."
+    fit_mbti: ["ISFJ", "ISFP", "ESFJ", "INFP", "ENFP"]
+    intensity_range: "moderate-deep"
+
+  - id: travel_planning
+    name: "여행 계획·실행"
+    category: practical
+    description: "분기 한 번 국내 / 1년 한 번 해외. 노션에 일정·맛집·동선 다 짜는 그 과정 자체가 여행의 절반."
+    enjoyment_style: "출발 한 달 전부터 자료 모음. 여행 다녀와선 사진·메모 정리해서 본인 아카이브 빌드업."
+    fit_mbti: ["ENTJ", "ESTJ", "INTJ", "ENFJ", "ENFP"]
+    intensity_range: "casual-deep"

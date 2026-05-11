@@ -49,12 +49,21 @@ class UnifiedResponse:
         internal_state_summary: str,
         marker_signal: str,
         memory_summary: str,
+        metacog_resource: float = 1.0,
     ):
         """async generator — plain text 토큰을 그대로 yield.
 
         stream_model (gpt-5.5 + reasoning_effort='none') 으로 non-reasoning
         mode 즉시 stream. 첫 토큰 ~500ms~1s.
         """
+        # metacog 자원의 정성 라벨 (prompt 에서 LLM 에 색채 신호 주는 용도).
+        if metacog_resource >= 0.7:
+            metacog_label = "충분 — 자기 확신 안정"
+        elif metacog_resource >= 0.4:
+            metacog_label = "일상 — 약간 흔들림 있음"
+        else:
+            metacog_label = "약함 — 자기 의문 일렁임"
+
         rendered = self.template.render(
             user_input=user_input,
             self_narrative=self_narrative or "(자기 서사 미확립)",
@@ -65,6 +74,8 @@ class UnifiedResponse:
             internal_state_summary=internal_state_summary or "(매질 정보 미확립)",
             marker_signal=marker_signal or "(없음)",
             memory_summary=memory_summary or "(특별히 떠오르는 기억 없음)",
+            metacog_resource=metacog_resource,
+            metacog_resource_label=metacog_label,
         )
         messages = [
             {"role": "system", "content": _SYSTEM_MESSAGE},
