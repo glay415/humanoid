@@ -1,0 +1,116 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "backend",
+      "type": "shell",
+      "command": "uv run python -m ui.backend",
+      "options": { "cwd": "${workspaceFolder}" },
+      "isBackground": true,
+      "presentation": {
+        "panel": "dedicated",
+        "group": "dev",
+        "reveal": "always",
+        "clear": true
+      },
+      "problemMatcher": {
+        "owner": "uvicorn",
+        "pattern": [
+          {
+            "regexp": "^(ERROR|CRITICAL):\\s+(.*)$",
+            "severity": 1,
+            "message": 2
+          }
+        ],
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".*Started server process.*",
+          "endsPattern": ".*Application startup complete.*"
+        }
+      }
+    },
+    {
+      "label": "frontend",
+      "type": "shell",
+      "command": "npm run dev",
+      "options": { "cwd": "${workspaceFolder}/ui/frontend" },
+      "isBackground": true,
+      "presentation": {
+        "panel": "dedicated",
+        "group": "dev",
+        "reveal": "always",
+        "clear": true
+      },
+      "problemMatcher": {
+        "owner": "vite",
+        "pattern": [
+          {
+            "regexp": "^\\s*(error|ERROR)\\s+(.*)$",
+            "severity": 1,
+            "message": 2
+          }
+        ],
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "VITE\\s+v",
+          "endsPattern": "ready in|Local:\\s+http"
+        }
+      }
+    },
+    {
+      "label": "dev (backend + frontend)",
+      "dependsOn": ["backend", "frontend"],
+      "dependsOrder": "parallel",
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "test",
+      "type": "shell",
+      "command": "uv run pytest tests/ -q",
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": { "kind": "test", "isDefault": true },
+      "presentation": {
+        "panel": "dedicated",
+        "reveal": "always",
+        "clear": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "test (scenarios)",
+      "type": "shell",
+      "command": "uv run pytest tests/scenarios/ -q",
+      "options": { "cwd": "${workspaceFolder}" },
+      "presentation": {
+        "panel": "dedicated",
+        "reveal": "always",
+        "clear": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "test (e2e trends)",
+      "type": "shell",
+      "command": "uv run pytest tests/e2e_trends/ -q",
+      "options": { "cwd": "${workspaceFolder}" },
+      "presentation": {
+        "panel": "dedicated",
+        "reveal": "always",
+        "clear": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "setup (uv sync)",
+      "type": "shell",
+      "command": "uv sync --extra dev --extra ui",
+      "options": { "cwd": "${workspaceFolder}" },
+      "presentation": {
+        "panel": "shared",
+        "reveal": "always"
+      },
+      "problemMatcher": []
+    }
+  ]
+}

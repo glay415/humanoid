@@ -156,6 +156,22 @@ python scripts/analyze.py <instance_id> --charts ./reports/<instance_id>
 
 `analyze` extra 는 `uv sync --extra analyze` (또는 `pip install -e .[analyze]`) 로 opt-in. default deps 에는 들어가지 않는다 — pandas/matplotlib 가 무거워 UI/CLI 만 쓰는 사용자에게 부담.
 
+### VSCode tasks
+
+`.vscode/tasks.json` 에 자주 쓰는 작업이 task 로 등록되어 있다. `Ctrl+Shift+P` → `Tasks: Run Task` → 선택하면 dedicated 터미널 패널에서 실행된다.
+
+| Task | 명령 |
+|---|---|
+| `backend` | `uv run python -m ui.backend` (background, problem matcher 가 startup 완료 감지) |
+| `frontend` | `npm run dev` in `ui/frontend` (background) |
+| `dev (backend + frontend)` | 위 두 개 parallel — default build task (`Ctrl+Shift+B`) |
+| `test` | `uv run pytest tests/ -q` — default test task |
+| `test (scenarios)` | `uv run pytest tests/scenarios/ -q` |
+| `test (e2e trends)` | `uv run pytest tests/e2e_trends/ -q` |
+| `setup (uv sync)` | `uv sync --extra dev --extra ui` |
+
+`Justfile` 도 같은 명령을 CLI 용으로 제공한다 (`just backend`, `just frontend`, `just test`). 둘 중 손에 맞는 쪽으로 쓰면 된다.
+
 ## Coding conventions
 
 - **언어**: 한국어 주석 OK (프로젝트 톤). 영어 기술 용어는 그대로. **Emoji 금지** (코드/docs/commit 메시지 모두).
