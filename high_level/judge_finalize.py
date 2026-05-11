@@ -4,10 +4,11 @@ ADR-011 v2 — 진짜 LLM token streaming:
   - decide(): JSON 결정 (selected_index, action, marker_match, response_v/a).
     reasoning_effort=low. ~2~4s.
   - stream_text(): 선택된 후보 텍스트를 톤 정렬하면서 평문 stream.
-    stream_model (gpt-4o-mini, non-reasoning) — 첫 토큰 ~200ms.
-    gpt-5.5 같은 reasoning 모델은 stream 도 thinking phase (~3~5s) 가
-    끝나야 토큰을 흘려 사용자가 "전체 결과 나온 후 와다다" 로 인식. 단순
-    톤 rewrite 는 reasoning 불필요하므로 non-reasoning 모델로 분리.
+    stream_model = gpt-5.5 + reasoning_effort='none' (non-reasoning 모드).
+    thinking phase 없이 stream 즉시 시작 → 첫 토큰 ~200ms.
+    별도 chat-latest 모델 ID 가 있는 게 아니라 같은 gpt-5.5 에 파라미터로
+    분기. reasoning 모델은 'low' 라도 thinking phase ~1s 가 있어 사용자가
+    "전체 결과 나온 후 와다다" 로 인식 — 'none' 이 그걸 제거.
 
 기존 1콜 통합 (ADR-011 v1) 보다 LLM 콜 1개 늘었지만 TTFT 가 짧아져
 체감 latency 가 훨씬 좋다. text 컨텐츠는 candidate 의 minor edit 수준이라
@@ -111,7 +112,7 @@ class JudgeFinalize:
         """선택된 후보 텍스트를 톤 정렬하며 토큰별 yield. async generator.
 
         호출부 (orchestrator → streaming.py) 는 매 토큰을 SSE response_chunk 로
-        흘려보낸다. stream_model (gpt-4o-mini) — non-reasoning 이라 thinking
+        흘려보낸다. stream_model = gpt-5.5 + reasoning_effort='none' — thinking
         phase 없이 즉시 stream. 첫 토큰 ~200ms.
 
         Args:

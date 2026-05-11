@@ -34,18 +34,22 @@ dmn_model:
   reasoning_effort: low
   timeout_ms: 15000
 
-# stream_model: non-reasoning chat variant. judge_finalize.stream_text 전용.
-#   gpt-5.5 (reasoning) 는 stream 모드에서 thinking phase (~1~5s) 가 끝나야 토큰
-#   흘려서 "전체 결과 나온 후 와다다" UX 가 됨. 같은 family 의 non-reasoning
-#   변형인 gpt-5.5-chat-latest 는 thinking phase 없이 즉시 stream 시작 → 첫 토큰
-#   ~200ms. 단순 톤 정렬 rewrite 작업이라 reasoning 불필요.
+# stream_model: judge_finalize.stream_text 전용 — non-reasoning 모드.
+#   gpt-5.5 의 reasoning_effort='none' 이 non-reasoning 모드. OpenAI 가
+#   "latency-critical tasks (light voice turns, fast retrieval, classification)"
+#   용으로 명시한 옵션. thinking phase 없이 stream 즉시 시작 → 첫 토큰 ~200ms.
+#   단순 톤 정렬 rewrite 작업이라 reasoning 불필요.
+#   별도 model ID (gpt-5.5-chat-latest) 가 있는 게 아니라 같은 gpt-5.5 에
+#   파라미터로 분기 — 이전 명명은 오해였음 (litellm.NotFoundError).
 stream_model:
   provider: "openai"
-  model: "gpt-5.5-chat-latest"
+  model: "gpt-5.5"
   max_tokens: 512
   temperature: 1.0
+  # 따옴표 필수 — YAML 의 unquoted none/Null 은 Python None 으로 파싱되어
+  # reasoning_effort 키 자체가 안 보내져 모델 default(=medium) reasoning 발동.
+  reasoning_effort: "none"
   timeout_ms: 10000
-  # reasoning_effort 없음 — chat variant 는 이 키 자체를 받지 않는다.
 
 # 구현 옵션 (최소/표준/풀)
 call_config: "standard"
