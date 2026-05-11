@@ -100,12 +100,22 @@ class JudgeFinalize:
         chosen_style: str,
         final_core_affect: dict[str, float],
         user_input: str = "",
+        *,
+        self_narrative: str = "",
+        mood_text: str = "",
+        recent_dialogue_text: str = "(첫 대화 턴 — 직전 대화 없음)",
     ):
         """선택된 후보 텍스트를 톤 정렬하며 토큰별 yield. async generator.
 
         호출부 (orchestrator → streaming.py) 는 매 토큰을 SSE response_chunk 로
         흘려보낸다. reasoning_effort=minimal — rewrite 정도이므로 thinking 거의 없음
         → 첫 토큰 ~500ms 안에 도착.
+
+        Args:
+            self_narrative: 페르소나의 자기 서사. 페르소나 톤·인격 유지에 필수
+                — 비어 있으면 LLM 이 일반 AI 어시스턴트 모드로 슬립.
+            mood_text: 현재 mood (valence/arousal) 한 줄 포맷.
+            recent_dialogue_text: 직전 대화 컨텍스트 (3턴) 포맷.
 
         Yields:
             str — LLM 의 partial content delta (보통 1~4 글자).
@@ -116,6 +126,9 @@ class JudgeFinalize:
             chosen_style=chosen_style,
             final_valence=final_core_affect.get('valence', 0.0),
             final_arousal=final_core_affect.get('arousal', 0.0),
+            self_narrative=self_narrative or "(자기 서사 미확립)",
+            mood_text=mood_text or "(mood 미확립)",
+            recent_dialogue=recent_dialogue_text,
         )
         messages = [
             {"role": "system", "content": _TEXT_SYSTEM_MESSAGE},

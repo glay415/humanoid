@@ -10,7 +10,7 @@ import asyncio
 import datetime as _dt
 import math
 import time
-from typing import TYPE_CHECKING
+from typing import Awaitable, Callable, TYPE_CHECKING
 
 from core.event_bus import EventBus, Event
 from core.turn import TurnType
@@ -47,6 +47,52 @@ def _iso_now() -> str:
         .replace(microsecond=0, tzinfo=None)
         .isoformat() + 'Z'
     )
+
+
+def _fmt_mood_for_stream(mood: dict) -> str:
+    """judge_finalize.stream_text 프롬프트의 mood_text 변수용 짧은 포맷."""
+    return (
+        f"valence={float(mood.get('valence', 0.0)):.2f}, "
+        f"arousal={float(mood.get('arousal', 0.0)):.2f}"
+    )
+
+
+def _fmt_recent_dialogue_for_stream(buffer: list) -> str:
+    """judge_finalize.stream_text 프롬프트의 recent_dialogue_text 변수용 포맷."""
+    if not buffer:
+        return "(첫 대화 턴 — 직전 대화 없음)"
+    lines: list[str] = []
+    # 최근 3턴만 노출 (token budget). 가장 오래된 → 최신 순.
+    for entry in buffer[-3:]:
+        u = (entry or {}).get('user', '')
+        a = (entry or {}).get('assistant', '')
+        if u:
+            lines.append(f"사람: {u}")
+        if a:
+            lines.append(f"나: {a}")
+    return "\n".join(lines) if lines else "(첫 대화 턴 — 직전 대화 없음)"
+
+
+def _snapshot_pre_low_level(orch) -> dict:
+    """debug=True 일 때 low_level.run() 전 입력 측을 캡쳐.
+
+    LowLevelPipeline.run 은 fast_path → state/exp_vec/raw_core_affect/mood/temperament
+    순으로 mutate 하므로, decomposition / mood_step / drift_step 모두 단계 진입 *전*
+    값이 필요. ui/backend/streaming.py 의 _snapshot_pre_pipeline 과 동일 로직 —
+    layer 위반 (orchestrator → UI module) 방지를 위해 orchestrator 로 끌어왔다.
+    반환된 raw dict 는 on_event('low_level', ...) 의 pre_snapshot 필드로 push.
+    """
+    from low_level.internal_state import InternalState
+    ils = orch.low_level.internal_state
+    eb = orch.low_level.emotion_base
+    temp = orch.low_level.temperament
+    return {
+        'state_before': ils.state.copy(),
+        'baselines_before': ils.baselines.copy(),
+        'exp_vec': InternalState.experience_dict_to_vector(orch.prev_experience),
+        'mood_before': dict(eb.mood),
+        'baseline_ema_before': temp._baseline_ema.copy(),
+    }
 
 
 def _compute_response_delay_ms(arousal: float) -> int:
@@ -164,7 +210,13 @@ class Orchestrator:
         self.turn_number += 1
         return self.low_level.run(raw_input, self.prev_experience)
 
-    async def process_conversation_turn(self, user_input: str) -> dict:
+    async def process_conversation_turn(
+        self,
+        user_input: str,
+        *,
+        on_event: 'Callable[[str, dict], Awaitable[None]] | None' = None,
+        debug: bool = False,
+    ) -> dict:
         """대화 턴 전체 파이프라인 (impl-spec §3.3).
 
         Returns:
@@ -187,10 +239,35 @@ class Orchestrator:
         # 스테이지별 latency 누적기. 턴 끝에 TurnLogEntry.timings_ms 로 박힌다.
         timings = _Stopwatch()
 
+        # on_event(name, data) — stage 별 raw dict 를 외부 (SSE 등) 에 흘려보낸다.
+        # None 이면 no-op. 실패는 turn 흐름을 막지 않는다.
+        async def _emit(name: str, data: dict) -> None:
+            if on_event is None:
+                return
+            try:
+                await on_event(name, data)
+            except Exception:
+                pass
+
         # 0. 저수준 파이프라인 (동기, prev_experience 반영)
+        # debug=True 면 low_level 진입 전 상태를 스냅샷 — UI 가 deep mode 시각화 위해 사용.
+        _pre_snap = _snapshot_pre_low_level(self) if debug else None
         _ts = timings.start()
         low_result = self.low_level.run(user_input, self.prev_experience)
         timings.record('low_level', _ts)
+        await _emit('low_level', {
+            'state': dict(low_result.get('state', {})),
+            'raw_core_affect': dict(low_result.get('raw_core_affect', {})),
+            'mood': dict(low_result['mood']),
+            'drives': dict(low_result.get('drives', {})),
+            'fast_path_triggered': bool(low_result.get('fast_path_triggered', False)),
+            # debug=True 일 때만 채워지며 streaming.py 가 LowLevelDebug 빌드에 사용.
+            'pre_snapshot': _pre_snap,
+            'baselines_after': (
+                {k: float(v) for k, v in self.low_level.temperament.baselines.items()}
+                if (self.low_level and self.low_level.temperament) else None
+            ),
+        })
 
         # 빠른 경로 발동 시 이벤트 기록.
         if self.logger is not None and low_result.get('fast_path_triggered'):
@@ -200,12 +277,14 @@ class Orchestrator:
 
         # 1. 감정 평가 (LLM 실패 시 raw_core_affect 기반 fallback)
         _ts = timings.start()
+        _emotion_err: str | None = None
         if self.emotion_appraisal is not None:
             try:
                 emotion_result = await self.emotion_appraisal.evaluate(
                     user_input, low_result['raw_core_affect']
                 )
             except (LLMError, AttributeError, KeyError) as exc:
+                _emotion_err = repr(exc)
                 emotion_result = self._emotion_fallback(low_result['raw_core_affect'])
                 if self.logger is not None:
                     self._log_event_safe('llm_error', {
@@ -218,6 +297,18 @@ class Orchestrator:
         self._log_event_safe('stage_timing', {
             'stage': 'emotion_appraisal',
             'duration_ms': round(_emotion_ms, 2),
+        })
+        if _emotion_err is not None:
+            await _emit('error', {'stage': 'emotion', 'message': _emotion_err})
+        await _emit('emotion', {
+            'valence': float(emotion_result['valence']),
+            'arousal': float(emotion_result['arousal']),
+            'preliminary_labels': list(emotion_result.get('preliminary_labels', [])),
+            'experience_dimensions': dict(emotion_result.get('experience_dimensions', {
+                'reward': max(0.0, emotion_result['valence']),
+                'threat': max(0.0, -emotion_result['valence']),
+                'novelty': 0.0,
+            })),
         })
 
         await self.event_bus.publish(
@@ -278,6 +369,11 @@ class Orchestrator:
         self._log_event_safe('stage_timing', {
             'stage': 'social_memory_parallel',
             'duration_ms': round(_smp_ms, 2),
+        })
+        await _emit('memory', {
+            'memories': list(memory_result.get('memories', [])),
+            'prospective_items': list(memory_result.get('prospective_items', [])),
+            'retrieval_context': dict(memory_result.get('retrieval_context', {})),
         })
 
         await self.event_bus.publish(
@@ -412,6 +508,7 @@ class Orchestrator:
         )
 
         _ts = timings.start()
+        _cand_err: str | None = None
         if self.candidate_generation is not None:
             try:
                 candidates = await self.candidate_generation.generate(
@@ -427,6 +524,7 @@ class Orchestrator:
                     baselines=ll_baselines,
                 )
             except LLMError as exc:
+                _cand_err = repr(exc)
                 candidates = [{'style': 'restrained', 'text': '...'}]
                 if self.logger is not None:
                     self._log_event_safe('llm_error', {
@@ -440,6 +538,15 @@ class Orchestrator:
             'stage': 'candidate_generation',
             'duration_ms': round(_cg_ms, 2),
         })
+        if _cand_err is not None:
+            await _emit('error', {'stage': 'candidates', 'message': _cand_err})
+        await _emit('candidates', {
+            'candidates': [
+                {'style': str(c.get('style', 'restrained')),
+                 'text': str(c.get('text', ''))}
+                for c in candidates
+            ],
+        })
 
         # 4+5. 최종 판단 + 출력 후처리.
         # final_core_affect 는 두 경로 모두 필요 — 먼저 계산.
@@ -452,8 +559,9 @@ class Orchestrator:
         regenerated = False
         if self.judge_finalize is not None and candidates:
             # ADR-011 v2: decide() (JSON, ~2~4s) + stream_text() (평문 stream).
-            # CLI / 비SSE 호출 경로 — stream 토큰을 모아 response_text 완성.
-            # SSE 경로는 ui/backend/streaming.py 가 직접 호출하므로 본 블록 미사용.
+            # decide 결과로 final / tone event emit, stream_text 의 토큰을 매번 _emit
+            # ('response_chunk', ...) 으로 push — SSE 경로면 그대로 흘러나가고 비-SSE
+            # 경로면 (CLI / 테스트) on_event=None 이라 모음만.
             _ts = timings.start()
             try:
                 judge = await self.judge_finalize.decide(
@@ -465,22 +573,57 @@ class Orchestrator:
                 )
                 _sel = int(judge['selected_index'])
                 _chosen = candidates[_sel] if 0 <= _sel < len(candidates) else candidates[0]
-                response_text = await self._collect_stream_text(
-                    chosen_text=str(_chosen.get('text', '')),
-                    chosen_style=str(_chosen.get('style', 'restrained')),
-                    final_core_affect=final_core_affect,
-                    user_input=user_input,
-                )
+                _chosen_text = str(_chosen.get('text', ''))
+                _chosen_style = str(_chosen.get('style', 'restrained'))
+                action = judge['action']
+                tone_eval = {
+                    'response_valence': judge['response_valence'],
+                    'response_arousal': judge['response_arousal'],
+                    'rationale': judge.get('rationale', ''),
+                }
+                delay_ms = _compute_response_delay_ms(final_core_affect.get('arousal', 0.0))
+
+                # final / tone event 는 decide 직후 emit — stream 시작 전에 메타 데이터부터.
+                await _emit('final', {
+                    'selected_index': _sel,
+                    'text': _chosen_text,  # placeholder; 실제 응답은 곧 response_chunk 로
+                    'rationale': str(judge.get('rationale', '')),
+                    'marker_match': str(judge.get('marker_match', 'none')),
+                })
+                await _emit('tone', {
+                    'action': action,
+                    'tone_eval': tone_eval,
+                    'recommended_delay_ms': int(delay_ms),
+                })
+
+                # token streaming — 각 토큰을 그대로 _emit. response_text 도 누적.
+                response_parts: list[str] = []
+                try:
+                    async for token in self.judge_finalize.stream_text(
+                        chosen_text=_chosen_text,
+                        chosen_style=_chosen_style,
+                        final_core_affect=final_core_affect,
+                        user_input=user_input,
+                        self_narrative=self_model_dict.get('narrative', ''),
+                        mood_text=_fmt_mood_for_stream(low_result['mood']),
+                        recent_dialogue_text=_fmt_recent_dialogue_for_stream(self.dialogue_buffer),
+                    ):
+                        response_parts.append(token)
+                        await _emit('response_chunk', {'text': token})
+                except LLMError as exc:
+                    if self.logger is not None:
+                        self._log_event_safe('llm_error', {
+                            'stage': 'judge_finalize_stream_text',
+                            'message': str(exc),
+                        })
+                    await _emit('error', {'stage': 'response_text', 'message': repr(exc)})
+                response_text = ''.join(response_parts) if response_parts else _chosen_text
+
                 final = {
                     'selected_index': _sel,
                     'text': response_text,
                     'rationale': judge.get('rationale', ''),
                     'marker_match': judge.get('marker_match', 'none'),
-                }
-                action = judge['action']
-                tone_eval = {
-                    'response_valence': judge['response_valence'],
-                    'response_arousal': judge['response_arousal'],
                 }
             except LLMError as exc:
                 final = {
@@ -492,17 +635,30 @@ class Orchestrator:
                 response_text = final['text']
                 action = 'pass'
                 tone_eval = {}
+                delay_ms = 0
                 if self.logger is not None:
                     self._log_event_safe('llm_error', {
                         'stage': 'judge_finalize',
                         'message': str(exc),
                     })
+                await _emit('error', {'stage': 'judge_finalize', 'message': repr(exc)})
+                # decide 실패면 final/tone 도 fallback 으로 emit.
+                await _emit('final', {
+                    'selected_index': 0,
+                    'text': response_text,
+                    'rationale': 'fallback',
+                    'marker_match': 'none',
+                })
+                await _emit('tone', {
+                    'action': action,
+                    'tone_eval': tone_eval,
+                    'recommended_delay_ms': 0,
+                })
             _jf_ms = timings.record('judge_finalize', _ts)
             self._log_event_safe('stage_timing', {
                 'stage': 'judge_finalize',
                 'duration_ms': round(_jf_ms, 2),
             })
-            delay_ms = _compute_response_delay_ms(final_core_affect.get('arousal', 0.0))
 
             # regenerate cycle (1회 캡) — 통합 경로 버전.
             if action == 'regenerate' and not regenerated and self.candidate_generation is not None:
@@ -533,6 +689,10 @@ class Orchestrator:
                         })
                 if candidates:
                     try:
+                        # regen 사이클: 새 candidates 로 decide. stream_text 는 다시 안
+                        # 흘림 — 첫 stream 이 이미 client 에 도착했고, 두 번째 stream 은
+                        # UX 깜빡임을 만든다. 새 chosen text 를 그대로 final 로 사용.
+                        # (regen 자체가 드문 케이스 — 후보 모두 톤 충돌일 때만)
                         judge = await self.judge_finalize.decide(
                             candidates=candidates,
                             marker_signal=marker_signal,
@@ -542,12 +702,7 @@ class Orchestrator:
                         )
                         _sel = int(judge['selected_index'])
                         _chosen = candidates[_sel] if 0 <= _sel < len(candidates) else candidates[0]
-                        response_text = await self._collect_stream_text(
-                            chosen_text=str(_chosen.get('text', '')),
-                            chosen_style=str(_chosen.get('style', 'restrained')),
-                            final_core_affect=final_core_affect,
-                            user_input=user_input,
-                        )
+                        response_text = str(_chosen.get('text', ''))
                         final = {
                             'selected_index': _sel,
                             'text': response_text,
@@ -575,11 +730,13 @@ class Orchestrator:
         elif self.final_judgment is not None and candidates:
             # Legacy 경로 — judge_finalize 가 없는 빌드 (테스트 / 부분 시뮬).
             _ts = timings.start()
+            _final_err: str | None = None
             try:
                 final = await self.final_judgment.select(
                     candidates, marker_signal, confidence, user_input
                 )
             except LLMError as exc:
+                _final_err = repr(exc)
                 final = {
                     'selected_index': 0,
                     'text': candidates[0]['text'],
@@ -596,6 +753,14 @@ class Orchestrator:
                 'stage': 'final_judgment',
                 'duration_ms': round(_fj_ms, 2),
             })
+            if _final_err is not None:
+                await _emit('error', {'stage': 'final', 'message': _final_err})
+            await _emit('final', {
+                'selected_index': int(final['selected_index']),
+                'text': str(final['text']),
+                'rationale': str(final.get('rationale', '')),
+                'marker_match': str(final.get('marker_match', 'none')),
+            })
             response_text = final['text']
             action = 'pass'
             tone_eval = {}
@@ -607,6 +772,12 @@ class Orchestrator:
                 'rationale': '',
                 'marker_match': 'none',
             }
+            await _emit('final', {
+                'selected_index': 0,
+                'text': str(final['text']),
+                'rationale': '',
+                'marker_match': 'none',
+            })
             response_text = final['text']
             action = 'pass'
             tone_eval = {}
@@ -615,6 +786,7 @@ class Orchestrator:
         # legacy 경로의 output_postprocess (judge_finalize 가 있으면 건너뜀)
         if self.output_postprocess is not None and self.judge_finalize is None:
             _ts = timings.start()
+            _tone_err: str | None = None
             try:
                 post = await self.output_postprocess.process(final, final_core_affect)
                 response_text = post['text']
@@ -622,6 +794,7 @@ class Orchestrator:
                 tone_eval = post['tone_eval']
                 delay_ms = post['recommended_delay_ms']
             except LLMError as exc:
+                _tone_err = repr(exc)
                 post = None
                 response_text = final['text']
                 action = 'pass'
@@ -637,10 +810,17 @@ class Orchestrator:
                 'stage': 'output_postprocess',
                 'duration_ms': round(_op_ms, 2),
             })
+            if _tone_err is not None:
+                await _emit('error', {'stage': 'tone', 'message': _tone_err})
+            await _emit('tone', {
+                'action': str(action),
+                'tone_eval': dict(tone_eval),
+                'recommended_delay_ms': int(delay_ms),
+            })
 
-            # β13: action='regenerate' 가 떨어지면 candidate_generation +
-            # final_judgment 를 한 번 더 돌리고 postprocess 를 재실행한다.
-            # 사이클 1회로 캡 — regenerate-again 이 떨어져도 무시한다.
+            # β13: legacy regenerate cycle — action='regenerate' 가 떨어지면
+            # candidate_generation + final_judgment 를 한 번 더 돌리고 postprocess
+            # 를 재실행한다. 사이클 1회 캡.
             if (
                 post is not None
                 and action == 'regenerate'
@@ -718,8 +898,14 @@ class Orchestrator:
                     'stage': 'regenerate_cycle',
                     'duration_ms': round(_rg_ms, 2),
                 })
-        # legacy postprocess 가 없을 때의 디폴트는 위쪽 final_judgment-only /
-        # stub 분기에서 이미 설정됨. judge_finalize 경로도 자체적으로 설정함.
+        elif self.judge_finalize is None:
+            # judge_finalize / output_postprocess 둘 다 없음 — SSE 시퀀스 완결용
+            # tone event 한 번 emit. tests/stub 빌드 케이스.
+            await _emit('tone', {
+                'action': 'pass',
+                'tone_eval': {},
+                'recommended_delay_ms': 0,
+            })
 
         # 메타인지 자원 소모 (대화 턴 1회당 작은 양; recover 는 정비 사이클에서)
         if self.metacognition is not None:
@@ -762,6 +948,13 @@ class Orchestrator:
             except Exception:
                 # 로깅 실패는 turn 진행을 막지 않는다.
                 pass
+
+        # done event — SSE 경로면 마지막 메시지로 클라이언트가 turn 종료 인식.
+        await _emit('done', {
+            'response': response_text,
+            'turn_number': self.turn_number,
+            'experience_vector': dict(experience_vector or {}),
+        })
 
         return {
             'response': response_text,
@@ -1144,41 +1337,6 @@ class Orchestrator:
     # ------------------------------------------------------------------
     # Wave 14A — JSONL 로깅 헬퍼
     # ------------------------------------------------------------------
-
-    async def _collect_stream_text(
-        self,
-        *,
-        chosen_text: str,
-        chosen_style: str,
-        final_core_affect: dict[str, float],
-        user_input: str,
-    ) -> str:
-        """judge_finalize.stream_text 의 토큰을 모두 모아 평문으로 반환.
-
-        CLI / 비-SSE 호출 경로 전용 — SSE generator 는 streaming.py 에서 직접
-        async for 으로 토큰을 받아 response_chunk 이벤트로 흘려보낸다.
-        실패 시 chosen_text 폴백 (스트리밍 중간에 실패하면 부분 결과 폴백).
-        """
-        if self.judge_finalize is None:
-            return chosen_text
-        parts: list[str] = []
-        try:
-            async for token in self.judge_finalize.stream_text(
-                chosen_text=chosen_text,
-                chosen_style=chosen_style,
-                final_core_affect=final_core_affect,
-                user_input=user_input,
-            ):
-                parts.append(token)
-        except LLMError as exc:
-            if self.logger is not None:
-                self._log_event_safe('llm_error', {
-                    'stage': 'judge_finalize_stream_text',
-                    'message': str(exc),
-                })
-            if not parts:
-                return chosen_text
-        return ''.join(parts) if parts else chosen_text
 
     def _log_event_safe(self, event_type: str, payload: dict) -> None:
         """Logger 가 있을 때 EventLogEntry 1건 기록. 실패는 무시."""
