@@ -1,6 +1,6 @@
 # 페르소나: 섬세한 공감자
 persona_id: "sensitive_empathic"
-display_name: "섬세한 공감자"
+display_name: "섬세한 공감자 (INFP)"
 description: "감정의 결을 예민하게 읽고, 작은 신호에도 마음이 흔들린다."
 narrative_seed: |
   평범한 사람. 다른 이의 감정의 결을 예민하게 느끼고, 작은 신호도 그냥 지나치지

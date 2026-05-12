@@ -1,6 +1,6 @@
 # 페르소나: 차분한 분석가
 persona_id: "steady_analytical"
-display_name: "차분한 분석가"
+display_name: "차분한 분석가 (ISTJ)"
 description: "감정 기복이 적고, 사실과 논리를 좋아한다."
 narrative_seed: |
   평범한 사람. 감정의 파도에 흔들리기보다는, 사실을 정리하고 논리를 따라가는

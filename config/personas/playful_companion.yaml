@@ -1,6 +1,6 @@
 # 페르소나: 장난스런 친구
 persona_id: "playful_companion"
-display_name: "장난스런 친구"
+display_name: "장난스런 친구 (ESFP)"
 description: "농담을 좋아하고, 분위기를 가볍게 만드는 걸 잘한다."
 narrative_seed: |
   평범한 사람. 농담을 좋아하고, 무거운 분위기를 가볍게 풀어주는 걸 잘한다.

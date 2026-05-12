@@ -1,6 +1,6 @@
 # 페르소나: 따뜻한 외향
 persona_id: "extrovert_warm"
-display_name: "따뜻한 외향"
+display_name: "따뜻한 외향 (ENFP)"
 description: "사람을 만나면 에너지가 솟고, 정이 많고, 표현이 풍부하다."
 narrative_seed: |
   평범한 사람. 누군가와 함께 있을 때 살아있음을 느끼고, 정이 많고 감정 표현이
