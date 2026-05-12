@@ -421,12 +421,70 @@ ADR-011/012 의 응답 latency (~15-20s/턴) 와 무관.
 
 ---
 
+## ADR-017 — DMN Activity 3 narrative_delta → self_model.narrative 적용 (2026-05-12)
+
+**Context**: ADR-016 으로 DMN Activity 3 (`_try_knowledge_internalize`) 의 LLM
+산출물 (`narrative_delta`) 이 SQLite 에 영속되긴 했지만, **`self_model.narrative`
+자체는 spawn 시점의 `sample_life()` 결과로 박제** 되어 있었다. 결과: DMN 이 만든
+"이 사람은 이러저러한 결을 갖게 됐다" 라는 통찰이 실 페르소나 응답에 *반영되지
+않음*. spec §2.4 의 "지식 내면화 → 자기 서사 영향" 의도가 절반.
+
+**Decision**: Activity 3 의 staging + commit 직후 `ctx.self_model.add_internalized_delta(delta)`
+를 silent 호출 — `self_model.narrative` 끝에 `[누적 자기인식 (DMN)]` 헤더
+section 을 만들고 그 안에 `- <line>` 형태로 적재. 최신이 위, max 5 라인 cap,
+초과 시 oldest drop.
+
+- **Helper API** (`storage/self_model.py`):
+  ```python
+  def add_internalized_delta(
+      self, delta: str, *, max_deltas: int = 5
+  ) -> None
+  ```
+  빈 delta / 다중 라인 / 중복 처리 정책은 helper 자체에 캡슐화. silent no-op
+  semantics (LLM 의 빈 응답 / 잘못된 multi-line 도 안전).
+- **Wiring** (`high_level/dmn.py::_try_knowledge_internalize`):
+  - LLM 콜 + stage_write + commit (ADR-016 영속) 이후 self_model 적용.
+  - try/except silent — 적용 실패 시에도 cycle 결과는 success 유지 (영속은 됐기 때문).
+  - DMNCycleResult.output 에 `narrative_applied: bool` 노출.
+
+**연쇄 효과 (UX 관점에서 의미 있는 변화)**:
+1. DMN Activity 3 LLM → 한 줄 통찰 ("재즈에 깊이 끌린다는 걸 알게 됐다.").
+2. dmn_artifacts.db row 추가 (ADR-016 — append-only history).
+3. `self_model.narrative` 끝 section 에 줄 누적 (ADR-017 — 본 변경).
+4. 다음 `unified_response` 콜의 `{self_narrative}` prompt 변수 자동 갱신.
+5. **사용자 체감**: 같은 페르소나가 같은 사람과 대화를 거듭할수록 "나는 어떤
+   결의 사람" 이라는 자기 진술이 풍부해짐. 페르소나 박제 상태 해소.
+
+**라이턴시**: 0 영향 — Activity 3 자체가 DMN 턴 안에서만 호출. `add_internalized_delta`
+는 in-memory dict 갱신 + 문자열 조작 (~수십 μs). SQLite write 와는 별개.
+
+**cap=5 선택 이유**:
+- max 5 deltas × 한 줄 ≈ 500 자. 페르소나 narrative_seed 의 typical 1500~3000자
+  대비 한정적이라 prompt 톤을 깨지 않으면서 *변화의 흔적* 은 보존.
+- 더 길어지면 prompt가 너무 사람 형태에서 벗어남. 더 짧으면 누적의 의미 약화.
+- 적정값은 향후 conversational drift 측정으로 재조정 가능 (ADR 후보).
+
+**Out of scope (future ADR)**:
+- Activity 2 의 "한 줄 규칙" → `fast_path` 자동 경로 승격 (ADR-018 후보).
+- Section 안 항목의 *aging* — 시간 경과로 자연 약화/삭제 (현재는 LIFO drop 만).
+- Activity 4 (사색) 의 reflection 도 narrative 영향 줄지 검토 (현재는 별도 row).
+
+**Files**:
+- `storage/self_model.py` — `add_internalized_delta` 헬퍼 추가.
+- `high_level/dmn.py` — `_try_knowledge_internalize` 에 적용 단계 추가.
+- `tests/test_self_model_internalized_delta.py` (신설, +8) — unit.
+- `tests/test_dmn_activity3_narrative_apply.py` (신설, +3) — integration.
+
+**Status**: accepted.
+
+---
+
 ## Future ADRs (placeholder)
 
 다음과 같은 결정이 일어나면 ADR 를 append:
 
-- Activity 2 의 "한 줄 규칙" → 실제 `fast_path` 자동 경로 승격 (ADR-016 후속).
-- Activity 3 의 `narrative_delta` 가 `self_model.narrative` 를 실제로 수정 (ADR-016 후속).
+- Activity 2 의 "한 줄 규칙" → 실제 `fast_path` 자동 경로 승격 (ADR-018 후보).
+- Activity 4 (사색) reflection 도 narrative 적용 검토 (ADR-017 후속).
 - Phase 6 W 행렬 미세조정 절차와 데이터 출처.
 - 멀티 인스턴스 동시 turn 의 LLM rate-limit 정책.
 - prompts/ 의 다국어 분기 (한국어 → 영어 / 일어 등) 도입.
