@@ -27,6 +27,9 @@ export function SpawnModal({
   const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>(null);
   const [displayName, setDisplayName] = useState<string>('');
   const [jitterPct, setJitterPct] = useState<number>(30); // 0..100
+  // ADR-013 Stage 2 — demographic selectors.
+  const [ageRange, setAgeRange] = useState<string>('30s');
+  const [gender, setGender] = useState<string>('unspecified');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [suffix, setSuffix] = useState<string>(() => shortId());
@@ -40,6 +43,8 @@ export function SpawnModal({
       );
       setDisplayName('');
       setJitterPct(30);
+      setAgeRange('30s');
+      setGender('unspecified');
       setError(null);
       setSubmitting(false);
       setSuffix(shortId());
@@ -79,6 +84,8 @@ export function SpawnModal({
       const req: SpawnRequest = {
         persona_id: selectedPersonaId,
         jitter: Math.max(0, Math.min(1, jitterPct / 100)),
+        age_range: ageRange,
+        gender: gender,
       };
       if (trimmed.length > 0) {
         req.display_name = trimmed;
@@ -149,6 +156,45 @@ export function SpawnModal({
                 disabled={submitting}
                 className="w-full rounded-md border border-ink-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-sm text-ink-900 dark:text-zinc-100 placeholder:text-ink-400 dark:placeholder:text-zinc-500 focus:outline-none focus:border-ink-400 dark:focus:border-zinc-500"
               />
+            </label>
+          </section>
+
+          <section className="grid grid-cols-2 gap-3">
+            <label className="block">
+              <span className="text-xs uppercase tracking-widest font-mono text-ink-500 dark:text-zinc-400 mb-1.5 block">
+                나이대
+              </span>
+              <select
+                value={ageRange}
+                onChange={(e) => setAgeRange(e.target.value)}
+                disabled={submitting}
+                className="w-full rounded-md border border-ink-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-sm text-ink-900 dark:text-zinc-100 focus:outline-none focus:border-ink-400 dark:focus:border-zinc-500"
+              >
+                <option value="10s">10대</option>
+                <option value="20s">20대</option>
+                <option value="30s">30대</option>
+                <option value="40s">40대</option>
+                <option value="50s">50대</option>
+                <option value="60+">60대 이상</option>
+                <option value="unspecified">지정 안 함</option>
+              </select>
+            </label>
+
+            <label className="block">
+              <span className="text-xs uppercase tracking-widest font-mono text-ink-500 dark:text-zinc-400 mb-1.5 block">
+                성별
+              </span>
+              <select
+                value={gender}
+                onChange={(e) => setGender(e.target.value)}
+                disabled={submitting}
+                className="w-full rounded-md border border-ink-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-sm text-ink-900 dark:text-zinc-100 focus:outline-none focus:border-ink-400 dark:focus:border-zinc-500"
+              >
+                <option value="female">여성</option>
+                <option value="male">남성</option>
+                <option value="non-binary">논바이너리</option>
+                <option value="unspecified">지정 안 함</option>
+              </select>
             </label>
           </section>
 

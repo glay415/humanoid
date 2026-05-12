@@ -40,6 +40,15 @@ import httpx
 import yaml
 
 
+# `python tests/persona_eval/runner.py` 직접 실행 시 repo root 가 sys.path 에
+# 없어 `from tests.persona_eval.judge import Judge` 가 실패한다. repo root 를
+# 명시적으로 추가해서 두 호출 방식 모두 호환 (uv run python -m 도 OK).
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+
+
 sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 

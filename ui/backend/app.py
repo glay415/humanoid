@@ -120,6 +120,11 @@ class SpawnRequest(BaseModel):
     persona_id: str
     display_name: str | None = None
     jitter: float = 0.3
+    # ADR-013 Stage 2 — demographic. spawn = "한 인생 만들기".
+    # 10s/20s/30s/40s/50s/60+/unspecified, male/female/non-binary/unspecified.
+    # 둘 다 unspecified 면 legacy 동작 (base narrative_seed 그대로).
+    age_range: str = 'unspecified'
+    gender: str = 'unspecified'
 
 
 class WipeRequest(BaseModel):
@@ -274,6 +279,8 @@ async def spawn_instance(body: SpawnRequest) -> dict:
             persona_id=body.persona_id,
             display_name=body.display_name,
             jitter=float(body.jitter),
+            age_range=body.age_range,
+            gender=body.gender,
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc))

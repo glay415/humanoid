@@ -25,7 +25,7 @@ from typing import Any
 
 import yaml
 
-from storage.jitter import apply_jitter
+from storage.jitter import apply_jitter, sample_life
 from storage.logger import InstanceLogger
 from ui.backend import personas as _personas
 from ui.backend.state_serializer import (
@@ -66,6 +66,9 @@ class InstanceMetadata:
     last_active: str
     turn_number: int = 0
     last_mood: dict = field(default_factory=lambda: {'valence': 0.0, 'arousal': 0.0})
+    # ADR-013 Stage 2 — demographic. 기존 인스턴스에는 없을 수 있어 optional.
+    age_range: str = 'unspecified'
+    gender: str = 'unspecified'
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -82,6 +85,8 @@ class InstanceMetadata:
             last_active=str(data.get('last_active', _now_iso())),
             turn_number=int(data.get('turn_number', 0)),
             last_mood=dict(data.get('last_mood') or {'valence': 0.0, 'arousal': 0.0}),
+            age_range=str(data.get('age_range', 'unspecified')),
+            gender=str(data.get('gender', 'unspecified')),
         )
 
 
@@ -152,6 +157,9 @@ class InstanceManager:
         jitter: float = 0.3,
         jitter_seed: int | None = None,
         instance_id: str | None = None,
+        *,
+        age_range: str = 'unspecified',
+        gender: str = 'unspecified',
     ) -> InstanceMetadata:
         """새 인스턴스 생성. 메타데이터 반환.
 
@@ -161,6 +169,9 @@ class InstanceManager:
             jitter: 0.0 = 페르소나 그대로. 1.0 = baselines ±0.1 / drives ±0.05.
             jitter_seed: 재현성용 시드. None 이면 random.
             instance_id: 명시적 ID 지정 (예: '_default'). None 이면 uuid4.
+            age_range: '10s' | '20s' | '30s' | '40s' | '50s' | '60+' | 'unspecified'.
+                       ADR-013 Stage 2 — narrative 합성에 inject. 사용자가 spawn 시 선택.
+            gender: 'male' | 'female' | 'non-binary' | 'unspecified'. ADR-013 Stage 2.
         """
         persona = _personas.get_persona(persona_id)
         # 1. id / seed 결정
@@ -183,12 +194,21 @@ class InstanceManager:
         if not display_name:
             display_name = f"{persona.display_name}-{instance_id[:6]}"
 
-        # 5. 오케스트레이터 빌드 + narrative_seed 적용
-        orch = self._build_orchestrator(instance_id)
-        if persona.narrative_seed and orch.self_model is not None:
-            orch.self_model.update({'narrative': persona.narrative_seed})
+        # 5. ADR-013 Stage 2 — sample_life: 같은 페르소나라도 spawn 마다 다른
+        #    interests + knowledge depth 분포 + demographic 으로 합성된 narrative.
+        life = sample_life(
+            jittered,
+            jitter_seed=int(jitter_seed),
+            age_range=age_range,
+            gender=gender,
+        )
 
-        # 6. 메타 작성 + 캐시
+        # 6. 오케스트레이터 빌드 + 합성 narrative 적용
+        orch = self._build_orchestrator(instance_id)
+        if orch.self_model is not None:
+            orch.self_model.update({'narrative': life['narrative']})
+
+        # 7. 메타 작성 + 캐시
         now = _now_iso()
         meta = InstanceMetadata(
             instance_id=instance_id,
@@ -196,6 +216,8 @@ class InstanceManager:
             persona_id=persona_id,
             jitter=float(jitter),
             jitter_seed=int(jitter_seed),
+            age_range=age_range,
+            gender=gender,
             created_at=now,
             last_active=now,
             turn_number=0,
@@ -243,12 +265,28 @@ class InstanceManager:
             raise KeyError(f"instance not found: {instance_id}")
         # 디스크에서 복원
         orch = self._build_orchestrator(instance_id)
-        # narrative_seed 복원 — state.json 에 self_model 이 있으면 그쪽이 우선.
+        # narrative 복원 — state.json 에 self_model 이 있으면 그쪽이 우선.
+        # 없을 때만 sample_life 로 합성 (같은 jitter_seed + demographic 이면
+        # 결정론적이라 같은 인생 복원). 기존 인스턴스 (age/gender 없음) 는
+        # base narrative_seed 만.
         meta = self.get_metadata(instance_id)
         try:
             persona = _personas.get_persona(meta.persona_id)
-            if persona.narrative_seed and orch.self_model is not None:
-                orch.self_model.update({'narrative': persona.narrative_seed})
+            if orch.self_model is not None:
+                if meta.age_range != 'unspecified' or meta.gender != 'unspecified':
+                    # 새 형식 — sample_life 로 결정론적 복원.
+                    raw = _personas.load_persona_yaml(meta.persona_id)
+                    jittered = apply_jitter(raw, jitter=meta.jitter, seed=meta.jitter_seed)
+                    life = sample_life(
+                        jittered,
+                        jitter_seed=meta.jitter_seed,
+                        age_range=meta.age_range,
+                        gender=meta.gender,
+                    )
+                    orch.self_model.update({'narrative': life['narrative']})
+                elif persona.narrative_seed:
+                    # legacy — base narrative_seed.
+                    orch.self_model.update({'narrative': persona.narrative_seed})
         except KeyError:
             pass
         # state.json 이 있으면 in-memory 상태 복원

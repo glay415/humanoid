@@ -99,6 +99,9 @@ export type SpawnRequest = {
   persona_id: string;
   display_name?: string;
   jitter?: number; // 0..1
+  // ADR-013 Stage 2 — demographic. spawn = "한 인생 만들기".
+  age_range?: string; // '10s' | '20s' | '30s' | '40s' | '50s' | '60+' | 'unspecified'
+  gender?: string;    // 'male' | 'female' | 'non-binary' | 'unspecified'
 };
 
 // Wave 12: hard reset (per-instance) + global wipe (admin) operations.
