@@ -176,6 +176,49 @@ class DMNArtifactStore:
             })
         return out
 
+    def latest_case_promotes(self, *, limit: int = 64) -> list[dict]:
+        """ADR-019 — 재시작 시 fast_path 복원에 사용.
+
+        ``activity='case_promote'`` 인 row 중 같은 ``key`` 의 가장 최신 것만 (id MAX)
+        1건씩 반환. 즉 같은 pattern_id 로 반복 승격된 경우 *가장 최근 승격* 만.
+        최대 ``limit`` 개. id DESC 정렬.
+
+        반환 형식은 ``query`` 와 동일 (id / activity / key / payload / turn / created_at).
+        payload 에 ``state_changes`` 와 ``confidence`` 가 있어야 fast_path 패턴으로
+        복원 가능 (ADR-019 이전 row 들은 그 키가 없어 호출자가 skip).
+        """
+        try:
+            cur = self._conn.execute(
+                "SELECT id, activity, key, payload_json, turn, created_at "
+                "FROM dmn_artifacts "
+                "WHERE activity = 'case_promote' "
+                "AND id IN ("
+                "    SELECT MAX(id) FROM dmn_artifacts "
+                "    WHERE activity = 'case_promote' "
+                "    GROUP BY key"
+                ") "
+                "ORDER BY id DESC LIMIT ?",
+                (int(limit),),
+            )
+            rows = cur.fetchall()
+        except Exception:
+            return []
+        out: list[dict] = []
+        for r in rows:
+            try:
+                payload = json.loads(r[3])
+            except (json.JSONDecodeError, TypeError):
+                payload = {'_raw': r[3]}
+            out.append({
+                'id': int(r[0]),
+                'activity': r[1],
+                'key': r[2],
+                'payload': payload,
+                'turn': int(r[4]),
+                'created_at': float(r[5]),
+            })
+        return out
+
     def count(self, *, activity: str | None = None) -> int:
         """전체 또는 특정 activity 의 누적 산출물 카운트."""
         try:

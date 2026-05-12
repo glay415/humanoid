@@ -226,3 +226,44 @@ def test_key_without_colon_uses_full_key_as_activity(tmp_path: Path):
     rows = db.query(activity='unknown')
     assert len(rows) == 1
     db.close()
+
+
+# ---------------------------------------------------------------------------
+# 11) ADR-019 — latest_case_promotes
+# ---------------------------------------------------------------------------
+
+
+def test_latest_case_promotes_returns_only_max_id_per_key(tmp_path: Path):
+    """같은 key (= 같은 pattern_id) 가 여러 번 write 되면 가장 최신 id 만 반환."""
+    db = DMNArtifactStore(tmp_path / "dmn.db")
+    # 패턴 A — 3 번 write (각각 다른 confidence).
+    for c in (0.7, 0.8, 0.95):
+        db.write('case_promote:A', {'pattern_id': 'A', 'confidence': c}, turn=1)
+    # 패턴 B — 1 번.
+    db.write('case_promote:B', {'pattern_id': 'B', 'confidence': 0.6}, turn=1)
+    # 다른 activity 는 결과에 포함 안 돼야.
+    db.write('rumination:m-1', {'memory_id': 'm-1'}, turn=1)
+
+    rows = db.latest_case_promotes()
+    keys = sorted(r['key'] for r in rows)
+    assert keys == ['case_promote:A', 'case_promote:B']
+    a_row = next(r for r in rows if r['key'] == 'case_promote:A')
+    assert a_row['payload']['confidence'] == pytest.approx(0.95)
+    db.close()
+
+
+def test_latest_case_promotes_empty_when_no_case_promote_rows(tmp_path: Path):
+    db = DMNArtifactStore(tmp_path / "dmn.db")
+    db.write('rumination:m-1', {'memory_id': 'm-1'}, turn=1)
+    db.write('contemplate:safety', {'r': 'ok'}, turn=1)
+    assert db.latest_case_promotes() == []
+    db.close()
+
+
+def test_latest_case_promotes_limit(tmp_path: Path):
+    db = DMNArtifactStore(tmp_path / "dmn.db")
+    for i in range(5):
+        db.write(f'case_promote:p{i}', {'pattern_id': f'p{i}'}, turn=i)
+    rows = db.latest_case_promotes(limit=3)
+    assert len(rows) == 3
+    db.close()
