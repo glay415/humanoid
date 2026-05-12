@@ -18,6 +18,7 @@ from typing import Callable
 
 from llm.client import LLMError
 from llm.prompts import load_prompt
+from low_level.fast_path import FastPathPattern
 
 
 def _noop_commit_sink(key: str, value: object) -> None:
@@ -51,6 +52,9 @@ class DMNContext:
     # ADR-015: 미평가 입력 retrospective 재평가용. None 이면 Activity 1 은
     # 종전대로 큐에서 pop 만 (LLM 콜 + delayed encoding 없이) — backward compat.
     emotion_appraisal: object | None = None  # high_level.EmotionAppraisal
+    # ADR-018: 사례 승격 (Activity 2) 의 결과를 실제 fast_path 패턴으로 register.
+    # None 이면 종전대로 텍스트 규칙 영속 (ADR-016) 까지만, 자동 경로 미생성.
+    fast_path: object | None = None       # low_level.FastPath
     drives: dict | None = None            # {'fulfillment': {...}, 'deficits': {...}}
     unappraised_queue: list = field(default_factory=list)
     rumination_counter: dict = field(default_factory=dict)
@@ -468,6 +472,33 @@ class DMN:
                 except Exception:
                     pass
 
+        # ADR-018 — 규칙 텍스트 영속에 이어, *실제* fast_path 패턴까지 등록.
+        # marker.pattern_id 를 trigger 로, valence 부호로 state_changes 도출,
+        # marker.strength 를 confidence 로. ctx.fast_path 가 None 이면 skip.
+        promoted = False
+        try:
+            if ctx.fast_path is not None and hasattr(ctx.fast_path, 'register_or_update'):
+                trigger = str(chosen.get('pattern_id', '')).strip()
+                if trigger:
+                    valence_val = float(chosen.get('valence', 0.0))
+                    strength_val = float(chosen.get('strength', 0.0))
+                    if valence_val >= 0.0:
+                        # 접근 — bonding/comfort 약한 상승.
+                        state_changes = {'bonding': 0.05, 'comfort': 0.03}
+                    else:
+                        # 회피 — stress/inhibition 약한 상승.
+                        state_changes = {'stress': 0.05, 'inhibition': 0.03}
+                    pattern = FastPathPattern(
+                        trigger=trigger,
+                        state_changes=state_changes,
+                        confidence=max(0.0, min(1.0, strength_val)),
+                    )
+                    ctx.fast_path.register_or_update(pattern)
+                    promoted = True
+        except Exception:
+            # 승격 실패도 silent — DMN 사이클 흐름 보호 (영속은 이미 됨).
+            pass
+
         return DMNCycleResult(
             activity='case_promote',
             activity_type=int(DMNActivityType.CASE_PROMOTE),
@@ -475,6 +506,7 @@ class DMN:
             output={
                 'pattern_id': chosen.get('pattern_id'),
                 'rule_summary': (rule or '').strip(),
+                'fast_path_promoted': promoted,
             },
             committed=committed,
         )

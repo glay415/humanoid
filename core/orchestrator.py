@@ -1336,6 +1336,10 @@ class Orchestrator:
                 llm=getattr(self.dmn, 'llm', None),
                 # ADR-015: DMN Activity 1 의 retrospective LLM 재평가용.
                 emotion_appraisal=self.emotion_appraisal,
+                # ADR-018: DMN Activity 2 의 사례 → fast_path 패턴 승격용.
+                fast_path=(
+                    self.low_level.fast_path if self.low_level is not None else None
+                ),
                 drives=drives_status,
                 unappraised_queue=getattr(self.dmn, 'unappraised_queue', None),
                 turn=int(self.turn_number),
