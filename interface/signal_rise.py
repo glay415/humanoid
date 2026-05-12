@@ -68,11 +68,25 @@ class SignalRise:
         self,
         raw_core_affect: dict[str, float],
         meta_resource: float,
+        regulation_capacity: float = 0.5,
     ) -> dict[str, float]:
-        """raw_core_affect + 메타자원 보정 → final_core_affect."""
+        """raw_core_affect + 메타자원 보정 → final_core_affect.
+
+        ADR-025 — 페르소나의 ``regulation_capacity`` 가 보정 강도에 영향.
+        높을수록 메타인지 자원 고갈 시 valence 가 더 크게 떨어짐 (조절 노력이 큰
+        페르소나일수록 자원 부족이 영향 큼). 낮을수록 보정 미미 (애초에 조절을
+        많이 안 하니 자원 고갈 영향도 적음).
+
+          effective_beta = meta_beta * (0.5 + regulation_capacity)
+
+        - default capacity=0.5 → multiplier 1.0 → 기존 동작 보존 (회귀 0).
+        - capacity=1.0 → 1.5 → 50% 강화.
+        - capacity=0.0 → 0.5 → 절반.
+        """
+        effective_beta = self.meta_beta * (0.5 + max(0.0, min(1.0, float(regulation_capacity))))
         final = dict(raw_core_affect)
         final['valence'] = float(np.clip(
-            raw_core_affect['valence'] - self.meta_beta * (1.0 - meta_resource),
+            raw_core_affect['valence'] - effective_beta * (1.0 - meta_resource),
             -1.0, 1.0,
         ))
         return final

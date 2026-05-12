@@ -594,8 +594,12 @@ class Orchestrator:
         # final_core_affect 는 두 경로 모두 필요 — 먼저 계산.
         confidence = self.metacognition.confidence if self.metacognition else 0.5
         meta_resource = self.metacognition.resource if self.metacognition else 1.0
+        # ADR-025 — regulation_capacity 가 meta_correction 강도에 곱해진다.
+        reg_cap = (
+            self.metacognition.regulation_capacity if self.metacognition else 0.5
+        )
         final_core_affect = self.signal_rise.apply_meta_correction(
-            low_result['raw_core_affect'], meta_resource
+            low_result['raw_core_affect'], meta_resource, regulation_capacity=reg_cap,
         )
 
         regenerated = False
