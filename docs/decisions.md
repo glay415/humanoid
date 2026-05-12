@@ -479,12 +479,83 @@ section 을 만들고 그 안에 `- <line>` 형태로 적재. 최신이 위, max
 
 ---
 
+## ADR-018 — DMN Activity 2 case_promote → fast_path 자동 경로 승격 (2026-05-12)
+
+**Context**: ADR-016 으로 Activity 2 (`_try_case_promote`) 의 LLM 산출물 (한 줄
+규칙) 이 SQLite 에 영속됐지만, **실제 `low_level.fast_path` 의 marker-driven
+자동 경로로 등록되지는 않았다**. 결과: DMN 이 사례를 "추상화" 하는 LLM 콜은
+매 사이클 만들었는데, *그 추상화가 다음 turn 의 즉시 반응 (fast_path.check) 에는
+일절 영향 X*. spec §4.2 의 "절차기억 — 빠른 경로 → 즉시 상태 변경" 이 dead code
+상태.
+
+**Decision**: Activity 2 의 stage_write + commit 직후, `ctx.fast_path.register_or_update(...)`
+로 *실제* `FastPathPattern` 등록. trigger 는 marker.pattern_id, state_changes 는
+valence sign 으로 도출, confidence 는 marker.strength.
+
+- **승격 매핑**:
+  | marker.valence | state_changes | 의미 |
+  |---|---|---|
+  | ≥ 0 | `{'bonding': +0.05, 'comfort': +0.03}` | 접근 — 그 trigger 가 다음에 등장하면 친밀감/편안함 즉시 상승 |
+  | < 0 | `{'stress': +0.05, 'inhibition': +0.03}` | 회피 — stress/억제 즉시 상승 |
+  델타 크기 0.03~0.05 는 single-turn 안에서 톤은 바꾸되 전체 페르소나를 흔들지 않을
+  수준. `InternalState.apply_fast_path` 의 `Δmax=0.3` 클램프로 보호.
+- **Dedupe** (`FastPath.register_or_update`):
+  - 같은 trigger 가 이미 있으면 confidence 는 max 채택, state_changes 는 새 값.
+  - 새로 등록되면 True, 갱신이면 False 반환.
+  - 기존 `register()` 는 변경 X (테스트가 의도적으로 같은 trigger 다중 패턴
+    추가하는 케이스 보존).
+- **Wiring**:
+  - `DMNContext.fast_path` 옵션 필드 추가. None 이면 종전대로 텍스트 영속만 (ADR-016).
+  - `core/orchestrator.py::process_dmn_turn` 의 DMNContext 구성에서
+    `fast_path=self.low_level.fast_path if self.low_level else None`.
+  - 적용 실패도 silent — Activity 2 success 는 영속 기준이지 fast_path register
+    실패 기준이 아님. output 에 `fast_path_promoted: bool` 노출.
+
+**라이턴시**: 0 영향. `register_or_update` 는 in-memory list 검색 + append (~수 μs).
+`fast_path.check` 는 이미 모든 대화 턴 첫 단계에서 동작 중이므로 패턴이 늘어나도
+턴 latency 에 추가 부담 없음 (O(N) substring match, N<<100 예상).
+
+**체감 변화**:
+1. Activity 2 LLM → "친구 거절 신호 = 거리감 유지" (한 줄 규칙) 생성.
+2. dmn_artifacts.db append (ADR-016).
+3. **fast_path 에 `('친구 거절', {'stress': +0.05, 'inhibition': +0.03}, 0.85)` 등록** (ADR-018).
+4. 다음 turn 의 user_input 에 "친구 거절" 부분 문자열이 등장하면 pipeline.run 의
+   첫 단계 fast_path.check 가 매치 → internal_state 의 stress / inhibition 즉시 상승.
+5. 그 즉시 변경된 state 가 같은 turn 의 emotion_base.update + unified_response prompt 의
+   `{internal_state}` 변수로 전파 → *응답 톤이 그 패턴에 학습된 결로 변함*.
+
+이는 spec §4.2 의 "사람이 어떤 자극에 대해 *생각하기 전에* 몸이 반응하는" 동작.
+대화 LLM 의 cognitive 추론에 *앞서서* 패턴이 발화. 진정한 *학습된 행동 변화*.
+
+**Out of scope (future ADR)**:
+- 인스턴스 재시작 시 fast_path 복원 — 현재는 in-memory. `dmn_artifacts.db` 의
+  `case_promote` row 들을 spawn 시 일괄 재로드해 fast_path 채우는 wiring 별도 ADR.
+- 패턴 *aging* — 시간 흐를수록 confidence 자연 감소 (현재는 영구).
+- 시간이 지나 같은 trigger 의 valence sign 이 *반대로* 뒤집힐 때 (접근→회피
+  학습 반전) 의 처리.
+- pattern_id 가 짧은 텍스트 fragment 일 때 false-match 위험 (예: "안" 이라는
+  trigger 가 너무 흔한 substring). 현재는 LLM 콜이 풀 sentence 를 pattern_id
+  로 보내주길 신뢰.
+
+**Files**:
+- `low_level/fast_path.py` — `register_or_update(pattern) -> bool` 추가.
+- `high_level/dmn.py` — `DMNContext.fast_path` 필드, `_try_case_promote` wiring.
+- `core/orchestrator.py` — `process_dmn_turn` 의 DMNContext 구성에 fast_path 주입.
+- `tests/test_dmn_activity2_fast_path_promote.py` (신설, +7) — 승격 시나리오.
+
+**Status**: accepted.
+
+---
+
 ## Future ADRs (placeholder)
 
 다음과 같은 결정이 일어나면 ADR 를 append:
 
-- Activity 2 의 "한 줄 규칙" → 실제 `fast_path` 자동 경로 승격 (ADR-018 후보).
+- 인스턴스 재시작 시 fast_path 패턴 복원 — `dmn_artifacts.db` 의 `case_promote`
+  row 일괄 재로드 (ADR-018 후속).
 - Activity 4 (사색) reflection 도 narrative 적용 검토 (ADR-017 후속).
+- DMN 산출물 (fast_path / narrative section) 의 *aging* — 시간 흐를수록 자연
+  약화 (현재는 LIFO drop / max-confidence 만).
 - Phase 6 W 행렬 미세조정 절차와 데이터 출처.
 - 멀티 인스턴스 동시 turn 의 LLM rate-limit 정책.
 - prompts/ 의 다국어 분기 (한국어 → 영어 / 일어 등) 도입.
