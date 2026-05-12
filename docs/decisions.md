@@ -343,13 +343,90 @@ DMN 의 재처리 기회는 *생성되지 않았다*.
 
 ---
 
+## ADR-016 — DMN 활동 산출물 SQLite 영속화 (DMNArtifactStore, 2026-05-12)
+
+**Context**: DMN Activity 2~5 (`_try_ruminate` / `_try_case_promote` /
+`_try_knowledge_internalize` / `_try_contemplate`) 는 이미 LLM 콜을 만들고
+`SnapshotManager.stage_write(key, value)` 까지 호출하는데, `SnapshotManager.commit`
+이 받는 `storage_write_fn` 의 기본값이 `_noop_commit_sink` 였다. 결과: 매 DMN
+사이클의 LLM 산출물 (반추 통찰 / 일반 규칙 / 자기 서사 델타 / 사색 텍스트) 이
+세션 끝에 휘발. 이는 spec §2.4 의 "DMN 이 시간을 통해 누적해 가는 인지 산출"
+의도와 부합하지 않으며, ADR-015 의 `delayed_appraisal` artifact 도 동일한
+sink-no-op 경로를 탔다.
+
+**Decision**: 인스턴스별 SQLite 파일 (`instances/<uuid>/dmn_artifacts.db`) 에
+append-only history 로 영속화하는 `DMNArtifactStore` 를 추가한다. orchestrator 가
+`process_dmn_turn` 안에서 `store.make_sink(turn_provider=lambda: self.turn_number)`
+로 closure 를 만들어 `DMNContext.commit_sink` 로 주입.
+
+- **스키마** (`storage/dmn_artifacts.py`):
+  ```sql
+  CREATE TABLE dmn_artifacts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      activity TEXT NOT NULL,      -- 'rumination' | 'case_promote' |
+                                   -- 'self_model.narrative_delta' |
+                                   -- 'contemplate' | 'delayed_appraisal'
+      key TEXT NOT NULL,           -- 원 stage_write 키 (예: 'rumination:mem-1')
+      payload_json TEXT NOT NULL,
+      turn INTEGER NOT NULL,
+      created_at REAL NOT NULL
+  );
+  -- 인덱스: activity, key, turn
+  ```
+- **API**:
+  - `write(key, value, *, turn=0)` — best-effort INSERT (예외 silent).
+  - `make_sink(turn_provider) -> Callable[[str, dict], None]` — `SnapshotManager.commit`
+    이 받는 시그니처. turn_provider 가 매 콜 시점에 현재 turn 을 가져옴.
+  - `query(activity=None, key=None, since_turn=None, limit=50)` — id DESC 정렬.
+  - `count(activity=None)` — 누적 카운트.
+  - `close()` — Windows 의 파일 락 잔류 방지용 (instance hard_reset / wipe 시).
+- **Wiring**:
+  - `main.build_full_orchestrator` — `storage_root` 가 주어진 경우 store 인스턴스
+    동봉. legacy 경로 (`storage_root=None`) 도 `storage_data/<name>/dmn_artifacts.db`
+    로 동일 패턴.
+  - `core/orchestrator.py::Orchestrator.__init__` — `dmn_artifacts: DMNArtifactStore | None = None`
+    옵션 인자. `process_dmn_turn` 에서 None 이면 sink 도 None → DMN 안에서
+    `_noop_commit_sink` 로 폴백 (Wave 7 호환).
+  - `ui/backend/instance_manager.py::_release_storage_handles` — `orch.dmn_artifacts.close()`
+    silent. `hard_reset` 의 삭제 대상에 `dmn_artifacts.db` 포함.
+
+**라이턴시**: 대화 응답 latency 영향 **0**. `commit_sink` 호출은 `process_dmn_turn`
+의 `SnapshotManager.commit` 안에서만 발생 — spec §1.3 의 턴 우선순위상 사용자
+입력 있을 때 DMN 안 돈다. SQLite INSERT 1회 ≈ 1ms (인덱스 3개 포함). 측정한
+ADR-011/012 의 응답 latency (~15-20s/턴) 와 무관.
+
+**Append-only history 선택 이유** (vs latest-wins):
+- 같은 `(activity, key)` 페어가 반복될 수 있다 (예: 같은 기억을 여러 번 반추 →
+  시점별 다른 통찰). 시간에 따른 *해석의 변화* 자체가 spec 의 핵심 동작.
+- 같은 drive 의 contemplate 도 반복 — 사색의 누적이 자기 서사 변화의 재료.
+- read 측 비용 ↑ 하지만 인덱스 + LIMIT 으로 보정.
+
+**Out of scope (future ADR)**:
+- Activity 2 (사례 승격) 가 생성한 "한 줄 규칙" 을 실제 `fast_path` 의 marker-
+  driven 자동 경로 (접근/회피) 로 *승격* 하는 것. 현재는 텍스트로만 누적.
+- Activity 3 (지식 내면화) 의 `narrative_delta` 가 실제로 `self_model.narrative`
+  를 *수정* 하도록 wiring. 현재는 별도 row 로만 적재.
+- Knowledge promotion 의 DAG / dependency 추적 (어떤 일화기억이 어떤 규칙의 근거인지).
+- 인스턴스 간 영속물 broadcast (단일 인스턴스 영속만).
+
+**Files**:
+- `storage/dmn_artifacts.py` (신설) — `DMNArtifactStore` 클래스.
+- `tests/test_dmn_artifacts.py` (신설, +10) — 단위 테스트.
+- `tests/test_dmn_artifacts_integration.py` (신설, +3) — orchestrator → store roundtrip.
+- `core/orchestrator.py` — `dmn_artifacts` 옵션 인자 + sink 주입.
+- `main.py` — `build_full_orchestrator` 에서 store 생성.
+- `ui/backend/instance_manager.py` — hard_reset 대상 + 핸들 해제.
+
+**Status**: accepted.
+
+---
+
 ## Future ADRs (placeholder)
 
 다음과 같은 결정이 일어나면 ADR 를 append:
 
-- DMN Activity 2 (사례 승격) / Activity 3 (지식 내면화) / Activity 4 (사색) 의
-  `commit_sink` 영속화 hook — 현재는 no-op default 라 LLM 산출물 (insight / rule /
-  delta / reflection) 이 세션 끝에 사라진다.
+- Activity 2 의 "한 줄 규칙" → 실제 `fast_path` 자동 경로 승격 (ADR-016 후속).
+- Activity 3 의 `narrative_delta` 가 `self_model.narrative` 를 실제로 수정 (ADR-016 후속).
 - Phase 6 W 행렬 미세조정 절차와 데이터 출처.
 - 멀티 인스턴스 동시 turn 의 LLM rate-limit 정책.
 - prompts/ 의 다국어 분기 (한국어 → 영어 / 일어 등) 도입.

@@ -2,10 +2,10 @@
 
 > Living document. Wave 머지 / 중요 결정 / baseline 변동 시마다 갱신한다. 규칙은 [`CLAUDE.md`](../CLAUDE.md) 참조.
 
-## Current baseline (as of 2026-05-12, ADR-013/014/015 emergent persona + DMN auto-push + retrospective)
+## Current baseline (as of 2026-05-12, ADR-013/014/015/016 — emergent persona + DMN auto-push + retrospective + artifact persistence)
 
-- Tests: **745 passed + 2 skipped + 1 xfailed** (`pytest tests/ -q --ignore=tests/persona_eval --ignore=tests/e2e_trends`, ~4.5min)
-- Branch: `main` past v0.3.0 (latest ADR-015 commits)
+- Tests: **758 passed + 2 skipped + 1 xfailed** (`pytest tests/ -q --ignore=tests/persona_eval --ignore=tests/e2e_trends`, ~4.7min)
+- Branch: `main` past v0.3.0 (latest ADR-016 commits)
 - Release: `release` branch at `v0.3.0` (Phase 3 / §8 enforcement / analyze.py / logs UI tab).
 - LLM tier: `small` / `large` / `dmn` 모두 `gpt-5.5`. `reasoning_effort` per-tier (small=low, large=medium, dmn=low). 콜별 override 가능 — ADR-011. Unified single-call stream — ADR-012.
 - persona_eval (`tests/persona_eval/`) scoped regression: **16/16 PASS** on 4 시나리오 × 5 페르소나 (실 LLM, 별도 비용 — pytest 에 포함 X).
@@ -30,6 +30,7 @@ Phase 단위는 spec §13 implementation roadmap 기준. Wave 는 실제 작업 
 - [x] DMN.unappraised_queue orchestrator 자동 push 통합 (ADR-014, 2026-05-12). `Orchestrator._push_unappraised` 헬퍼 + 두 emotion fallback hook (`process_conversation_turn` / `stream_unified_turn`). +6 tests (`tests/test_dmn_auto_push.py`). DMN cycle 의 retrospective LLM 처리는 별도 PR.
 - [x] ADR-013 emergent persona 동작 검증 (2026-05-12). `tests/persona_eval/` 프레임워크 — LLM-as-judge regression. 11 시나리오 (3 grounding 정합 수정 + 신규 `meta_identity_low_metacog`). 좁은 scope 회귀 검증 (4 시나리오 × 5 페르소나) **16/16 PASS**. 두 핵심 fix: judge 가 sample_life 합성 narrative 도 보게 (`runner.py::fetch_instance_narrative`), 그리고 `prompts/unified_response.txt` 의 "사람이다" rule 의 *표현 강도* 가 metacog 자원에 따라 emergent (자원<0.4 → 흔들림 + AI disclosure 금지 유지).
 - [x] DMN Activity 1 retrospective LLM 재평가 + delayed episodic encoding (ADR-015, 2026-05-12). ADR-014 의 auto-push 가 큐를 채우면 다음 DMN 턴에서 `emotion_appraisal.evaluate(...)` 로 회고적 재평가 + `episodic.store(source='delayed_appraisal')` 까지 처리. 대화 latency 영향 없음 (spec §1.3 턴 우선순위 상 DMN 은 사용자 입력 없을 때만 작동). +7 tests (`tests/test_dmn_retrospective_reprocess.py`). spec §2.4 의 "미평가 → 재처리 큐" 가 비로소 *완전히* 동작.
+- [x] DMN 활동 산출물 SQLite 영속화 (ADR-016, 2026-05-12). `storage/dmn_artifacts.py::DMNArtifactStore` — 인스턴스별 `dmn_artifacts.db`. orchestrator 가 `commit_sink` 로 wiring → Activity 1~5 의 LLM 산출물 (반추 통찰 / 일반 규칙 / 자기 서사 델타 / 사색 텍스트 / delayed appraisal) 이 append-only history 로 누적. 인스턴스 종료/재실행 가능, query 가능. 대화 latency 영향 0 (DMN/정비 턴 안에서만 SQLite INSERT). +13 tests (10 unit + 3 integration).
 
 ## Wave history
 
@@ -60,6 +61,7 @@ Phase 단위는 spec §13 implementation roadmap 기준. Wave 는 실제 작업 
 - 2026-05-12 DMN auto-push (ADR-014): **738 + 2 skip + 1 xfail** (+6 신규 `tests/test_dmn_auto_push.py` + 1 기존 e2e 테스트 업데이트. 716 → 738 차이는 다른 sub-agent 의 main 직커밋 합산 포함).
 - 2026-05-12 ADR-013 verification: 통상 pytest 카운트는 변동 없음 (`tests/persona_eval/` 는 pytest 에서 ignore). persona_eval scoped regression (4 시나리오 × 5 페르소나) **16 PASS / 0 FAIL** — 실 LLM 콜 기반 별도 검증.
 - 2026-05-12 DMN retrospective (ADR-015): **745 + 2 skip + 1 xfail** (+7 신규 `tests/test_dmn_retrospective_reprocess.py`).
+- 2026-05-12 DMN artifact persistence (ADR-016): **758 + 2 skip + 1 xfail** (+10 신규 `tests/test_dmn_artifacts.py` + 3 신규 `tests/test_dmn_artifacts_integration.py`).
 
 ## Active work
 
@@ -77,7 +79,8 @@ Phase 단위는 spec §13 implementation roadmap 기준. Wave 는 실제 작업 
 
 자연스러운 다음 작업 후보:
 - Phase 6 — 실 대화 데이터 W 행렬 미세조정 (sensitivity 결과 활용).
-- DMN Activity 2~5 (사례 승격 / 지식 내면화 / 사색) 의 영속화 hook — 현재 `commit_sink` 가 no-op default 라 LLM 산출물이 세션 끝에 휘발. spec §2.4 의 진정한 *학습* 누적 시작점.
+- Activity 2 의 "한 줄 규칙" → 실제 `fast_path` marker-driven 자동 경로 승격 (ADR-016 영속화 후 자연스러운 다음 단계).
+- Activity 3 의 `narrative_delta` → `self_model.narrative` 실제 수정 (현재는 별도 row 로만 적재).
 - 시나리오 #25 (나-너) 부분 통과를 full pass 로 확장.
 - Persona별 prompt 변형 (현재는 baseline / drive_ratios 만 jitter; 톤 가이드도 personalize 검토).
 - 멀티 인스턴스 동시 turn 처리 시 LLM 비용/레이트리밋 정책.
@@ -111,7 +114,7 @@ scripts/        sensitivity report helper
 - 5 worktree directories may persist on disk after `git worktree remove` (Windows file locks). Cleanup manually or skip — git records say cleaned.
 - spec §12 시나리오 26 (non-dual awareness): xfail strict — "표현 시 이원성 복원" 은 텍스트 기반 존재의 ontological 한계.
 - spec §12 시나리오 27 (collective transcendence): skip — 시뮬레이션 환경이 1-person.
-- DMN Activity 2~5 의 `commit_sink` 가 기본 no-op — 사례 승격 / 지식 내면화 / 사색 의 LLM 산출물 (insight / rule / delta / reflection) 이 stage_write 까지만 가고 세션 끝에 휘발. 본격적인 학습/누적 동작을 위해선 영속화 hook 을 wiring 해야 (별도 ADR 후보).
+- ADR-016 으로 영속화는 됐지만 Activity 2 의 "한 줄 규칙" 이 실제 `fast_path` 의 marker-driven 자동 경로로 *승격* 되지는 않음 (텍스트 누적만). Activity 3 의 `narrative_delta` 도 별도 row 일 뿐 `self_model.narrative` 를 실제로 수정하진 않음. 그 wiring 은 별도 ADR 후보.
 - `tests/persona_eval/` 의 전체 scope (11 시나리오 × 21 페르소나) 는 실제 LLM 콜 ~214 회 + judge 채점 + rate-limit guard 로 ~100분 + LLM 비용. 매번 안 돌린다. 좁은 scope (대표 4 × 대표 5 = 16) 만 회귀 검증용으로 권장 — `uv run python tests/persona_eval/runner.py --scenario <a,b,c> --persona <a,b,c>`.
 - `model: gpt-5.5` 인식하는 LiteLLM 버전이 필요. 인식 못 하면 `pyproject.toml` 의 litellm pin 을 올린다.
 - `chroma_db/` 와 `storage_data/` (기질 이름별 단일 인스턴스 경로) 는 Wave 11 이후 legacy. `instances/<uuid>/` 가 정식. legacy `_default` 인스턴스가 자동 생성되어 기존 `/api/turn`, `/api/state` 가 backward-compat. 단일화 ADR 후보.
