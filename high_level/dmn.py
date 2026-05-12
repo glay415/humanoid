@@ -687,6 +687,18 @@ class DMN:
                 except Exception:
                     pass
 
+        # ADR-020 — reflection 을 self_model.narrative 의 [혼잣말] section 에 누적.
+        # Activity 3 의 외부 자극 → 자기이해 와 결이 다르므로 별도 section.
+        # 다음 turn 의 unified_response prompt 의 {self_narrative} 에 자동 반영.
+        contemplation_applied = False
+        try:
+            if ctx.self_model is not None and hasattr(ctx.self_model, 'add_contemplation'):
+                ctx.self_model.add_contemplation(reflection or '')
+                contemplation_applied = True
+        except Exception:
+            # 적용 실패도 silent — DMN 사이클 흐름 보호 (영속은 이미 됨).
+            pass
+
         return DMNCycleResult(
             activity='contemplate',
             activity_type=int(DMNActivityType.CONTEMPLATE),
@@ -694,6 +706,7 @@ class DMN:
             output={
                 'drive': chosen_drive,
                 'reflection': (reflection or '').strip(),
+                'contemplation_applied': contemplation_applied,
             },
             committed=committed,
         )
