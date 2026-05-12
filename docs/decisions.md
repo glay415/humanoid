@@ -547,15 +547,90 @@ valence sign 으로 도출, confidence 는 marker.strength.
 
 ---
 
+## ADR-019 — 인스턴스 재시작 시 fast_path 패턴 복원 (2026-05-12)
+
+**Context**: ADR-018 로 DMN Activity 2 가 marker 사례를 `FastPath` 패턴으로 자동
+승격하게 했지만, `FastPath.patterns` 는 *in-memory list* 였다. backend 프로세스
+재시작 / 인스턴스 재빌드 마다 이전에 학습된 패턴이 전부 휘발. ADR-018 의
+효과가 *세션 안* 으로만 한정 — spec §4.2 의 절차기억 (시간을 견디는 저수준
+학습) 의도와 부합하지 않는다.
+
+ADR-016 의 `dmn_artifacts.db` 에 `case_promote` row 들이 영속되긴 했지만,
+페이로드에 `pattern_id` + `rule_summary` 만 있어 fast_path 패턴 재구성에
+필요한 `state_changes` / `confidence` / `valence` 가 없었다.
+
+**Decision**: 두 단계로 영구화.
+
+**(1) Activity 2 stage_write payload 확장** (`high_level/dmn.py`):
+- 기존: `{pattern_id, rule_summary}`
+- 신: `{pattern_id, rule_summary, valence, strength, state_changes, confidence}`
+- 코드 순서: derive(state_changes/confidence) → stage_write → commit → register.
+  derive 한 값이 영속 payload 와 fast_path register 양쪽에 동일하게 들어가
+  1:1 정합.
+
+**(2) DMNArtifactStore query + restore hook** (`storage/dmn_artifacts.py` +
+`main.py`):
+- `DMNArtifactStore.latest_case_promotes(limit=64)` — 같은 key 의 가장 최근
+  (id MAX) row 만 1 건씩 반환. SQL `WHERE activity='case_promote' AND id IN
+  (SELECT MAX(id) ... GROUP BY key)`.
+- `main.build_full_orchestrator` — orchestrator 조립 + `register_default_triggers`
+  직후 한 번 호출. payload 에서 `state_changes` + `confidence` + `pattern_id`
+  모두 있어야 register_or_update. 누락 / 잘못된 타입 / 빈 trigger 는 skip.
+  best-effort — 복원 실패가 인스턴스 빌드 자체를 막지 않게 try/except.
+- 복원 건수는 `'fast_path_restored'` 이벤트로 logger 에 기록.
+
+**효과**:
+- 첫 spawn 시: store 비어 있어 no-op.
+- 후속 빌드: 이전 세션의 학습된 trigger → state_changes 매핑이 그대로 복귀.
+- backend 재시작 후 같은 자극을 만나면 *이미 학습한 반응* 이 다시 발동.
+- 누적 학습이 비로소 *영속* — spec §4.2 의 진짜 의도.
+
+**ADR-019 이전 row 호환**:
+- 구 포맷 (payload 에 state_changes / confidence 없음) 은 silent skip. 충돌 X.
+- 새 row 부터 자연스럽게 복원 대상이 됨.
+- 마이그레이션 / 백필 안 함 — 이전 row 는 그대로 두고 새 row 가 점진적으로
+  자리를 메우는 정책.
+
+**라이턴시**: 0 영향.
+- 복원은 인스턴스 *빌드* 시점 1 회. 대화 응답 경로엔 일절 끼지 않음.
+- SQLite SELECT (`activity='case_promote'` 인덱스 사용) + register_or_update
+  (in-memory list 순회). 64 패턴 기준 ~1ms 미만.
+
+**Out of scope (future ADR)**:
+- 패턴 *aging* — 시간 흐를수록 confidence 자연 감소. 현재는 register_or_update
+  의 max-confidence 정책이라 한 번 높았던 패턴이 영구히 강함. Hebbian 학습의
+  하향 보완이 필요해질 시점에 별도 ADR.
+- Activity 3 (`narrative_delta`) 의 재시작 복원 — self_model.narrative 자체가
+  이미 state.json 에 영속되므로 별도 wiring 불필요. 단 sample_life 합성된
+  base narrative 와 누적 section 의 reconcile 정책 점검 (ADR-017 후속).
+- Activity 4 (사색) reflection 의 self_model 적용 — 별도 섹션 (`[혼잣말]`) 분리
+  설계 후 ADR.
+
+**Files**:
+- `high_level/dmn.py` — `_try_case_promote` payload 확장 + 코드 순서.
+- `storage/dmn_artifacts.py` — `latest_case_promotes` query.
+- `main.py::build_full_orchestrator` — restore hook.
+- `tests/test_dmn_artifacts.py` (+3) — query 단위.
+- `tests/test_dmn_fast_path_restore.py` (신설, +5) — restore 통합.
+
+**테스트 격리 메모**: 새 통합 테스트가 `build_full_orchestrator` 를 여러 번
+호출 → chromadb `SharedSystem` 글로벌 캐시 누적으로 후속 스위트 일부가
+`no such table: acquire_write` 로 깨지는 quirk 가 재발. 각 테스트 끝에
+`_close_chroma` 헬퍼로 client / prospective / dmn_artifacts handle 명시 해제
+(`ui/backend/instance_manager.py::_release_storage_handles` 와 동일 패턴) 로 해결.
+
+**Status**: accepted.
+
+---
+
 ## Future ADRs (placeholder)
 
 다음과 같은 결정이 일어나면 ADR 를 append:
 
-- 인스턴스 재시작 시 fast_path 패턴 복원 — `dmn_artifacts.db` 의 `case_promote`
-  row 일괄 재로드 (ADR-018 후속).
-- Activity 4 (사색) reflection 도 narrative 적용 검토 (ADR-017 후속).
-- DMN 산출물 (fast_path / narrative section) 의 *aging* — 시간 흐를수록 자연
-  약화 (현재는 LIFO drop / max-confidence 만).
+- Activity 4 (사색) reflection 의 self_model 영향 검토 — 별도 섹션 (`[혼잣말]`)
+  으로 분리 설계 (ADR-017 자매).
+- DMN 산출물 *aging* — 시간 흐를수록 fast_path confidence / narrative section
+  의 자연 약화 (Hebbian 학습 보완, ADR-019 후속).
 - Phase 6 W 행렬 미세조정 절차와 데이터 출처.
 - 멀티 인스턴스 동시 turn 의 LLM rate-limit 정책.
 - prompts/ 의 다국어 분기 (한국어 → 영어 / 일어 등) 도입.
