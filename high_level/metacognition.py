@@ -69,11 +69,18 @@ class Metacognition:
                 'converged': True,
             }
 
+        # ADR-023 — 페르소나의 정서 조절 능력 (regulation_capacity, 0~1) 이 재평가
+        # 트리거 임계값에 영향. 높을수록 더 작은 mismatch 에도 reframe — 적극적
+        # 정서 조절. 낮을수록 큰 mismatch 만 트리거 — 수동적.
+        # multiplier 정책: (1.5 - regulation_capacity), [0.5, 1.5] 범위.
+        # default 0.5 → 1.0 (기존 동작 보존), 1.0 → 0.5 (2배 민감), 0.0 → 1.5 (둔감).
+        _rc_mult = max(0.5, min(1.5, 1.5 - float(self.regulation_capacity)))
+
         # 1. state_mismatch — 고수준 valence 와 raw_core_affect valence 부호 불일치 + 큰 격차.
-        # 임계값 0.4 → 0.5 (작은 mismatch 까지 잡으면 reasoning 비용 대비 가치 낮음).
+        # 기본 임계값 0.5 — regulation_capacity 로 스케일링.
         raw_v = (low_result or {}).get('raw_core_affect', {}).get('valence', 0.0)
         high_v = (emotion_result or {}).get('valence', 0.0)
-        if (raw_v >= 0) != (high_v >= 0) and abs(raw_v - high_v) > 0.5:
+        if (raw_v >= 0) != (high_v >= 0) and abs(raw_v - high_v) > 0.5 * _rc_mult:
             reasons.append('state_mismatch')
             strategy = 'reframe'
 
@@ -84,10 +91,10 @@ class Metacognition:
                 strategy = 'context'
 
         # 3. social/threat 충돌 — 보상이 큰데 위협도 큼 → 거리두기 필요.
-        # 임계값 0.6 → 0.65 (강한 양립만 트리거).
+        # 기본 임계값 0.65 — regulation_capacity 로 스케일링.
         soc = (social_result or {}).get('social_reward', 0.0) if social_result else 0.0
         threat = (emotion_result or {}).get('experience_dimensions', {}).get('threat', 0.0)
-        if soc > 0.65 and threat > 0.65:
+        if soc > 0.65 * _rc_mult and threat > 0.65 * _rc_mult:
             reasons.append('social_threat_conflict')
             if strategy is None:
                 strategy = 'distance'
