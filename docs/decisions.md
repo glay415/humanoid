@@ -978,6 +978,65 @@ Files: `main.py`. +4 tests.
 
 ---
 
+## ADR-029 — Marker decay 즉시 영속 + tombstone (2026-05-12)
+
+**Context**: ADR-028 로 marker formation 시점에 영속화는 됐지만 maintenance turn
+마다의 strength decay 는 *다음 formation 까지* 영속 안 됨. 결과: 재시작 시
+formation 시점의 strength 가 그대로 복원돼 *decay 효과 무효화*. 학습 loop 의
+"감쇠" 단계가 invisible 하게 깨져 있음.
+
+추가로 ADR-028 의 restore 는 strength<=0 marker 도 inject 했음 — decay 로
+removed 된 marker 가 *부활하는* 버그성 동작.
+
+**Decision**: maintenance turn 의 decay_all 직후 즉시 영속 + tombstone 처리.
+
+**(1) Orchestrator maintenance hook** (`core/orchestrator.py::process_maintenance_turn`):
+- `decay_all` 호출 *전* `pre_decay_ages` snapshot (tombstone age 계산용).
+- `decay_all` 호출 후:
+  - 살아남은 marker 각각: `write_marker_snapshot(pid, valence, strength, age, turn)`
+    — *현재* (decayed) state 영속.
+  - expired marker 각각: `write_marker_snapshot(pid, 0.0, 0.0, age+1, turn)`
+    — strength=0 tombstone.
+- silent failure (maintenance 흐름 보호).
+
+**(2) Restore tombstone skip** (`main.build_full_orchestrator`):
+- `latest_markers()` row 의 `strength<=0` 은 ADR-029 tombstone 으로 간주, skip.
+- 본 변경은 ADR-028 의 restore 와 자연 호환 (이전엔 tombstone 자체가 없었음).
+
+**연쇄 흐름 통합** (ADR-019/021/022/028/029):
+1. 자극 → marker 형성 (in-memory) + ADR-028 즉시 영속.
+2. maintenance → decay (strength ↓ 또는 expire).
+3. **ADR-029** — 감쇠 후 state 즉시 snapshot. expired 는 tombstone.
+4. 인스턴스 재시작 → tombstone skip + 살아남은 marker 만 정확한 strength 로 복원.
+
+이로써 학습 loop 의 *상향 (formation/reinforcement) + 하향 (decay/expiration)*
+양방향이 세션 간 완전 일관 영속.
+
+**Tombstone 정책 근거**:
+- 단순히 "복원 시 skip" 만 하지 않고 *명시적 tombstone* row 를 쓰는 이유:
+  - 후속 재시작 사이에 같은 pattern_id 가 다시 형성되면 새 snapshot 이 tombstone
+    위에 쌓임 (`latest_markers` 의 MAX id 정책으로 자동 처리).
+  - tombstone 이 없으면 expired 직후 재시작이 *형성 시점 snapshot* 을 복원할 위험.
+  - 본 정책으로 "한 번 expire 된 marker 는 새 자극 없이는 부활 X" invariant 유지.
+
+**라이턴시**: 0 영향 (maintenance turn 내부만, 대화 경로 무관). N marker 기준
+SQLite INSERT N+expired 회 ~1ms × N.
+
+**Out of scope (future ADR)**:
+- tombstone row 의 정리 (오래된 tombstone 누적 시 store 크기 ↑) — append-only
+  history 정책 그대로 두되 필요 시 별도 ADR.
+- `MarkerRegistry.decay_all` 의 시그니처에 surviving + expired 모두 반환하게
+  하는 refactor — 현재는 orchestrator 가 pre/post 비교로 처리.
+
+**Files**:
+- `core/orchestrator.py::process_maintenance_turn` — decay + 영속 hook.
+- `main.py::build_full_orchestrator` — restore tombstone skip.
+- `tests/test_marker_decay_persistence.py` (신설, +4).
+
+**Status**: accepted.
+
+---
+
 ## Future ADRs (placeholder)
 
 다음과 같은 결정이 일어나면 ADR 를 append:
@@ -985,7 +1044,7 @@ Files: `main.py`. +4 tests.
 - yaml `narrative_pressure` / `relationship_threshold` wiring — 코드 적용 방법
   추측 단계. 명세 의도 확인 필요.
 - marker `pattern_id` 의 robust 추출 (LLM noun / embedding cluster) — ADR-022 후속.
-- marker decay 의 즉시 영속 (maintenance 시 strength 변화도 적재) — ADR-028 후속.
+- tombstone row 의 정리 정책 (오래된 tombstone 누적) — ADR-029 후속.
 - narrative section (`[누적 자기인식]` / `[혼잣말]`) 의 time-based aging (ADR-021 자매).
 - DMN 패턴별 unused turn counter — 매치 없는 패턴만 선택적 감쇠.
 - trigger_registry 의 실제 evaluation wiring 또는 dead code 제거 (G9).
