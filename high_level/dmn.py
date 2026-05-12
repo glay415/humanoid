@@ -48,6 +48,9 @@ class DMNContext:
     other_model: object | None = None     # storage.OtherModel
     snapshot_manager: object | None = None  # storage.SnapshotManager
     llm: object | None = None             # llm.LLMClient | MockLLMClient
+    # ADR-015: 미평가 입력 retrospective 재평가용. None 이면 Activity 1 은
+    # 종전대로 큐에서 pop 만 (LLM 콜 + delayed encoding 없이) — backward compat.
+    emotion_appraisal: object | None = None  # high_level.EmotionAppraisal
     drives: dict | None = None            # {'fulfillment': {...}, 'deficits': {...}}
     unappraised_queue: list = field(default_factory=list)
     rumination_counter: dict = field(default_factory=dict)
@@ -162,9 +165,17 @@ class DMN:
     # -------------------------------------------------------------- activity 1
 
     async def _try_unappraised_reprocess(self, ctx: DMNContext) -> DMNCycleResult | None:
-        """감정 평가 실패 폴백 큐를 팝. 실제 재평가는 orchestrator 가 한다.
+        """ADR-014 의 미평가 큐 → ADR-015 의 retrospective LLM 재평가 + delayed encoding.
 
-        Wave 7 범위: 큐에서 가장 오래된 항목 pop + 결과로 표시만.
+        흐름 (spec §2.4 우선순위 1):
+          1. 큐에서 가장 오래된 항목 pop.
+          2. ctx.emotion_appraisal + ctx.episodic 둘 다 있으면 LLM 재평가 후
+             episodic.store(source='delayed_appraisal') 로 delayed encoding.
+          3. 둘 중 하나라도 없으면 종전대로 flag-only (backward compat).
+          4. LLM 재평가 실패: 항목 *drop* — 재큐잉 안 함 (무한 재시도 방지).
+
+        대화 latency 영향 없음: 본 활동은 DMN/정비 턴에서만 실행 (spec §1.3
+        turn priority: 대화 > DMN > 정비). 사용자 입력 있으면 트리거 안 됨.
         """
         queue = ctx.unappraised_queue
         if not queue:
@@ -176,12 +187,113 @@ class DMN:
                 self.unappraised_queue.pop(0)
             except IndexError:
                 pass
+
+        appraisal = getattr(ctx, 'emotion_appraisal', None)
+        episodic = ctx.episodic
+        # backward compat: 옵션 어느 한쪽이라도 없으면 종전 flag-only 동작.
+        if appraisal is None or episodic is None:
+            return DMNCycleResult(
+                activity='unappraised_reprocess',
+                activity_type=int(DMNActivityType.UNAPPRAISED_REPROCESS),
+                success=True,
+                output={'item': item, 'note': 'reprocessing flagged for orchestrator'},
+                committed=False,
+            )
+
+        user_input = item.get('user_input', '') or ''
+        raw_core_affect = item.get('raw_core_affect') or {}
+        # spec §2.4: retrospective LLM 재평가 — emotion_appraisal 의 본 evaluate
+        # 를 재사용한다 (별도 prompt 불필요).
+        sm = ctx.snapshot_manager
+        try:
+            emotion_result = await appraisal.evaluate(
+                user_input=user_input,
+                raw_core_affect={
+                    'valence': float(raw_core_affect.get('valence', 0.0)),
+                    'arousal': float(raw_core_affect.get('arousal', 0.0)),
+                },
+            )
+        except LLMError as exc:
+            if sm is not None:
+                try:
+                    sm.rollback()
+                except Exception:
+                    pass
+            return DMNCycleResult(
+                activity='unappraised_reprocess',
+                activity_type=int(DMNActivityType.UNAPPRAISED_REPROCESS),
+                success=False,
+                output={'item': item, 'note': 'retrospective LLM failed, item dropped'},
+                committed=False,
+                error=f'LLMError: {exc}',
+            )
+
+        # Delayed episodic encoding. source='delayed_appraisal' — 일반 turn 의
+        # 'experience' 와 구분되되 우선순위는 동일 (storage.memory_store).
+        try:
+            mem_id = await episodic.store(
+                content=user_input,
+                emotion_tag={
+                    'valence': float(emotion_result.get('valence', 0.0)),
+                    'arousal': float(emotion_result.get('arousal', 0.0)),
+                    'labels': list(emotion_result.get('preliminary_labels', [])),
+                },
+                source='delayed_appraisal',
+                importance=min(1.0, abs(float(emotion_result.get('valence', 0.0)))
+                               + float(emotion_result.get('arousal', 0.0))),
+                turn=int(ctx.turn),
+            )
+        except Exception as exc:  # noqa: BLE001 — 인코딩 실패는 sub-error 로만.
+            if sm is not None:
+                try:
+                    sm.rollback()
+                except Exception:
+                    pass
+            return DMNCycleResult(
+                activity='unappraised_reprocess',
+                activity_type=int(DMNActivityType.UNAPPRAISED_REPROCESS),
+                success=False,
+                output={'item': item, 'note': 'delayed encoding failed'},
+                committed=False,
+                error=f'EncodingError: {exc!r}',
+            )
+
+        committed = False
+        if sm is not None:
+            try:
+                sm.stage_write(f'delayed_appraisal:{mem_id}', {
+                    'memory_id': mem_id,
+                    'user_input': user_input,
+                    'emotion': {
+                        'valence': float(emotion_result.get('valence', 0.0)),
+                        'arousal': float(emotion_result.get('arousal', 0.0)),
+                        'labels': list(emotion_result.get('preliminary_labels', [])),
+                    },
+                    'source_item': item,
+                })
+                sm.commit(ctx.commit_sink or _noop_commit_sink)
+                committed = True
+            except Exception:
+                try:
+                    sm.rollback()
+                except Exception:
+                    pass
+
         return DMNCycleResult(
             activity='unappraised_reprocess',
             activity_type=int(DMNActivityType.UNAPPRAISED_REPROCESS),
             success=True,
-            output={'item': item, 'note': 'reprocessing flagged for orchestrator'},
-            committed=False,
+            output={
+                'item': item,
+                'memory_id': mem_id,
+                'emotion': {
+                    'valence': float(emotion_result.get('valence', 0.0)),
+                    'arousal': float(emotion_result.get('arousal', 0.0)),
+                    'labels': list(emotion_result.get('preliminary_labels', [])),
+                },
+                'note': 'delayed encoding ok',
+            },
+            committed=committed,
         )
 
     # -------------------------------------------------------------- activity 2

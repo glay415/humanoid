@@ -24,9 +24,14 @@ from storage.vector_db import VectorDB
 _NEUTRAL_MOOD: dict = {'valence': 0.0, 'arousal': 0.0}
 
 
-# 출처 우선순위 — retrieve 재정렬 시 사용. experience > internet > general > imagination.
+# 출처 우선순위 — retrieve 재정렬 시 사용.
+# experience ≡ delayed_appraisal > internet > general > imagination.
+# delayed_appraisal (ADR-015) 은 turn 중 LLM 실패로 미평가됐던 입력을 DMN 이
+# 회고적으로 재평가해서 인코딩한 것 — 시간만 늦었지 실 체험이므로 experience 와
+# 동일 우선순위로 취급한다.
 SOURCE_PRIORITY: dict[str, int] = {
     "experience": 4,
+    "delayed_appraisal": 4,
     "internet": 3,
     "general": 2,
     "imagination": 1,

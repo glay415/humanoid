@@ -1319,8 +1319,11 @@ class Orchestrator:
                 other_model=self.other_model,
                 snapshot_manager=getattr(self, 'snapshot_manager', None),
                 llm=getattr(self.dmn, 'llm', None),
+                # ADR-015: DMN Activity 1 의 retrospective LLM 재평가용.
+                emotion_appraisal=self.emotion_appraisal,
                 drives=drives_status,
                 unappraised_queue=getattr(self.dmn, 'unappraised_queue', None),
+                turn=int(self.turn_number),
             )
             raw = await self.dmn.run_cycle(ctx)
         else:
