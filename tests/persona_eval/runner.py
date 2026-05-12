@@ -89,6 +89,10 @@ def load_scenarios(scenario_filter: str | None = None) -> list[dict]:
     files = sorted(SCENARIO_DIR.glob('*.yaml'))
     if not files:
         raise FileNotFoundError(f"no scenarios in {SCENARIO_DIR}")
+    # comma 구분 다중 시나리오 id 도 허용.
+    wanted_ids: set[str] | None = None
+    if scenario_filter:
+        wanted_ids = {s.strip() for s in scenario_filter.split(',') if s.strip()}
     out: list[dict] = []
     for f in files:
         with f.open('r', encoding='utf-8') as fp:
@@ -96,12 +100,12 @@ def load_scenarios(scenario_filter: str | None = None) -> list[dict]:
         if 'id' not in data:
             print(f"[WARN] {f.name}: missing 'id' — skipped", flush=True)
             continue
-        if scenario_filter and data['id'] != scenario_filter:
+        if wanted_ids is not None and data['id'] not in wanted_ids:
             continue
         data['_source_file'] = f.name
         out.append(data)
-    if scenario_filter and not out:
-        raise ValueError(f"scenario id {scenario_filter!r} not found")
+    if wanted_ids is not None and not out:
+        raise ValueError(f"scenario id {sorted(wanted_ids)!r} not found")
     return out
 
 
@@ -260,7 +264,9 @@ def resolve_personas(scenario: dict, all_personas: list[str],
             print(f"[WARN] scenario {scenario['id']}: persona {m!r} not in "
                   f"config/personas — skipped", flush=True)
     if persona_filter:
-        candidates = [p for p in candidates if p == persona_filter]
+        # comma 구분 다중 페르소나 필터도 허용 (예: --persona infp,intj,estp).
+        wanted = {p.strip() for p in persona_filter.split(',') if p.strip()}
+        candidates = [p for p in candidates if p in wanted]
     return candidates
 
 
@@ -348,8 +354,8 @@ def print_run_result(run: ScenarioRun, verbose: bool) -> None:
 
 async def amain(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument('--scenario', help='scenario id (기본: 모두)')
-    parser.add_argument('--persona', help='persona id 필터 (기본: scenario 의 applies_to_personas)')
+    parser.add_argument('--scenario', help='scenario id (기본: 모두). comma 구분 다중 가능 (예: meta_identity,mood_state_reflection).')
+    parser.add_argument('--persona', help='persona id 필터 (기본: scenario 의 applies_to_personas). comma 구분 다중 가능 (예: infp,intj,estp).')
     parser.add_argument('--verbose', action='store_true',
                         help='passing signal 의 reason 까지 출력 + turn 별 응답')
     parser.add_argument('--base-url', default=os.environ.get('PERSONA_EVAL_BASE_URL', DEFAULT_BASE),
