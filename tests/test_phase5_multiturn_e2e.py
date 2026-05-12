@@ -615,21 +615,39 @@ async def test_full_conversation_turn_emits_response_field_after_phase5_changes(
 
 
 async def test_dmn_unappraised_queue_drains_after_emotion_failure(tmp_path, mock_llm):
-    """ADR-014: orchestrator 는 emotion 실패 시 dmn.unappraised_queue 에 자동 push 한다.
+    """ADR-014 + ADR-015: orchestrator 는 emotion 실패 시 큐 자동 push, 다음 DMN
+    턴에서 retrospective LLM 재평가 + delayed encoding 으로 소진한다.
 
     이 테스트는 두 단계를 검증한다:
       A) emotion_appraisal.evaluate 가 LLMError 를 던져도 fallback 으로 대화 턴이 완료되며
-         동시에 dmn.unappraised_queue 에 1 항목이 자동 push 된다.
+         동시에 dmn.unappraised_queue 에 1 항목이 자동 push 된다 (ADR-014).
       B) 그 다음 process_dmn_turn 의 첫 활동 UNAPPRAISED_REPROCESS 가 큐를 1건 pop 하고
-         'unappraised_reprocess' 활동을 반환 — 큐는 소진된다.
+         retrospective LLM 재평가 + episodic.store(source='delayed_appraisal') 까지
+         완료 — 큐는 소진된다 (ADR-015). DMN 의 다음 활동 (contemplate) 까진 본 테스트
+         scope 밖이라 mild 한 응답으로 처리.
     """
     # ─ A: emotion fallback + 자동 push 검증 ─
-    # mock_llm.responses 에 emotion 자리만 깨진 JSON, 나머지는 정상.
+    # 호출 순서 (확인됨):
+    #   conv: emotion → reappraisal → candidates → final → tone  (5 콜)
+    #   DMN:  retrospective(Activity 1) → contemplate(Activity 5)  (2 콜)
+    # = 7 콜 분의 응답 필요. emotion 만 broken (LLMError + auto-push 검증), 나머지는
+    # 정상 페이로드. reappraisal 콜은 shape 안 맞아도 conv 가 fallback 으로 흡수.
     mock_llm.responses = [
-        "this is not json",  # emotion → LLMError → fallback + auto-push
-        _candidates_payload(),
-        _final_payload(),
-        _tone_payload(),
+        "this is not json",          # 1) emotion → LLMError → fallback + auto-push
+        _candidates_payload(),       # 2) reappraisal — shape mismatch → conv fallback
+        _final_payload(),            # 3) candidates — shape mismatch → conv fallback
+        _tone_payload(),             # 4) final — shape mismatch → conv fallback
+        _tone_payload(),             # 5) tone — 정상 페이로드
+        # ADR-015 — DMN Activity 1 retrospective. mild 값으로 인코딩된 기억이
+        # Activity 2 (ruminate) 의 |v|+a>1.0 임계를 못 넘게 한다.
+        json.dumps({
+            "valence": -0.1,
+            "arousal": 0.2,
+            "preliminary_labels": ["우울"],
+            "experience_dimensions": {"reward": 0.0, "threat": 0.1, "novelty": 0.0},
+        }),
+        # DMN max_activities=2 default — Activity 5 contemplate 가 끼어든다.
+        "조용한 저녁이다.",
     ]
 
     # 진짜 DMN 인스턴스 — unappraised_queue 가 list 여야 함.
@@ -656,7 +674,7 @@ async def test_dmn_unappraised_queue_drains_after_emotion_failure(tmp_path, mock
     assert dmn_result['activity'] == 'unappraised_reprocess', (
         f"DMN 이 unappraised_reprocess 를 반환하지 않음: {dmn_result}"
     )
-    assert dmn_result['success'] is True
+    assert dmn_result['success'] is True, f"dmn_result={dmn_result}"
     # 큐가 1 → 0 으로 비워졌는지.
     assert real_dmn.unappraised_queue == [], (
         f"unappraised_queue 가 소진되지 않음: {real_dmn.unappraised_queue!r}"
