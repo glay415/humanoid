@@ -175,6 +175,37 @@ async def delete_instance(client: httpx.AsyncClient, base: str, instance_id: str
         print(f"[WARN] delete instance {instance_id} 실패 (무시): {exc!r}", flush=True)
 
 
+async def apply_preconditions(
+    client: httpx.AsyncClient,
+    base: str,
+    instance_id: str,
+    preconditions: dict,
+) -> None:
+    """시나리오 yaml 의 preconditions 섹션을 backend 에 적용.
+
+    현재 지원:
+      - metacog_resource: float — POST /api/instances/{id}/debug/metacog.
+        spawn 직후 metacognition.resource 가 1.0 인데, 자원 낮은 상태의 emergent
+        행동을 검증하려면 강제로 낮춰야 한다. 0.0 ~ 1.0 범위 밖이면 backend 가 400.
+
+    실패 시 RuntimeError. 시나리오에 preconditions 가 없거나 빈 dict 면 no-op.
+    """
+    if not preconditions:
+        return
+    if 'metacog_resource' in preconditions:
+        resource = float(preconditions['metacog_resource'])
+        r = await client.post(
+            f"{base}/api/instances/{instance_id}/debug/metacog",
+            json={'resource': resource},
+            timeout=10.0,
+        )
+        if r.status_code != 200:
+            raise RuntimeError(
+                f"precondition metacog_resource={resource} failed: "
+                f"HTTP {r.status_code} {r.text!r}"
+            )
+
+
 async def post_turn(
     client: httpx.AsyncClient,
     base: str,
@@ -257,6 +288,12 @@ async def run_scenario(
         run.instance_id = instance_id
         # spawn 응답에 jitter_seed 가 노출 안 되더라도 instance state 에 보존됨.
         # 로그에 남기고 싶으면 GET /api/instances/{id} 로 fetch. (선택)
+
+        # 시나리오에 preconditions 가 있으면 turn 호출 전에 적용. 예) metacog_resource
+        # 를 0.15 로 강제해 자원 낮은 상태의 emergent 행동 검증.
+        await apply_preconditions(
+            client, base, instance_id, scenario.get('preconditions') or {},
+        )
 
         for turn_idx, turn in enumerate(scenario.get('turns', [])):
             user_input = turn['user_input']

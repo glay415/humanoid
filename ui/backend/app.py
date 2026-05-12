@@ -132,6 +132,16 @@ class WipeRequest(BaseModel):
     confirm: str
 
 
+class MetacogDebugRequest(BaseModel):
+    """debug 용 metacognition.resource override 요청.
+
+    persona_eval 시나리오가 *특정 metacog 상태* 의 emergent 행동 (예: 자원 낮을 때
+    자기 의문 발동) 을 검증하려면 그 상태를 강제로 만들 수단이 필요하다.
+    floor (0.0) ~ ceiling (1.0) 범위만 허용 — 그 외는 400.
+    """
+    resource: float
+
+
 class InstanceCardModel(BaseModel):
     instance_id: str
     display_name: str
@@ -376,6 +386,44 @@ async def reset_instance(instance_id: str) -> Response:
     MANAGER.reset(instance_id)
     _instance_mood_history.pop(instance_id, None)
     return Response(status_code=204)
+
+
+@app.post("/api/instances/{instance_id}/debug/metacog", status_code=200)
+async def debug_set_metacog_resource(
+    instance_id: str,
+    body: MetacogDebugRequest,
+) -> dict:
+    """debug 전용 — 인스턴스의 metacognition.resource 를 즉시 override.
+
+    persona_eval 시나리오가 fresh-spawn (resource=1.0) 이 아닌 *자원 낮은*
+    상태에서 emergent 행동을 검증하려면 그 상태를 강제로 만들 수단이 필요하다.
+    프로덕션 라우트가 아니라 *debug* — admin_token 가드는 기존 정책 (env 설정
+    시에만 강제) 을 따른다 (현재 라우트는 무가드, 필요 시 의존성 추가).
+
+    범위:
+      - 0.0 <= resource <= 1.0 — 그 외는 400.
+      - 존재하지 않는 instance 는 404.
+
+    반환: {"instance_id": "...", "resource": 0.15}
+    """
+    if not MANAGER.exists(instance_id):
+        raise HTTPException(status_code=404, detail=f"instance not found: {instance_id}")
+    if not (0.0 <= body.resource <= 1.0):
+        raise HTTPException(
+            status_code=400,
+            detail=f"resource out of range [0.0, 1.0]: {body.resource}",
+        )
+    orch = MANAGER.get(instance_id)
+    if orch.metacognition is None:
+        raise HTTPException(
+            status_code=400,
+            detail="orchestrator has no metacognition module",
+        )
+    orch.metacognition.resource = float(body.resource)
+    return {
+        'instance_id': instance_id,
+        'resource': float(orch.metacognition.resource),
+    }
 
 
 @app.post("/api/instances/{instance_id}/hard-reset", status_code=200)
