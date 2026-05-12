@@ -2,10 +2,10 @@
 
 > Living document. Wave 머지 / 중요 결정 / baseline 변동 시마다 갱신한다. 규칙은 [`CLAUDE.md`](../CLAUDE.md) 참조.
 
-## Current baseline (as of 2026-05-12, ADR-013~021 — emergent persona + DMN learning loop + Hebbian 양방향)
+## Current baseline (as of 2026-05-12, ADR-013~022 — emergent persona + DMN 학습 loop 실 활성)
 
-- Tests: **803 passed + 2 skipped + 1 xfailed** (`pytest tests/ -q --ignore=tests/persona_eval --ignore=tests/e2e_trends`, ~4.9min)
-- Branch: `main` past v0.3.0 (latest ADR-021 commits)
+- Tests: **809 passed + 2 skipped + 1 xfailed** (`pytest tests/ -q --ignore=tests/persona_eval --ignore=tests/e2e_trends`, ~5.2min)
+- Branch: `main` past v0.3.0 (latest ADR-022 commits)
 - Release: `release` branch at `v0.3.0` (Phase 3 / §8 enforcement / analyze.py / logs UI tab).
 - LLM tier: `small` / `large` / `dmn` 모두 `gpt-5.5`. `reasoning_effort` per-tier (small=low, large=medium, dmn=low). 콜별 override 가능 — ADR-011. Unified single-call stream — ADR-012.
 - persona_eval (`tests/persona_eval/`) scoped regression: **16/16 PASS** on 4 시나리오 × 5 페르소나 (실 LLM, 별도 비용 — pytest 에 포함 X).
@@ -36,6 +36,7 @@ Phase 단위는 spec §13 implementation roadmap 기준. Wave 는 실제 작업 
 - [x] 인스턴스 재시작 시 fast_path 패턴 복원 (ADR-019, 2026-05-12). Activity 2 의 stage_write payload 에 `state_changes` + `confidence` 포함. `DMNArtifactStore.latest_case_promotes` 로 가장 최근 row 만 query. `main.build_full_orchestrator` 가 빌드 직후 register_or_update 일괄 호출. 이전 세션의 학습된 자동 경로가 backend 재시작 후에도 살아남 — spec §4.2 절차기억 영구성. +8 tests (5 integration + 3 unit). 구 포맷 row 호환 (state_changes 없으면 skip).
 - [x] DMN Activity 4 contemplate → self_model `[혼잣말]` section (ADR-020, 2026-05-12). Activity 3 의 [누적 자기인식] 과 별도 섹션. `SelfModel._add_to_section` generic helper + 두 named 메서드 (`add_internalized_delta` / `add_contemplation`). 한 section 의 갱신이 다른 section 의 라인을 건드리지 않음 (독립 cap=5, dedupe, LIFO drop). +9 tests (6 unit + 3 integration).
 - [x] fast_path 패턴 aging — Hebbian 하향 (ADR-021, 2026-05-12). `FastPath.decay_all(factor=0.97, floor=0.4)` — maintenance turn 마다 모든 패턴 confidence 감쇠, floor 미만 제거. 사용 안 되는 절차기억의 자연 망각 + 같은 trigger 가 reinforced 되면 register_or_update 의 max 정책으로 회복. Hebbian 학습의 *양방향* (상향 + 하향) 완성. +10 tests (6 unit + 4 integration).
+- [x] Marker 자동 형성 hook + DMN marker_store wiring (ADR-022, 2026-05-12). spec §1.4 의 "자극 → 마커" 가 Wave 7 이후 production code path 에서 빠져있던 **critical gap** 을 메움. `_maybe_form_marker` 가 `process_conversation_turn` / `stream_unified_turn` 의 emotion_appraisal 직후 호출. `_MARKER_FORM_TRIGGER (0.3)` 1차 가드 + `formation_threshold (0.7)` 2차 가드. pattern_id = 앞 15자 normalized prefix. `MarkerRegistry.load_all` 신설 — `DMNContext.marker_store` 가 in-memory registry fallback 으로 Activity 2 와 wiring. **이제 ADR-018/019/021 의 학습 loop 이 실 대화에서 실제로 트리거됨**. +6 tests.
 
 ## Wave history
 
@@ -71,6 +72,7 @@ Phase 단위는 spec §13 implementation roadmap 기준. Wave 는 실제 작업 
 - 2026-05-12 DMN Activity 2 fast_path promotion (ADR-018): **776 + 2 skip + 1 xfail** (+7 신규 `tests/test_dmn_activity2_fast_path_promote.py`).
 - 2026-05-12 fast_path restart restore (ADR-019): **784 + 2 skip + 1 xfail** (+5 신규 `tests/test_dmn_fast_path_restore.py` + 3 신규 단위 `tests/test_dmn_artifacts.py`).
 - 2026-05-12 ADR-020 (Activity 4 contemplation apply) + ADR-021 (fast_path aging): **803 + 2 skip + 1 xfail** (+6 `tests/test_self_model_contemplation.py` + 3 `tests/test_dmn_activity4_contemplation_apply.py` + 6 `tests/test_fast_path_aging.py` + 4 `tests/test_maintenance_fast_path_decay.py`).
+- 2026-05-12 ADR-022 (marker 자동 형성 hook): **809 + 2 skip + 1 xfail** (+6 `tests/test_marker_formation_hook.py`).
 
 ## Active work
 
@@ -88,6 +90,8 @@ Phase 단위는 spec §13 implementation roadmap 기준. Wave 는 실제 작업 
 
 자연스러운 다음 작업 후보:
 - Phase 6 — 실 대화 데이터 W 행렬 미세조정 (sensitivity 결과 활용).
+- marker `pattern_id` 의 robust 추출 (LLM noun extraction / embedding clustering) — ADR-022 후속.
+- marker registry 자체의 인스턴스 재시작 영속 — ADR-022 후속.
 - narrative section (`[누적 자기인식]` / `[혼잣말]`) 의 time-based aging — 현재는 LIFO drop 만 (ADR-021 자매).
 - DMN 패턴별 unused turn counter — 매치 없는 패턴만 선택적 감쇠 (ADR-021 후속).
 - 시나리오 #25 (나-너) 부분 통과를 full pass 로 확장.
@@ -124,6 +128,8 @@ scripts/        sensitivity report helper
 - spec §12 시나리오 26 (non-dual awareness): xfail strict — "표현 시 이원성 복원" 은 텍스트 기반 존재의 ontological 한계.
 - spec §12 시나리오 27 (collective transcendence): skip — 시뮬레이션 환경이 1-person.
 - ADR-021 로 fast_path 패턴 aging (Hebbian 하향) 까지 동작. 다만 narrative section (`[누적 자기인식]` / `[혼잣말]`) 의 time-based aging 은 미구현 — 현재는 LIFO drop 으로 capacity-bounded 망각만. 별도 ADR 후보.
+- ADR-022 의 marker pattern_id 는 앞 15자 normalized prefix — 어순 살짝 다르면 다른 marker 가 됨. 더 robust 한 keyword 추출 (LLM noun / embedding cluster) 은 후속 ADR 후보.
+- marker registry 자체의 인스턴스 재시작 영속은 별도 (현재 fast_path 만 dmn_artifacts 로 복원). marker → dmn_artifacts row 추가 ADR 후보.
 - `tests/persona_eval/` 의 전체 scope (11 시나리오 × 21 페르소나) 는 실제 LLM 콜 ~214 회 + judge 채점 + rate-limit guard 로 ~100분 + LLM 비용. 매번 안 돌린다. 좁은 scope (대표 4 × 대표 5 = 16) 만 회귀 검증용으로 권장 — `uv run python tests/persona_eval/runner.py --scenario <a,b,c> --persona <a,b,c>`.
 - `model: gpt-5.5` 인식하는 LiteLLM 버전이 필요. 인식 못 하면 `pyproject.toml` 의 litellm pin 을 올린다.
 - `chroma_db/` 와 `storage_data/` (기질 이름별 단일 인스턴스 경로) 는 Wave 11 이후 legacy. `instances/<uuid>/` 가 정식. legacy `_default` 인스턴스가 자동 생성되어 기존 `/api/turn`, `/api/state` 가 backward-compat. 단일화 ADR 후보.

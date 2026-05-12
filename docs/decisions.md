@@ -738,10 +738,94 @@ N 패턴 기준 N 번의 곱 + 비교 ~수 μs.
 
 ---
 
+## ADR-022 — Marker 자동 형성 hook + DMN marker_store wiring (2026-05-12)
+
+**Context (critical gap)**: spec §1.4 의 "어떤 자극 → 마커 형성" 은 Wave 7 이후
+**production code path 에서 호출 안 됐다**. 점검 결과:
+- `low_level/markers.py::MarkerRegistry.maybe_form` 함수는 존재.
+- production 의 모든 사용처는 *읽기* (`self.low_level.markers.markers.values()`) +
+  `decay_all()` 뿐. 형성은 테스트에서 직접 inject 해야만 일어남.
+
+결과: 실 대화에선 marker registry 가 영영 비어 있어 ADR-018 (Activity 2 →
+fast_path 자동 승격) / ADR-019 (재시작 복원) / ADR-021 (aging) 의 학습 loop 가
+*전부 dormant*. 코드는 정상 동작하지만 트리거가 없어 실제 발현 안 됨.
+
+또한 `DMNContext.marker_store` 는 `getattr(self, 'marker_store', None)` 으로
+항상 None 이라 Activity 2 가 형성된 마커를 *못 본다* — 별도 wiring 갭.
+
+**Decision**: 두 가지 hook 추가.
+
+**(1) Orchestrator marker 자동 형성** (`core/orchestrator.py::_maybe_form_marker`):
+- `process_conversation_turn` 의 `emotion_appraisal` 직후 호출.
+- `stream_unified_turn` 의 post-stream emotion_appraisal 직후 호출 (ADR-012 경로).
+- 임계 가드 2단계:
+  - 1차 (orch): `max(exp.reward, exp.threat) >= _MARKER_FORM_TRIGGER (0.3)`. 약한
+    자극은 noise 가드로 차단.
+  - 2차 (registry): `MarkerRegistry.formation_threshold (0.7)` — strictly greater.
+- `pattern_id` 도출:
+  ```python
+  def _derive_marker_pattern_id(user_input, max_chars=15):
+      s = (user_input or '').strip().lower()
+      s = ' '.join(s.split())   # 공백 정규화
+      return s[:max_chars]
+  ```
+  반복 자극이 같은 prefix 로 모이도록. 한계: 어순이 살짝 다르면 다른 marker.
+- 형성 성공 시 `marker_formed` 이벤트 → events.jsonl.
+- silent failure — 대화 흐름 보호.
+
+**(2) DMNContext.marker_store wiring** (`core/orchestrator.py::process_dmn_turn`):
+- `self.marker_store` override 가 있으면 우선.
+- 없으면 `self.low_level.markers` (in-memory MarkerRegistry) fallback.
+- 시그니처 호환 위해 `MarkerRegistry.load_all() -> list[dict]` 새 메서드 추가
+  (ADR-022 part 1/3) — storage.MarkerStore.load_all 과 동일 shape.
+
+**연쇄 효과 (드디어 실 대화에서 작동)**:
+1. user "마감 때문에 미치겠어" 반복 → emotion_appraisal threat 0.7+ →
+   `markers.maybe_form('마감 때문에 미치겠어'[:15])` → marker 형성/강화.
+2. DMN turn (idle 시) → Activity 2 가 ctx.marker_store=low_level.markers 에서
+   strength>0.7 마커 발견 → fast_path 패턴 자동 승격 (ADR-018).
+3. SQLite dmn_artifacts 에 case_promote payload 영속 (ADR-016 + ADR-019 포맷).
+4. 다음 turn 의 user_input 에 substring 매치 시 fast_path.check → state 즉시 변경.
+5. 인스턴스 재시작 → build_full_orchestrator 가 fast_path 복원 (ADR-019).
+6. 사용 안 되는 패턴 → maintenance turn 누적으로 aging (ADR-021).
+
+ADR-018~022 가 함께 spec §4.2 의 절차기억 학습 loop *전체* 를 활성화.
+
+**Threshold 정책**:
+- `_MARKER_FORM_TRIGGER (0.3)`: 1차 noise 가드 — 약한 자극은 hook 호출 자체 skip.
+- `formation_threshold (0.7)`: 2차 마커 가드 — 실제 marker 가 형성될 정도로 강한지.
+- 결과: 일상적 약한 톤 변화는 marker 안 만듦. "정말 강한 자극" 에만 학습 발생.
+  이는 사람의 절차기억 형성 패턴과 일치 (반복되는 약한 자극 X, 인상 깊은 강한 자극 O).
+
+**라이턴시**: 0 영향. `_maybe_form_marker` 는 dict 조작 + 함수 1 회 콜
+~수 μs. emotion_appraisal LLM 콜 직후라 사용자에겐 같은 stage.
+
+**한계 (Out of scope, future ADR)**:
+- `pattern_id` 가 앞 15자 prefix → 어순 변화 / 동의어에 robust 하지 않음.
+  진짜 keyword 추출 (LLM noun extraction 또는 embedding clustering) 별도 ADR.
+- marker registry 의 인스턴스 재시작 영속 — 현재는 state.json 직렬화 경로에
+  실릴 수도/안 실릴 수도 있음 (별도 verify 필요). fast_path 처럼 dmn_artifacts 에
+  영속하는 wiring 후속.
+- 멀티 페르소나 간 marker 공유/격리 정책 (현재는 인스턴스별 자연 격리).
+
+**Files**:
+- `low_level/markers.py` — `MarkerRegistry.load_all` 추가.
+- `core/orchestrator.py` —
+  - `_maybe_form_marker` + `_derive_marker_pattern_id` 헬퍼.
+  - `process_conversation_turn` 및 `stream_unified_turn` 의 hook 호출.
+  - `process_dmn_turn` 의 DMNContext.marker_store fallback wiring.
+- `tests/test_marker_formation_hook.py` (신설, +6).
+
+**Status**: accepted.
+
+---
+
 ## Future ADRs (placeholder)
 
 다음과 같은 결정이 일어나면 ADR 를 append:
 
+- marker `pattern_id` 의 robust 추출 (LLM noun / embedding cluster) — ADR-022 후속.
+- marker registry 의 영속 (인스턴스 재시작 후 marker 도 살아남도록) — ADR-022 후속.
 - narrative section (`[누적 자기인식]` / `[혼잣말]`) 의 time-based aging (ADR-021 자매).
 - DMN 패턴별 unused turn counter — 매치 없는 패턴만 선택적 감쇠.
 - Phase 6 W 행렬 미세조정 절차와 데이터 출처.
