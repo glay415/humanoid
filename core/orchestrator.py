@@ -1418,6 +1418,18 @@ class Orchestrator:
             for pid in expired_markers:
                 self._log_event_safe('marker_decayed', {'pattern_id': pid})
 
+        # ADR-021 — fast_path 패턴 감쇠 (Hebbian 하향). 사용 안 되는 절차기억
+        # 의 자연 망각. confidence < floor 이 되면 제거.
+        expired_fast_paths: list[str] = []
+        if self.low_level is not None and self.low_level.fast_path is not None:
+            try:
+                expired_fast_paths = self.low_level.fast_path.decay_all()
+            except Exception:
+                expired_fast_paths = []
+        if self.logger is not None and expired_fast_paths:
+            for trigger in expired_fast_paths:
+                self._log_event_safe('fast_path_decayed', {'trigger': trigger})
+
         # 메타 자원 회복
         if self.metacognition is not None:
             self.metacognition.recover()
@@ -1433,6 +1445,7 @@ class Orchestrator:
             'turn_number': self.turn_number,
             'low_level': low_result,
             'expired_markers': expired_markers,
+            'expired_fast_paths': expired_fast_paths,
             'meta_resource': (
                 self.metacognition.resource if self.metacognition else None
             ),
