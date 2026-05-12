@@ -279,11 +279,77 @@ DMN 의 재처리 기회는 *생성되지 않았다*.
 
 ---
 
+## ADR-015 — DMN Activity 1 retrospective LLM 재평가 + delayed episodic encoding (2026-05-12)
+
+**Context**: ADR-014 가 emotion_appraisal fallback 시점에 `dmn.unappraised_queue`
+로 자동 push 하는 hook 을 만들었지만, DMN 의 Activity 1 (`_try_unappraised_reprocess`)
+은 큐에서 *pop 만* 하고 LLM 재평가는 안 했다. 결과: 평가 실패한 입력이 큐에 들어
+가긴 해도 *재평가 + 기억 인코딩* 까진 닿지 못해 spec §2.4 "미평가 → 재처리 큐" 의
+의도가 절반만 실현됐다.
+
+**Decision**: Activity 1 안에서 retrospective `emotion_appraisal.evaluate(...)` 콜 +
+`episodic.store(source='delayed_appraisal', ...)` 까지 수행한다. 대화 latency 영향
+**없음** — spec §1.3 의 턴 우선순위 (대화 > DMN > 정비) 상 DMN 활동은 사용자
+입력 없을 때만 돈다.
+
+- **Wiring**:
+  - `DMNContext.emotion_appraisal: object | None = None` 추가. orchestrator 가
+    `process_dmn_turn` 에서 `self.emotion_appraisal` 을 그대로 전달.
+  - `ctx.emotion_appraisal` 이나 `ctx.episodic` 어느 한쪽이라도 None 이면
+    Activity 1 은 종전대로 flag-only (backward compat — Wave 7 호환 + 테스트 stub
+    호환).
+- **흐름** (Activity 1):
+  1. 큐에서 oldest 항목 pop (기존 동작).
+  2. `appraisal.evaluate(user_input, raw_core_affect)` — LLM 재평가.
+  3. 성공: `episodic.store(content=user_input, emotion_tag={v,a,labels}, source='delayed_appraisal', importance=|v|+a, turn=ctx.turn)` 로 delayed encoding.
+  4. LLM 실패: 항목 *drop* (재큐잉 안 함). 무한 재시도 방지.
+  5. 인코딩 실패: 항목 drop + sub-error 보고.
+  6. SnapshotManager 가 있으면 stage_write + commit (다른 활동과 동일 패턴).
+- **`source='delayed_appraisal'`**: `storage.memory_store.SOURCE_PRIORITY` 에서
+  `'experience'` 와 동일한 4 우선순위. 시간만 늦었지 실 체험이므로 인출 시 동등
+  취급. 별도 source 값으로 둔 이유는 분석/디버그 시 retrospective 인지 구분 가능.
+
+**Payload shape** (delayed episodic record):
+```python
+{
+    'content': str,           # 원 user_input
+    'emotion_tag': {
+        'valence': float,     # retrospective LLM 결과
+        'arousal': float,
+        'labels': list[str],
+    },
+    'source': 'delayed_appraisal',
+    'importance': float,      # |valence| + arousal, [0,1] clamp
+    'turn': int,              # DMN 턴 번호 (ctx.turn — original turn_number 가 아니다)
+}
+```
+
+**Out of scope (future ADR)**:
+- DMN cycle 내 **delayed encoding 의 timestamp 가 ctx.turn 인 게 맞나** — 인출 시
+  시간 순서가 자연스러운지 검증 필요. 일단은 발생 시점(DMN 턴) 기준.
+- Mood-congruent retrieval bias 가 delayed_appraisal source 에 어떻게 작용하는지
+  empirical 관찰 — 별도 회귀 시나리오 (persona_eval) 후보.
+- `_UNAPPRAISED_QUEUE_MAX=32` (ADR-014) 와 retrospective 처리 속도의 균형 (큐가
+  DMN 사이클 1회당 1 건만 소진되므로 폭주 시 처리 누락).
+
+**Files**:
+- `high_level/dmn.py` — `DMNContext.emotion_appraisal` 필드 + `_try_unappraised_reprocess` 본체 (LLM 콜 + delayed encoding + snapshot stage).
+- `core/orchestrator.py` — `process_dmn_turn` 의 DMNContext 구성에서 `emotion_appraisal=self.emotion_appraisal` + `turn=int(self.turn_number)` 추가.
+- `storage/memory_store.py` — `SOURCE_PRIORITY['delayed_appraisal'] = 4` 추가.
+- `tests/test_dmn_retrospective_reprocess.py` (신설) — 7 tests: 정상 / appraisal-None / episodic-None / LLM 실패 / 큐 비어있음 / 인코딩 실패 / FIFO 순서.
+- `tests/test_phase5_multiturn_e2e.py:617` — 응답 큐를 7 슬롯으로 확장 (conv 5 콜 + DMN 2 콜).
+
+**Status**: accepted.
+
+---
+
 ## Future ADRs (placeholder)
 
 다음과 같은 결정이 일어나면 ADR 를 append:
 
-- DMN.unappraised_queue 의 retrospective LLM 처리 + delayed encoding 정책 (ADR-014 후속).
+- DMN Activity 2 (사례 승격) / Activity 3 (지식 내면화) / Activity 4 (사색) 의
+  `commit_sink` 영속화 hook — 현재는 no-op default 라 LLM 산출물 (insight / rule /
+  delta / reflection) 이 세션 끝에 사라진다.
 - Phase 6 W 행렬 미세조정 절차와 데이터 출처.
 - 멀티 인스턴스 동시 turn 의 LLM rate-limit 정책.
 - prompts/ 의 다국어 분기 (한국어 → 영어 / 일어 등) 도입.
