@@ -45,6 +45,38 @@ class FastPath:
         self.patterns.append(pattern)
         return True
 
+    def decay_all(self, factor: float = 0.97, floor: float = 0.4) -> list[str]:
+        """ADR-021 — Hebbian 하향 — 정비 사이클마다 모든 패턴 confidence × factor.
+
+        ``confidence < floor`` 이 되면 그 패턴은 *제거* (사용되지 않는 절차기억
+        의 자연 망각). 같은 패턴이 다음 DMN 사이클에서 다시 승격되면 자연
+        강화로 복원될 수 있음 (register_or_update 의 max-confidence 정책).
+
+        Args:
+            factor: 매 호출당 곱할 비율. 기본 0.97 → 약 23 maintenance turn 후 half.
+            floor: 이 미만으로 떨어지면 제거. 기본 0.4 — `confidence_threshold`(0.6)
+                보다 낮게 두어 *발화는 멈춘 채로 일정 기간 잠복* 한 뒤 망각.
+
+        Returns:
+            제거된 패턴의 trigger 리스트. ``markers.decay_all`` 의 시그니처 미러.
+        """
+        if not self.patterns:
+            return []
+        expired: list[str] = []
+        kept: list[FastPathPattern] = []
+        for p in self.patterns:
+            new_conf = max(0.0, float(p.confidence) * float(factor))
+            if new_conf < float(floor):
+                expired.append(p.trigger)
+                continue
+            kept.append(FastPathPattern(
+                trigger=p.trigger,
+                state_changes=dict(p.state_changes),
+                confidence=new_conf,
+            ))
+        self.patterns = kept
+        return expired
+
     def check(self, raw_input: str) -> dict[str, float] | None:
         """입력 텍스트에 대해 패턴 매칭. 매칭 시 state_changes 반환."""
         for pattern in self.patterns:
