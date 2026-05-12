@@ -101,6 +101,22 @@ class MarkerRegistry:
     def all_markers(self) -> list[Marker]:
         return list(self.markers.values())
 
+    def load_all(self) -> list[dict]:
+        """ADR-022 — DMN Activity 2 (case_promote) 가 ctx.marker_store.load_all
+        시그니처로 마커들을 읽는다. storage.MarkerStore.load_all 과 동일 shape
+        (list of dict with pattern_id / valence / strength / age) 로 반환해
+        in-memory registry 가 영속 store 와 듀얼 backend 로 동작 가능.
+        """
+        return [
+            {
+                'pattern_id': m.pattern_id,
+                'valence': float(m.valence),
+                'strength': float(m.strength),
+                'age': int(m.age),
+            }
+            for m in self.markers.values()
+        ]
+
     def remove(self, pattern_id: str) -> None:
         """spec §8.2: 마커 직접 삭제는 spec 위반 — 항상 SpecViolation.
 
