@@ -219,6 +219,73 @@ class DMNArtifactStore:
             })
         return out
 
+    def latest_markers(self, *, limit: int = 128) -> list[dict]:
+        """ADR-028 — 재시작 시 marker registry 복원에 사용.
+
+        ``activity='marker'`` 인 row 중 같은 ``key`` 의 가장 최신 것만 (id MAX)
+        1건씩 반환. fast_path 복원 (latest_case_promotes) 과 동일 패턴.
+
+        payload 는 ``write_marker_snapshot`` 이 적재한 ``{pattern_id, valence,
+        strength, age}`` 구조 — MarkerRegistry 가 그대로 복원 가능.
+        """
+        try:
+            cur = self._conn.execute(
+                "SELECT id, activity, key, payload_json, turn, created_at "
+                "FROM dmn_artifacts "
+                "WHERE activity = 'marker' "
+                "AND id IN ("
+                "    SELECT MAX(id) FROM dmn_artifacts "
+                "    WHERE activity = 'marker' "
+                "    GROUP BY key"
+                ") "
+                "ORDER BY id DESC LIMIT ?",
+                (int(limit),),
+            )
+            rows = cur.fetchall()
+        except Exception:
+            return []
+        out: list[dict] = []
+        for r in rows:
+            try:
+                payload = json.loads(r[3])
+            except (json.JSONDecodeError, TypeError):
+                payload = {'_raw': r[3]}
+            out.append({
+                'id': int(r[0]),
+                'activity': r[1],
+                'key': r[2],
+                'payload': payload,
+                'turn': int(r[4]),
+                'created_at': float(r[5]),
+            })
+        return out
+
+    def write_marker_snapshot(
+        self,
+        pattern_id: str,
+        valence: float,
+        strength: float,
+        age: int,
+        *,
+        turn: int = 0,
+    ) -> None:
+        """ADR-028 — marker 형성/재강화 시 호출되는 영속 hook.
+
+        write() wrapper — `marker:{pattern_id}` 키 + 정형 payload.
+        """
+        if not pattern_id:
+            return
+        self.write(
+            f'marker:{pattern_id}',
+            {
+                'pattern_id': pattern_id,
+                'valence': float(valence),
+                'strength': float(strength),
+                'age': int(age),
+            },
+            turn=turn,
+        )
+
     def count(self, *, activity: str | None = None) -> int:
         """전체 또는 특정 activity 의 누적 산출물 카운트."""
         try:
