@@ -1737,6 +1737,19 @@ class Orchestrator:
                     'valence': float(formed.valence),
                     'strength': float(formed.strength),
                 })
+                # ADR-028 — 형성/재강화된 marker 를 dmn_artifacts 에 영속화
+                # → 인스턴스 재시작 후 복원 가능. best-effort.
+                if self.dmn_artifacts is not None:
+                    try:
+                        self.dmn_artifacts.write_marker_snapshot(
+                            pattern_id=pid,
+                            valence=float(formed.valence),
+                            strength=float(formed.strength),
+                            age=int(getattr(formed, 'age', 0)),
+                            turn=int(self.turn_number),
+                        )
+                    except Exception:
+                        pass  # silent
         except Exception:
             return  # silent
 

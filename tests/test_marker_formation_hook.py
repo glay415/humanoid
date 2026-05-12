@@ -287,6 +287,42 @@ async def test_repeated_stimulus_reinforces_same_marker(tmp_path, mock_llm):
 # ---------------------------------------------------------------------------
 
 
+async def test_marker_formation_persists_to_dmn_artifacts(tmp_path, mock_llm):
+    """ADR-028 — 형성된 marker 가 dmn_artifacts.db 에도 자동 적재되는지.
+
+    full orchestrator build (storage_root 있어야 dmn_artifacts 활성) 가 필요.
+    여기서는 _make_orch 가 dmn_artifacts 를 안 wiring 하므로 직접 attach 후 검증.
+    """
+    from storage.dmn_artifacts import DMNArtifactStore
+    orch = _make_orch(tmp_path, mock_llm)
+    try:
+        store = DMNArtifactStore(tmp_path / 'dmn_artifacts.db')
+        orch.dmn_artifacts = store
+
+        mock_llm.responses = [
+            json.dumps({
+                "valence": 0.7,
+                "arousal": 0.5,
+                "preliminary_labels": ["기쁨"],
+                "experience_dimensions": {"reward": 0.85, "threat": 0.0, "novelty": 0.2},
+            }),
+            _candidates_payload(),
+            _final_payload(),
+            _tone_payload(),
+        ]
+        await orch.process_conversation_turn('합격했어 너무 기뻐')
+
+        # dmn_artifacts.db 에 marker snapshot row 1 건 있어야.
+        rows = store.latest_markers()
+        assert len(rows) == 1
+        p = rows[0]['payload']
+        assert p['pattern_id'].startswith('합격')
+        assert p['valence'] > 0
+        store.close()
+    finally:
+        _close_chroma(orch)
+
+
 async def test_dmn_activity_2_sees_in_memory_markers(tmp_path, mock_llm):
     """marker_store 가 None 일 때 자동으로 low_level.markers 를 fallback 으로 쓴다."""
     orch = _make_orch(tmp_path, mock_llm)

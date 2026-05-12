@@ -282,6 +282,32 @@ def build_full_orchestrator(
             # best-effort — 복원 실패가 새 인스턴스 빌드를 막지 않게.
             pass
 
+    # ADR-028 — marker registry 복원. ADR-022 의 marker 형성 hook 이 매 turn
+    # snapshot 영속하므로 재시작 시 그 latest 상태 그대로 inject.
+    if low_level.markers is not None:
+        try:
+            from low_level.markers import Marker as _Marker
+            rows = dmn_artifacts.latest_markers()
+            restored_markers = 0
+            for r in rows:
+                payload = r.get('payload') or {}
+                pid = str(payload.get('pattern_id', '')).strip()
+                if not pid:
+                    continue
+                low_level.markers.markers[pid] = _Marker(
+                    pattern_id=pid,
+                    valence=float(payload.get('valence', 0.0)),
+                    strength=float(payload.get('strength', 0.0)),
+                    age=int(payload.get('age', 0)),
+                )
+                restored_markers += 1
+            if restored_markers > 0:
+                orch._log_event_safe('markers_restored', {
+                    'count': restored_markers,
+                })
+        except Exception:
+            pass
+
     # LLM 콜 단위 latency 도 events.jsonl 에 흘려보낸다. logger 가 set_logger 로
     # 나중에 붙더라도 _log_event_safe 가 None 체크하므로 안전.
     def _llm_event_sink(payload: dict) -> None:
