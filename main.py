@@ -49,9 +49,21 @@ def build_low_level(config_path: Path | str | None = None) -> LowLevelPipeline:
         drive_gamma=cfg.get('drive_gamma', 0.05),
     )
     drives = Drives(drive_ratios=cfg['drive_ratios'])
+    # ADR-024 — yaml 의 marker_inertia (0~100 scale, 일반적으로 40~50) 를
+    # reinforcement_weight (0~1) 로 변환. weight = clamp(1 - inertia/100, 0.05, 0.95).
+    # inertia=50 → weight=0.5 (default 0.3 보다 응답성 ↑), inertia=70 → 0.3 (legacy 동작).
+    # yaml 에 marker_inertia 가 없으면 None → Marker.reinforce default 0.3 그대로.
+    _marker_inertia = cfg.get('marker_inertia')
+    _reinforcement_weight: float | None = None
+    if _marker_inertia is not None:
+        try:
+            _reinforcement_weight = max(0.05, min(0.95, 1.0 - float(_marker_inertia) / 100.0))
+        except (TypeError, ValueError):
+            _reinforcement_weight = None
     markers = MarkerRegistry(
         formation_threshold=cfg.get('marker_formation_threshold', 0.7),
         decay_rate=cfg.get('marker_decay_rate', 0.01),
+        reinforcement_weight=_reinforcement_weight,
     )
     fast_path = FastPath(
         confidence_threshold=cfg.get('fast_path_confidence_threshold', 0.6),

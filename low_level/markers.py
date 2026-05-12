@@ -57,10 +57,16 @@ class MarkerRegistry:
         self,
         formation_threshold: float = 0.7,
         decay_rate: float = 0.01,
+        # ADR-024 — 페르소나의 marker_inertia 가 reinforce 의 가중치에 영향.
+        # 높은 inertia → 새 경험이 기존 마커를 덜 갱신 (보수적 페르소나).
+        # 낮은 inertia → 새 경험에 빠르게 반응 (변덕스러운 페르소나).
+        # None 이면 Marker.reinforce 의 default weight=0.3 사용 (기존 동작).
+        reinforcement_weight: float | None = None,
     ):
         self.markers: dict[str, Marker] = {}
         self.formation_threshold = formation_threshold
         self.decay_rate = decay_rate
+        self.reinforcement_weight = reinforcement_weight
 
     def maybe_form(
         self,
@@ -76,7 +82,15 @@ class MarkerRegistry:
         strength = max(reward, threat)
 
         if pattern_id in self.markers:
-            self.markers[pattern_id].reinforce(valence, strength)
+            # ADR-024 — reinforcement_weight 가 None 이면 Marker.reinforce 의
+            # default 0.3 사용 (기존 동작). yaml 의 marker_inertia 가 wiring 되면
+            # 페르소나별 다른 가중치 적용.
+            if self.reinforcement_weight is not None:
+                self.markers[pattern_id].reinforce(
+                    valence, strength, weight=float(self.reinforcement_weight),
+                )
+            else:
+                self.markers[pattern_id].reinforce(valence, strength)
         else:
             self.markers[pattern_id] = Marker(
                 pattern_id=pattern_id,
