@@ -28,7 +28,12 @@ _MAX_DELTAS = 5
 class SelfModel:
     """자기 모델 관리."""
 
-    def __init__(self):
+    def __init__(self, narrative_pressure: float = 0.5):
+        # ADR-030: narrative_pressure (0~1) 가 [누적 자기인식] / [혼잣말] section
+        # 의 cap 을 결정. default 0.5 → max_lines=5 (기존 동작 보존). 1.0 → 10,
+        # 0.0 → 1 (최소). 높은 pressure 페르소나는 self_narrative 가 더 풍부하게
+        # 누적되어 unified_response prompt 에 더 큰 영향.
+        self._narrative_pressure = max(0.0, min(1.0, float(narrative_pressure)))
         self.data: dict = {
             'narrative': DEFAULT_NARRATIVE,
             'goals': [],
@@ -36,6 +41,12 @@ class SelfModel:
             'confidence': 0.5,
             'relationship_stage': None,
         }
+
+    def _effective_max_lines(self, default: int = _MAX_DELTAS) -> int:
+        """ADR-030 — narrative_pressure 를 section cap 으로 변환.
+        pressure=0.5 (default) → cap 5. pressure=1.0 → cap 10. pressure=0.0 → cap 1.
+        """
+        return max(1, int(round(default * 2.0 * self._narrative_pressure)))
 
     @property
     def confidence(self) -> float:
@@ -116,10 +127,11 @@ class SelfModel:
         # 새 line 최상단, dedupe, cap.
         lines_out: list[str] = [first]
         for existing_line in existing_lines:
-            if existing_line and existing_line != first and existing_line not in lines_out:
-                lines_out.append(existing_line)
+            # cap 체크는 append *전* — 그래야 cap=1 일 때도 정확히 1 라인 유지.
             if len(lines_out) >= max_lines:
                 break
+            if existing_line and existing_line != first and existing_line not in lines_out:
+                lines_out.append(existing_line)
 
         rebuilt_section = (
             section_header + '\n' + '\n'.join(f'- {x}' for x in lines_out)
@@ -132,19 +144,25 @@ class SelfModel:
             parts.append(tail_after_section)
         self.data['narrative'] = '\n\n'.join(parts)
 
-    def add_internalized_delta(self, delta: str, *, max_deltas: int = _MAX_DELTAS) -> None:
+    def add_internalized_delta(self, delta: str, *, max_deltas: int | None = None) -> None:
         """DMN Activity 3 (knowledge_internalize) 가 만든 narrative_delta 누적.
 
         ``[누적 자기인식 (DMN)]`` section 에 한 줄씩 쌓는다. 자세한 정책은
         ``_add_to_section`` doc 참조.
-        """
-        self._add_to_section(_INTERNALIZED_HEADER, delta, max_lines=max_deltas)
 
-    def add_contemplation(self, reflection: str, *, max_lines: int = _MAX_DELTAS) -> None:
+        ADR-030: max_deltas 가 None 이면 ``_narrative_pressure`` 기반 cap 사용.
+        """
+        cap = max_deltas if max_deltas is not None else self._effective_max_lines()
+        self._add_to_section(_INTERNALIZED_HEADER, delta, max_lines=cap)
+
+    def add_contemplation(self, reflection: str, *, max_lines: int | None = None) -> None:
         """ADR-020 — DMN Activity 4 (contemplate) 가 만든 사색 한 줄을 누적.
 
         ``[혼잣말 (DMN 사색)]`` 별도 section 에 한 줄씩. Activity 3 의 외부 자극
         기반 자기이해와 결이 다르므로 (드라이브 결핍 자유 연상), 의도적으로
         섹션 분리. 같은 누적 정책 (최신 위, dedupe, max_lines cap, oldest drop).
+
+        ADR-030: max_lines 가 None 이면 ``_narrative_pressure`` 기반 cap 사용.
         """
-        self._add_to_section(_CONTEMPLATION_HEADER, reflection, max_lines=max_lines)
+        cap = max_lines if max_lines is not None else self._effective_max_lines()
+        self._add_to_section(_CONTEMPLATION_HEADER, reflection, max_lines=cap)
