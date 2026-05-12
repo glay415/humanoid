@@ -556,6 +556,18 @@ class DMN:
                 except Exception:
                     pass
 
+        # ADR-017 — delta 를 실제 self_model.narrative 에 누적 적용.
+        # 본 wiring 으로 다음 턴의 unified_response prompt 에 변화된 self_narrative
+        # 가 자동 반영된다. self_model 이 None 이면 no-op (test stub 호환).
+        narrative_applied = False
+        try:
+            if ctx.self_model is not None and hasattr(ctx.self_model, 'add_internalized_delta'):
+                ctx.self_model.add_internalized_delta(delta)
+                narrative_applied = True
+        except Exception:
+            # 적용 실패도 silent — DMN 사이클 흐름 보호. delta 자체는 이미 영속.
+            pass
+
         return DMNCycleResult(
             activity='knowledge_internalize',
             activity_type=int(DMNActivityType.KNOWLEDGE_INTERNALIZE),
@@ -563,6 +575,7 @@ class DMN:
             output={
                 'memory_id': mem_id,
                 'narrative_delta': (delta or '').strip(),
+                'narrative_applied': narrative_applied,
             },
             committed=committed,
         )
