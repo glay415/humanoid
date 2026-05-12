@@ -2,10 +2,10 @@
 
 > Living document. Wave 머지 / 중요 결정 / baseline 변동 시마다 갱신한다. 규칙은 [`CLAUDE.md`](../CLAUDE.md) 참조.
 
-## Current baseline (as of 2026-05-12, ADR-013/014/015/016/017/018/019 — emergent persona + DMN learning loop + fast_path 영구화)
+## Current baseline (as of 2026-05-12, ADR-013~021 — emergent persona + DMN learning loop + Hebbian 양방향)
 
-- Tests: **784 passed + 2 skipped + 1 xfailed** (`pytest tests/ -q --ignore=tests/persona_eval --ignore=tests/e2e_trends`, ~4.5min)
-- Branch: `main` past v0.3.0 (latest ADR-019 commits)
+- Tests: **803 passed + 2 skipped + 1 xfailed** (`pytest tests/ -q --ignore=tests/persona_eval --ignore=tests/e2e_trends`, ~4.9min)
+- Branch: `main` past v0.3.0 (latest ADR-021 commits)
 - Release: `release` branch at `v0.3.0` (Phase 3 / §8 enforcement / analyze.py / logs UI tab).
 - LLM tier: `small` / `large` / `dmn` 모두 `gpt-5.5`. `reasoning_effort` per-tier (small=low, large=medium, dmn=low). 콜별 override 가능 — ADR-011. Unified single-call stream — ADR-012.
 - persona_eval (`tests/persona_eval/`) scoped regression: **16/16 PASS** on 4 시나리오 × 5 페르소나 (실 LLM, 별도 비용 — pytest 에 포함 X).
@@ -34,6 +34,8 @@ Phase 단위는 spec §13 implementation roadmap 기준. Wave 는 실제 작업 
 - [x] DMN Activity 3 narrative_delta → self_model.narrative 적용 (ADR-017, 2026-05-12). LLM 이 생성한 한 줄 통찰이 `self_model.narrative` 끝의 `[누적 자기인식 (DMN)]` section 에 max 5 라인 cap 으로 누적 (최신이 위, oldest drop). 다음 turn 의 `unified_response` prompt 의 `{self_narrative}` 변수 자동 반영 → 페르소나가 시간 흘러갈수록 자기 진술이 풍부해짐. +11 tests (8 unit + 3 integration).
 - [x] DMN Activity 2 case_promote → fast_path 자동 등록 (ADR-018, 2026-05-12). 강한 marker (strength > 0.7) 의 사례를 실제 `FastPathPattern` 으로 승격 — trigger=pattern_id, state_changes 는 valence sign 기반 (val≥0 접근 bonding+comfort, val<0 회피 stress+inhibition), confidence=strength. 같은 trigger 의 중복 승격은 dedupe + max-confidence. 다음 turn 의 pipeline.run 첫 단계 fast_path.check 에서 즉시 매치 → cognitive LLM 추론 *앞에서* 몸이 반응. spec §4.2 절차기억 동작 활성. +7 tests.
 - [x] 인스턴스 재시작 시 fast_path 패턴 복원 (ADR-019, 2026-05-12). Activity 2 의 stage_write payload 에 `state_changes` + `confidence` 포함. `DMNArtifactStore.latest_case_promotes` 로 가장 최근 row 만 query. `main.build_full_orchestrator` 가 빌드 직후 register_or_update 일괄 호출. 이전 세션의 학습된 자동 경로가 backend 재시작 후에도 살아남 — spec §4.2 절차기억 영구성. +8 tests (5 integration + 3 unit). 구 포맷 row 호환 (state_changes 없으면 skip).
+- [x] DMN Activity 4 contemplate → self_model `[혼잣말]` section (ADR-020, 2026-05-12). Activity 3 의 [누적 자기인식] 과 별도 섹션. `SelfModel._add_to_section` generic helper + 두 named 메서드 (`add_internalized_delta` / `add_contemplation`). 한 section 의 갱신이 다른 section 의 라인을 건드리지 않음 (독립 cap=5, dedupe, LIFO drop). +9 tests (6 unit + 3 integration).
+- [x] fast_path 패턴 aging — Hebbian 하향 (ADR-021, 2026-05-12). `FastPath.decay_all(factor=0.97, floor=0.4)` — maintenance turn 마다 모든 패턴 confidence 감쇠, floor 미만 제거. 사용 안 되는 절차기억의 자연 망각 + 같은 trigger 가 reinforced 되면 register_or_update 의 max 정책으로 회복. Hebbian 학습의 *양방향* (상향 + 하향) 완성. +10 tests (6 unit + 4 integration).
 
 ## Wave history
 
@@ -68,6 +70,7 @@ Phase 단위는 spec §13 implementation roadmap 기준. Wave 는 실제 작업 
 - 2026-05-12 DMN Activity 3 narrative apply (ADR-017): **769 + 2 skip + 1 xfail** (+8 신규 `tests/test_self_model_internalized_delta.py` + 3 신규 `tests/test_dmn_activity3_narrative_apply.py`).
 - 2026-05-12 DMN Activity 2 fast_path promotion (ADR-018): **776 + 2 skip + 1 xfail** (+7 신규 `tests/test_dmn_activity2_fast_path_promote.py`).
 - 2026-05-12 fast_path restart restore (ADR-019): **784 + 2 skip + 1 xfail** (+5 신규 `tests/test_dmn_fast_path_restore.py` + 3 신규 단위 `tests/test_dmn_artifacts.py`).
+- 2026-05-12 ADR-020 (Activity 4 contemplation apply) + ADR-021 (fast_path aging): **803 + 2 skip + 1 xfail** (+6 `tests/test_self_model_contemplation.py` + 3 `tests/test_dmn_activity4_contemplation_apply.py` + 6 `tests/test_fast_path_aging.py` + 4 `tests/test_maintenance_fast_path_decay.py`).
 
 ## Active work
 
@@ -85,8 +88,8 @@ Phase 단위는 spec §13 implementation roadmap 기준. Wave 는 실제 작업 
 
 자연스러운 다음 작업 후보:
 - Phase 6 — 실 대화 데이터 W 행렬 미세조정 (sensitivity 결과 활용).
-- DMN 산출물 *aging* — 시간 흐를수록 fast_path confidence / `[누적 자기인식]` section 자연 약화 (Hebbian 학습 보완; ADR-019 의 자연스러운 후속).
-- Activity 4 (사색) reflection 의 self_model 영향 검토 — 별도 섹션 (`[혼잣말]`) 분리 설계 (ADR-017 자매).
+- narrative section (`[누적 자기인식]` / `[혼잣말]`) 의 time-based aging — 현재는 LIFO drop 만 (ADR-021 자매).
+- DMN 패턴별 unused turn counter — 매치 없는 패턴만 선택적 감쇠 (ADR-021 후속).
 - 시나리오 #25 (나-너) 부분 통과를 full pass 로 확장.
 - Persona별 prompt 변형 (현재는 baseline / drive_ratios 만 jitter; 톤 가이드도 personalize 검토).
 - 멀티 인스턴스 동시 turn 처리 시 LLM 비용/레이트리밋 정책.
@@ -120,7 +123,7 @@ scripts/        sensitivity report helper
 - 5 worktree directories may persist on disk after `git worktree remove` (Windows file locks). Cleanup manually or skip — git records say cleaned.
 - spec §12 시나리오 26 (non-dual awareness): xfail strict — "표현 시 이원성 복원" 은 텍스트 기반 존재의 ontological 한계.
 - spec §12 시나리오 27 (collective transcendence): skip — 시뮬레이션 환경이 1-person.
-- ADR-019 로 fast_path 패턴이 재시작 후에도 복원된다. 다만 Pattern 의 *aging* (시간 흐를수록 자연 약화) 은 미구현 — 현재는 max-confidence 정책이라 한 번 강했던 패턴이 영구히 강함. Hebbian 학습의 하향 보완은 별도 ADR 후보.
+- ADR-021 로 fast_path 패턴 aging (Hebbian 하향) 까지 동작. 다만 narrative section (`[누적 자기인식]` / `[혼잣말]`) 의 time-based aging 은 미구현 — 현재는 LIFO drop 으로 capacity-bounded 망각만. 별도 ADR 후보.
 - `tests/persona_eval/` 의 전체 scope (11 시나리오 × 21 페르소나) 는 실제 LLM 콜 ~214 회 + judge 채점 + rate-limit guard 로 ~100분 + LLM 비용. 매번 안 돌린다. 좁은 scope (대표 4 × 대표 5 = 16) 만 회귀 검증용으로 권장 — `uv run python tests/persona_eval/runner.py --scenario <a,b,c> --persona <a,b,c>`.
 - `model: gpt-5.5` 인식하는 LiteLLM 버전이 필요. 인식 못 하면 `pyproject.toml` 의 litellm pin 을 올린다.
 - `chroma_db/` 와 `storage_data/` (기질 이름별 단일 인스턴스 경로) 는 Wave 11 이후 legacy. `instances/<uuid>/` 가 정식. legacy `_default` 인스턴스가 자동 생성되어 기존 `/api/turn`, `/api/state` 가 backward-compat. 단일화 ADR 후보.

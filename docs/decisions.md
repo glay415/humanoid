@@ -623,14 +623,127 @@ ADR-016 의 `dmn_artifacts.db` 에 `case_promote` row 들이 영속되긴 했지
 
 ---
 
+## ADR-020 — DMN Activity 4 reflection → self_model `[혼잣말]` section (2026-05-12)
+
+**Context**: ADR-017 로 Activity 3 (`knowledge_internalize`) 의 `narrative_delta`
+가 `self_model.narrative` 에 누적 적용된다. 그러나 Activity 4 (`contemplate`) 의
+reflection 은 ADR-016 으로 영속만 되고 self_model 에는 반영 안 되는 비대칭. 또한
+두 활동의 *결* 이 다름:
+- Activity 3: 외부 자극으로 *학습* 한 자기이해. "재즈에 깊이 끌린다는 걸 알게 됐다".
+- Activity 4: 드라이브 결핍 기반 *자유 연상*. "오늘은 조용히 있고 싶다".
+
+같은 section 에 섞으면 톤이 흐려져 unified_response prompt 의 `{self_narrative}`
+에 잡음으로 들어간다.
+
+**Decision**: 별도 section `[혼잣말 (DMN 사색)]` 추가. `SelfModel._add_to_section`
+generic helper 로 누적 정책 (cap 5, dedupe, 최신 위, LIFO drop) 을 공유하되 두
+section 은 *독립적으로* 관리. 한 section 의 갱신이 다른 section 의 라인을
+건드리지 않음 + base narrative + 다른 section 들도 모두 보존.
+
+- **API** (`storage/self_model.py`):
+  ```python
+  def add_internalized_delta(self, delta, *, max_deltas=5)  # ADR-017
+  def add_contemplation(self, reflection, *, max_lines=5)   # ADR-020
+  ```
+  내부적으로 `_add_to_section(section_header, line, *, max_lines)` 공유.
+- **Wiring** (`high_level/dmn.py::_try_contemplate`):
+  - stage_write + commit (ADR-016 영속) 직후 `ctx.self_model.add_contemplation(reflection)`
+    silent 호출.
+  - DMNCycleResult.output 에 `contemplation_applied: bool` 노출.
+  - self_model None / 메서드 부재 시 skip (backward compat).
+
+**Section parsing 메모** (헬퍼 구현 디테일):
+- 헤더 직후 빈 줄은 단순 separator 로 간주 (section 종료 X).
+- 첫 bullet 이후의 빈 줄은 section 종료 → 뒷줄은 tail 로 보존.
+- 다른 section header 등장 시 tail.
+- 이 정책으로 한 narrative 안에 여러 헤더 section 이 안전하게 공존.
+
+**라이턴시**: 0 영향 (self_model dict 갱신 + 문자열 조작 ~수십 μs).
+
+**Out of scope (future ADR)**:
+- 두 section 의 *aging* — 시간 경과 자연 약화 (현재는 LIFO drop 만; ADR-021 의
+  fast_path aging 의 자매 작업).
+
+**Files**:
+- `storage/self_model.py` — `_add_to_section` generic helper + `add_contemplation`.
+- `high_level/dmn.py` — `_try_contemplate` 에 `add_contemplation` 호출.
+- `tests/test_self_model_contemplation.py` (신설, +6) — section 분리 / 독립 cap.
+- `tests/test_dmn_activity4_contemplation_apply.py` (신설, +3) — integration.
+- 기존 `tests/test_self_model_internalized_delta.py` (8) 모두 보존 (refactor 검증).
+
+**Status**: accepted.
+
+---
+
+## ADR-021 — fast_path 패턴 aging (Hebbian 하향, 2026-05-12)
+
+**Context**: ADR-018 로 DMN Activity 2 가 marker 사례를 fast_path 패턴으로
+자동 승격하고, ADR-019 로 재시작 후에도 영속 복원된다. 그러나 `register_or_update`
+의 max-confidence 정책 때문에 한 번 강했던 패턴이 *영구히 강한 상태로* 누적
+— 더 이상 reinforce 되지 않아도 confidence 가 떨어지지 않는다.
+
+이는 Hebbian 학습 (use it or lose it) 의 *하향* 보완이 빠진 형태. spec §4.2
+의 "사용 안 되는 절차기억은 망각" 의도와 부합 X. 인스턴스가 오래 돌수록
+stale fast_path 패턴이 쌓여 fast_path.check 가 의도치 않게 매치되는 위험.
+
+**Decision**: maintenance turn (spec §9) 에서 fast_path 전체 confidence 를
+factor 만큼 감쇠. floor 미만으로 떨어지면 제거 (자연 망각). 같은 trigger 가
+다시 reinforced 되면 register_or_update 의 max 정책으로 회복.
+
+- **API** (`low_level/fast_path.py`):
+  ```python
+  def decay_all(self, factor: float = 0.97, floor: float = 0.4) -> list[str]
+  ```
+  반환은 제거된 trigger 리스트 (markers.decay_all 시그니처 미러).
+- **기본값 근거**:
+  - `factor=0.97` — ~23 maintenance turn 후 half. 너무 빠르면 학습이 못 굳음,
+    너무 느리면 stale 안 사라짐. 가정: 인스턴스가 적정한 maintenance 주기를 가짐.
+  - `floor=0.4` — fast_path.check 의 confidence_threshold (0.6) 보다 낮음.
+    의도: 발화는 멈춘 *잠복* 상태로 한참 유지된 뒤 망각. 그 사이 reinforced
+    되면 패턴 부활.
+- **Wiring** (`core/orchestrator.py::process_maintenance_turn`):
+  - 기존 `markers.decay_all` 직후 `fast_path.decay_all` 호출.
+  - expired 된 trigger 는 events.jsonl 의 `fast_path_decayed` 이벤트.
+  - 반환 dict 에 `expired_fast_paths` 노출 (`expired_markers` 와 짝).
+  - try/except silent — 감쇠 실패가 maintenance 흐름 막지 않음.
+
+**Lifecycle 흐름 통합** (ADR-018/019/021):
+1. user 가 자극 반복 → marker 강화.
+2. DMN Activity 2 → fast_path register (ADR-018) + dmn_artifacts 영속 (ADR-019).
+3. 다음 turn 의 fast_path.check 매치 → cognitive 추론 전 즉시 상태 변경.
+4. 인스턴스 재시작 → build_full_orchestrator 가 dmn_artifacts 에서 fast_path 복원 (ADR-019).
+5. 사용 안 되는 패턴 → maintenance turn 누적으로 confidence 감쇠 (ADR-021).
+6. floor 미만 → 망각. 같은 자극 재발 시 register_or_update 가 max 로 회복.
+
+이로써 Hebbian 학습의 *양방향* (상향 reinforcement + 하향 망각) 이 모두 동작.
+
+**라이턴시**: 대화 응답 0 영향. maintenance turn 안에서만 decay_all 호출.
+N 패턴 기준 N 번의 곱 + 비교 ~수 μs.
+
+**Out of scope (future ADR)**:
+- narrative section (`[누적 자기인식]` / `[혼잣말]`) 의 aging — 현재는 LIFO drop
+  으로 *capacity-bounded* 망각만. time-based decay 는 별도 ADR 후보.
+- 패턴별 *unused turn counter* (마지막으로 매치된 시점 기록) → 매치 없는 패턴만
+  선택적으로 감쇠. 현재는 전체 일괄.
+- factor / floor 의 페르소나별 차등 — temperament 와 결합 (예: 보수적 페르소나
+  는 망각 느리게).
+
+**Files**:
+- `low_level/fast_path.py` — `decay_all(factor, floor) -> list[str]`.
+- `core/orchestrator.py::process_maintenance_turn` — decay_all 호출 + 이벤트 + 반환.
+- `tests/test_fast_path_aging.py` (신설, +6) — unit.
+- `tests/test_maintenance_fast_path_decay.py` (신설, +4) — integration.
+
+**Status**: accepted.
+
+---
+
 ## Future ADRs (placeholder)
 
 다음과 같은 결정이 일어나면 ADR 를 append:
 
-- Activity 4 (사색) reflection 의 self_model 영향 검토 — 별도 섹션 (`[혼잣말]`)
-  으로 분리 설계 (ADR-017 자매).
-- DMN 산출물 *aging* — 시간 흐를수록 fast_path confidence / narrative section
-  의 자연 약화 (Hebbian 학습 보완, ADR-019 후속).
+- narrative section (`[누적 자기인식]` / `[혼잣말]`) 의 time-based aging (ADR-021 자매).
+- DMN 패턴별 unused turn counter — 매치 없는 패턴만 선택적 감쇠.
 - Phase 6 W 행렬 미세조정 절차와 데이터 출처.
 - 멀티 인스턴스 동시 turn 의 LLM rate-limit 정책.
 - prompts/ 의 다국어 분기 (한국어 → 영어 / 일어 등) 도입.
