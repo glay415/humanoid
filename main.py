@@ -284,6 +284,7 @@ def build_full_orchestrator(
 
     # ADR-028 — marker registry 복원. ADR-022 의 marker 형성 hook 이 매 turn
     # snapshot 영속하므로 재시작 시 그 latest 상태 그대로 inject.
+    # ADR-029 — strength<=0 tombstone 은 skip (decay 로 expired 된 marker).
     if low_level.markers is not None:
         try:
             from low_level.markers import Marker as _Marker
@@ -294,10 +295,14 @@ def build_full_orchestrator(
                 pid = str(payload.get('pattern_id', '')).strip()
                 if not pid:
                     continue
+                strength = float(payload.get('strength', 0.0))
+                if strength <= 0.0:
+                    # ADR-029 tombstone — 이미 expired 된 marker, 복원 X.
+                    continue
                 low_level.markers.markers[pid] = _Marker(
                     pattern_id=pid,
                     valence=float(payload.get('valence', 0.0)),
-                    strength=float(payload.get('strength', 0.0)),
+                    strength=strength,
                     age=int(payload.get('age', 0)),
                 )
                 restored_markers += 1

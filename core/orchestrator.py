@@ -1438,13 +1438,49 @@ class Orchestrator:
 
         # 마커 감쇠 (정비 사이클의 핵심)
         expired_markers: list[str] = []
+        # ADR-029 — decay 전에 marker age 를 snapshot. expired tombstone 의 age 계산용.
+        _pre_decay_ages: dict[str, int] = {}
         if self.low_level is not None and self.low_level.markers is not None:
+            _pre_decay_ages = {
+                pid: m.age for pid, m in self.low_level.markers.markers.items()
+            }
             expired_markers = self.low_level.markers.decay_all()
 
         # 마커 만료 이벤트 — 각각 1줄.
         if self.logger is not None and expired_markers:
             for pid in expired_markers:
                 self._log_event_safe('marker_decayed', {'pattern_id': pid})
+
+        # ADR-029 — marker decay 즉시 영속.
+        # ADR-028 의 영속은 formation 시점에만 일어났고 strength decay 는 다음
+        # formation 까지 영속 안 됨 → 재시작 시 stale state 복원 위험.
+        # 본 hook 으로 매 maintenance 마다:
+        #   - 살아남은 marker: 현재 (decayed) state snapshot.
+        #   - expired marker: strength=0 tombstone — restore 가 skip.
+        if (
+            self.dmn_artifacts is not None
+            and self.low_level is not None
+            and self.low_level.markers is not None
+        ):
+            try:
+                for pid in expired_markers:
+                    self.dmn_artifacts.write_marker_snapshot(
+                        pattern_id=pid,
+                        valence=0.0,
+                        strength=0.0,  # tombstone — restore 가 skip
+                        age=_pre_decay_ages.get(pid, 0) + 1,
+                        turn=int(self.turn_number),
+                    )
+                for pid, m in self.low_level.markers.markers.items():
+                    self.dmn_artifacts.write_marker_snapshot(
+                        pattern_id=pid,
+                        valence=float(m.valence),
+                        strength=float(m.strength),
+                        age=int(m.age),
+                        turn=int(self.turn_number),
+                    )
+            except Exception:
+                pass  # silent — maintenance 흐름 보호
 
         # ADR-021 — fast_path 패턴 감쇠 (Hebbian 하향). 사용 안 되는 절차기억
         # 의 자연 망각. confidence < floor 이 되면 제거.
