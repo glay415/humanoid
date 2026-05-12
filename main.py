@@ -198,7 +198,10 @@ def build_full_orchestrator(
     )
 
     # DMN — 시그니처는 Team O 가 확정. 방어적으로 base_activity 만 전달.
-    dmn = DMN(base_activity=cfg.get('dmn_base_activity', 0.5))
+    # ADR-027 — yaml 의 'dmn_activity' (페르소나별 DMN 활성도, 예: ENFP 0.7, ISTJ 0.4)
+    # 가 모든 persona yaml 에 있지만 main 이 'dmn_base_activity' 로 찾는 키 미스매치로
+    # 무시되던 갭. 둘 다 fallback 으로 받되 yaml 의 'dmn_activity' 가 정식.
+    dmn = DMN(base_activity=cfg.get('dmn_activity', cfg.get('dmn_base_activity', 0.5)))
     # LLM 핸들 부착 — Team O 의 run_cycle 이 ctx.llm 으로도 받지만 호환을 위해.
     if not hasattr(dmn, 'llm') or getattr(dmn, 'llm', None) is None:
         try:
