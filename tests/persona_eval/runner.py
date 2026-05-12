@@ -130,6 +130,36 @@ def narrative_excerpt(persona_id: str, max_chars: int = 1500) -> str:
     return seed
 
 
+async def fetch_instance_narrative(
+    client: httpx.AsyncClient,
+    base: str,
+    instance_id: str,
+    max_chars: int = 2500,
+) -> str:
+    """spawn 후 backend 에서 실제 합성된 narrative 를 가져온다.
+
+    sample_life (ADR-013 Stage 2) 가 persona narrative_seed 위에 무작위로 추가한
+    interests/knowledge 가 self_model.narrative 안에 포함됨. judge 가 채점할 때
+    이 *런타임 narrative* 를 봐야 instance 가 sample_life 로 받은 관심사로 답한
+    걸 "narrative 와 결 맞는 답" 으로 인정한다 (interest_match 시나리오 등).
+    """
+    try:
+        r = await client.get(f"{base}/api/instances/{instance_id}", timeout=10.0)
+        if r.status_code != 200:
+            return ''
+        payload = r.json()
+    except Exception:
+        return ''
+    narrative = (
+        ((payload.get('self_model') or {}).get('narrative')) or ''
+    ).strip()
+    if not narrative:
+        return ''
+    if len(narrative) > max_chars:
+        return narrative[:max_chars] + '\n…(truncated)'
+    return narrative
+
+
 # ---------------------------------------------------------------------------
 # Backend interaction
 # ---------------------------------------------------------------------------
@@ -319,8 +349,21 @@ async def run_scenario(
                       f"      asst> {response[:200]}{'…' if len(response) > 200 else ''}",
                       flush=True)
 
-        # 채점
-        excerpt = narrative_excerpt(persona_id)
+        # 채점 — base narrative_seed + 런타임 합성 narrative 둘 다 본다.
+        # 런타임 narrative 는 sample_life 가 추가한 interests/knowledge 가 들어
+        # 있으므로 ('아침 카페' 외에 spawn 시 무작위로 받은 '클라이밍' 등),
+        # judge 가 이 풍부한 컨텍스트로 채점하지 않으면 "narrative 와 결 안 맞음"
+        # 으로 오판한다 (ADR-013 Stage 2 grounding).
+        base_excerpt = narrative_excerpt(persona_id)
+        runtime_excerpt = await fetch_instance_narrative(client, base, instance_id)
+        if runtime_excerpt:
+            excerpt = (
+                f"## base narrative_seed (페르소나 yaml)\n{base_excerpt}\n\n"
+                f"## runtime narrative (sample_life 적용 — 이 instance 의 실제 결)\n"
+                f"{runtime_excerpt}"
+            )
+        else:
+            excerpt = base_excerpt
         run.judgment = await judge.judge(
             scenario=scenario,
             persona_id=persona_id,
