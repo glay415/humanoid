@@ -456,12 +456,28 @@ class DMN:
                 error=f'LLMError: {exc}',
             )
 
+        # ADR-018 / ADR-019 — state_changes / confidence 를 *먼저* derive 한 뒤
+        # stage_write payload 에 포함시키고 (재시작 후 복원에 사용), 같은 값으로
+        # fast_path 에 register. 영속과 in-memory register 가 1:1 정합.
+        derived_valence = float(chosen.get('valence', 0.0))
+        derived_strength = float(chosen.get('strength', 0.0))
+        if derived_valence >= 0.0:
+            derived_state_changes: dict[str, float] = {'bonding': 0.05, 'comfort': 0.03}
+        else:
+            derived_state_changes = {'stress': 0.05, 'inhibition': 0.03}
+        derived_confidence = max(0.0, min(1.0, derived_strength))
+
         committed = False
         if sm is not None:
             try:
                 sm.stage_write(f'case_promote:{chosen.get("pattern_id")}', {
                     'pattern_id': chosen.get('pattern_id'),
                     'rule_summary': rule,
+                    # ADR-019 — 재시작 시 fast_path 복원에 필요한 정보.
+                    'valence': derived_valence,
+                    'strength': derived_strength,
+                    'state_changes': dict(derived_state_changes),
+                    'confidence': derived_confidence,
                 })
                 # audit β6: ctx.commit_sink 가 있으면 그 hook 으로 영속화.
                 sm.commit(ctx.commit_sink or _noop_commit_sink)
@@ -472,26 +488,16 @@ class DMN:
                 except Exception:
                     pass
 
-        # ADR-018 — 규칙 텍스트 영속에 이어, *실제* fast_path 패턴까지 등록.
-        # marker.pattern_id 를 trigger 로, valence 부호로 state_changes 도출,
-        # marker.strength 를 confidence 로. ctx.fast_path 가 None 이면 skip.
+        # ADR-018 — 위에서 derive 한 state_changes / confidence 로 fast_path register.
         promoted = False
         try:
             if ctx.fast_path is not None and hasattr(ctx.fast_path, 'register_or_update'):
                 trigger = str(chosen.get('pattern_id', '')).strip()
                 if trigger:
-                    valence_val = float(chosen.get('valence', 0.0))
-                    strength_val = float(chosen.get('strength', 0.0))
-                    if valence_val >= 0.0:
-                        # 접근 — bonding/comfort 약한 상승.
-                        state_changes = {'bonding': 0.05, 'comfort': 0.03}
-                    else:
-                        # 회피 — stress/inhibition 약한 상승.
-                        state_changes = {'stress': 0.05, 'inhibition': 0.03}
                     pattern = FastPathPattern(
                         trigger=trigger,
-                        state_changes=state_changes,
-                        confidence=max(0.0, min(1.0, strength_val)),
+                        state_changes=dict(derived_state_changes),
+                        confidence=derived_confidence,
                     )
                     ctx.fast_path.register_or_update(pattern)
                     promoted = True
