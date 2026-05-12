@@ -410,6 +410,13 @@ class InstanceManager:
                         pass
         except Exception:
             pass
+        # ADR-016 — DMNArtifactStore sqlite connection.
+        try:
+            art = getattr(orch, 'dmn_artifacts', None)
+            if art is not None:
+                art.close()
+        except Exception:
+            pass
         # ChromaDB PersistentClient 핸들 — close() 로 SharedSystem refcount 감소.
         # 같은 인스턴스 path 를 다시 사용할 거면 (hard_reset) 마지막 ref 가 풀려야
         # sqlite WAL 파일이 해제된다.
@@ -441,6 +448,7 @@ class InstanceManager:
         삭제 대상:
           - chroma_db/        (VectorDB persistent collection)
           - prospective.db    (ProspectiveQueue SQLite)
+          - dmn_artifacts.db  (DMN 활동 산출물 — ADR-016)
           - state.json        (직렬화된 in-memory 상태)
           - markers.db        (있다면)
           - storage_data/     (있다면 — legacy 호환)
@@ -481,6 +489,8 @@ class InstanceManager:
                     shutil.rmtree(target, ignore_errors=True)
         for fname in (
             'state.json', 'prospective.db', 'markers.db',
+            # ADR-016 — DMN 활동 산출물 영속화 DB.
+            'dmn_artifacts.db',
             # Wave 14A — JSONL 로그도 같이 비운다.
             'turns.jsonl', 'events.jsonl', 'drift.jsonl',
         ):
