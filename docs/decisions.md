@@ -1037,12 +1037,63 @@ SQLite INSERT N+expired 회 ~1ms × N.
 
 ---
 
+## ADR-030 — narrative_pressure / relationship_threshold yaml wiring (2026-05-12)
+
+**Context**: audit G7 잔여 — 모든 페르소나 yaml 에 `narrative_pressure` (0.5
+default) 와 `relationship_threshold` (E=70 / I=130 등 MBTI 별 차이) 가 있지만
+코드 어디서도 미참조. 페르소나별 차별화 의도가 dormant.
+
+**Decision**: 두 필드를 의미 있는 wiring 으로 연결.
+
+### Part A — `narrative_pressure` → SelfModel section cap
+
+- `SelfModel(narrative_pressure: float = 0.5)` 옵션. `_effective_max_lines()`
+  helper 가 `cap = max(1, int(round(_MAX_DELTAS * 2.0 * pressure)))` 로 변환.
+  - default 0.5 → cap 5 (회귀 0).
+  - 1.0 → cap 10 (풍부한 자기 누적).
+  - 0.0 → cap 1 (최소 누적).
+- `add_internalized_delta` / `add_contemplation` 의 `max_*` 인자가 None 이면
+  자동 사용. 명시 인자는 override.
+- main.build_full_orchestrator 가 `cfg.get('narrative_pressure', 0.5)` 전달.
+
+**부수 fix**: `_add_to_section` 의 cap check 가 append *전* 으로 이동 —
+cap=1 일 때 정확히 1 라인 유지 (off-by-one 버그 fix).
+
+### Part B — `relationship_threshold` → OtherModel stage transitions
+
+- `OtherModel(relationship_threshold: int = 100)` 옵션. 4 stages:
+  `initial` / `familiar` / `close` / `intimate`.
+- `observation_count` 가 threshold 의 배수마다 한 단계 advance.
+  - 0~N-1: initial / N~2N-1: familiar / 2N~3N-1: close / 3N+: intimate.
+- 단방향 — observation 만으로는 자동 하향 없음 (relationship 회복 비대칭성).
+  위협 연속은 `record_threat` 가 별도 처리 (audit γ1 의도 보존).
+- main.build_full_orchestrator 가 `cfg.get('relationship_threshold', 100)` 전달.
+
+**연쇄**: social_cognition._fmt_other_model 이 relationship_stage 를 LLM prompt
+의 타자 모델 context 에 inject → 페르소나별 친밀도 발현 (E 빠른 advance, I 느림).
+
+**라이턴시**: 0 영향 (in-memory dict 갱신만).
+
+**Out of scope (future ADR)**:
+- relationship_stage advance 시 special event 발화 (예: 'relationship_advanced')
+  로 prompt 에 *전환 순간* 강조. 현재는 단계 자체만 prompt 에 흐름.
+- stage downgrade — 위협이 누적되면 가능한 downgrade 정책. 현재는 단방향.
+- narrative_pressure 의 *시간 따른* 변동 (학습 누적이 deep 해질수록 pressure ↑).
+
+**Files**:
+- `storage/self_model.py` — `narrative_pressure` 인자 + `_effective_max_lines` helper.
+- `storage/other_model.py` — `relationship_threshold` 인자 + `_derive_stage` + stage advance.
+- `main.py::build_full_orchestrator` — 두 yaml 키 전달.
+- `tests/test_narrative_pressure.py` (신설, +6).
+- `tests/test_relationship_threshold.py` (신설, +6).
+
+**Status**: accepted.
+
+---
+
 ## Future ADRs (placeholder)
 
 다음과 같은 결정이 일어나면 ADR 를 append:
-
-- yaml `narrative_pressure` / `relationship_threshold` wiring — 코드 적용 방법
-  추측 단계. 명세 의도 확인 필요.
 - marker `pattern_id` 의 robust 추출 (LLM noun / embedding cluster) — ADR-022 후속.
 - tombstone row 의 정리 정책 (오래된 tombstone 누적) — ADR-029 후속.
 - narrative section (`[누적 자기인식]` / `[혼잣말]`) 의 time-based aging (ADR-021 자매).
