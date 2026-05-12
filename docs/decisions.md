@@ -913,6 +913,71 @@ Files: `main.py`. +4 tests.
 
 ---
 
+## ADR-028 — Marker registry 재시작 영속 복원 (2026-05-12)
+
+**Context**: ADR-022 로 marker formation hook 이 wiring 됐지만 `MarkerRegistry` 는
+*in-memory* dict 라 인스턴스 재시작 시 모든 marker 휘발. ADR-019 가 `fast_path`
+패턴은 dmn_artifacts.db 에서 복원했지만 그 *재료* 인 marker 는 여전히 휘발 →
+재시작 후 fast_path 는 살아남되 새 marker 가 형성될 때까지 학습 갭.
+
+**Decision**: ADR-019 와 평행 구조로 marker 도 dmn_artifacts.db 에 영속 + 재시작
+복원.
+
+**(1) DMNArtifactStore API** (`storage/dmn_artifacts.py`):
+- `write_marker_snapshot(pattern_id, valence, strength, age, *, turn=0)` —
+  `write()` wrapper. 키 `marker:{pattern_id}`, payload `{pattern_id, valence,
+  strength, age}`.
+- `latest_markers(limit=128) -> list[dict]` — 같은 key 의 MAX id row 만 반환.
+  `latest_case_promotes` 와 동일 SQL 패턴.
+
+**(2) Orchestrator hook** (`core/orchestrator.py::_maybe_form_marker`):
+- ADR-022 의 maybe_form 성공 직후, `self.dmn_artifacts` 가 있으면
+  `write_marker_snapshot` 호출.
+- silent failure (대화 흐름 보호).
+
+**(3) Restore** (`main.build_full_orchestrator`):
+- ADR-019 의 fast_path restore 직후 marker restore hook 추가.
+- `latest_markers()` → 각 row 의 payload 로 `Marker(...)` 직접 생성 →
+  `low_level.markers.markers[pid] = Marker`.
+- 빈 store / 빈 pattern_id / 잘못된 payload skip.
+- `markers_restored` 이벤트 로깅.
+
+**전체 학습 loop 통합 (ADR-018/019/021/022/028)**:
+1. user 자극 → emotion_appraisal → ADR-022 `maybe_form` (in-memory).
+2. **ADR-028** — marker snapshot 즉시 dmn_artifacts 에 영속.
+3. DMN idle → ADR-018 Activity 2 가 strong marker 발견 → fast_path 자동 승격.
+4. fast_path 패턴 dmn_artifacts 에 영속 (ADR-019 의 case_promote row).
+5. ADR-021 — maintenance 시 fast_path aging.
+6. 인스턴스 재시작 → build_full_orchestrator → **ADR-019 (fast_path 복원) +
+   ADR-028 (marker 복원)** 둘 다 실행.
+
+이전엔 fast_path 만 살아남았지만 이제 marker registry 도 살아남아 *학습 loop
+전체가 세션 간 완전 영속*.
+
+**라이턴시**: 0 영향. `_maybe_form_marker` 의 sqlite INSERT 1회 ~1ms, 대화 응답
+경로 안에서 발생하지만 turn 합산 시간에 무시 가능. restore 는 빌드 1회만.
+
+**Forward compat**: latest_markers payload 에 ADR-028 이전 row (없음 — 본 ADR
+이전엔 marker 영속 안 했음) 는 자연스럽게 skip.
+
+**Out of scope (future ADR)**:
+- marker decay (`MarkerRegistry.decay_all`) 의 영속 — 현재 마커가 maintenance
+  마다 strength 감쇠하지만 그 변화가 즉시 영속되진 않음. 다음 marker 형성 시점
+  의 snapshot 으로 간접 반영. 명시 영속이 필요하면 별도 hook.
+- marker 형성 빈도 ↑ 시 dmn_artifacts 크기 폭증 — 현재 write 마다 append-only.
+  필요 시 row 정리 정책 (오래된 marker row drop) 별도 ADR.
+
+**Files**:
+- `storage/dmn_artifacts.py` — `write_marker_snapshot` + `latest_markers`.
+- `core/orchestrator.py::_maybe_form_marker` — 영속 hook.
+- `main.py::build_full_orchestrator` — restore hook.
+- `tests/test_marker_registry_restore.py` (신설, +6).
+- `tests/test_marker_formation_hook.py` (+1 추가).
+
+**Status**: accepted.
+
+---
+
 ## Future ADRs (placeholder)
 
 다음과 같은 결정이 일어나면 ADR 를 append:
@@ -920,7 +985,7 @@ Files: `main.py`. +4 tests.
 - yaml `narrative_pressure` / `relationship_threshold` wiring — 코드 적용 방법
   추측 단계. 명세 의도 확인 필요.
 - marker `pattern_id` 의 robust 추출 (LLM noun / embedding cluster) — ADR-022 후속.
-- marker registry 의 영속 (인스턴스 재시작 후 marker 도 살아남도록) — ADR-022 후속.
+- marker decay 의 즉시 영속 (maintenance 시 strength 변화도 적재) — ADR-028 후속.
 - narrative section (`[누적 자기인식]` / `[혼잣말]`) 의 time-based aging (ADR-021 자매).
 - DMN 패턴별 unused turn counter — 매치 없는 패턴만 선택적 감쇠.
 - trigger_registry 의 실제 evaluation wiring 또는 dead code 제거 (G9).

@@ -2,10 +2,10 @@
 
 > Living document. Wave 머지 / 중요 결정 / baseline 변동 시마다 갱신한다. 규칙은 [`CLAUDE.md`](../CLAUDE.md) 참조.
 
-## Current baseline (as of 2026-05-12, ADR-013~027 — dormant code audit + persona 차별화 실 발현)
+## Current baseline (as of 2026-05-12, ADR-013~028 — 학습 loop 전체 세션 간 영속)
 
-- Tests: **833 passed + 2 skipped + 1 xfailed** (`pytest tests/ -q --ignore=tests/persona_eval --ignore=tests/e2e_trends`, ~5min)
-- Branch: `main` past v0.3.0 (latest ADR-027 commits)
+- Tests: **840 passed + 2 skipped + 1 xfailed** (`pytest tests/ -q --ignore=tests/persona_eval --ignore=tests/e2e_trends`, ~5.2min)
+- Branch: `main` past v0.3.0 (latest ADR-028 commits)
 - Release: `release` branch at `v0.3.0` (Phase 3 / §8 enforcement / analyze.py / logs UI tab).
 - LLM tier: `small` / `large` / `dmn` 모두 `gpt-5.5`. `reasoning_effort` per-tier (small=low, large=medium, dmn=low). 콜별 override 가능 — ADR-011. Unified single-call stream — ADR-012.
 - persona_eval (`tests/persona_eval/`) scoped regression: **16/16 PASS** on 4 시나리오 × 5 페르소나 (실 LLM, 별도 비용 — pytest 에 포함 X).
@@ -37,6 +37,7 @@ Phase 단위는 spec §13 implementation roadmap 기준. Wave 는 실제 작업 
 - [x] DMN Activity 4 contemplate → self_model `[혼잣말]` section (ADR-020, 2026-05-12). Activity 3 의 [누적 자기인식] 과 별도 섹션. `SelfModel._add_to_section` generic helper + 두 named 메서드 (`add_internalized_delta` / `add_contemplation`). 한 section 의 갱신이 다른 section 의 라인을 건드리지 않음 (독립 cap=5, dedupe, LIFO drop). +9 tests (6 unit + 3 integration).
 - [x] fast_path 패턴 aging — Hebbian 하향 (ADR-021, 2026-05-12). `FastPath.decay_all(factor=0.97, floor=0.4)` — maintenance turn 마다 모든 패턴 confidence 감쇠, floor 미만 제거. 사용 안 되는 절차기억의 자연 망각 + 같은 trigger 가 reinforced 되면 register_or_update 의 max 정책으로 회복. Hebbian 학습의 *양방향* (상향 + 하향) 완성. +10 tests (6 unit + 4 integration).
 - [x] Marker 자동 형성 hook + DMN marker_store wiring (ADR-022, 2026-05-12). spec §1.4 의 "자극 → 마커" 가 Wave 7 이후 production code path 에서 빠져있던 **critical gap** 을 메움. `_maybe_form_marker` 가 `process_conversation_turn` / `stream_unified_turn` 의 emotion_appraisal 직후 호출. `_MARKER_FORM_TRIGGER (0.3)` 1차 가드 + `formation_threshold (0.7)` 2차 가드. pattern_id = 앞 15자 normalized prefix. `MarkerRegistry.load_all` 신설 — `DMNContext.marker_store` 가 in-memory registry fallback 으로 Activity 2 와 wiring. **이제 ADR-018/019/021 의 학습 loop 이 실 대화에서 실제로 트리거됨**. +6 tests.
+- [x] Marker registry 재시작 영속 복원 (ADR-028, 2026-05-12). ADR-019 (fast_path 복원) 과 평행 — `DMNArtifactStore.write_marker_snapshot` + `latest_markers`. `_maybe_form_marker` 가 maybe_form 직후 영속. `build_full_orchestrator` restore hook 이 marker registry 도 inject. 이로써 학습 loop *전체* (marker + fast_path) 가 세션 간 완전 영속화. +7 tests.
 - [x] Dormant code audit + 5 wiring fix (ADR-023~027, 2026-05-12). 시스템 깊이 훑어 9 갭 발견, 실 fix 가능한 5건 처리:
   - **ADR-023**: `regulation_capacity` → `Metacognition.review` 임계 multiplier (페르소나별 재평가 빈도 차이).
   - **ADR-024**: yaml `marker_inertia` → `MarkerRegistry.reinforcement_weight` (페르소나별 마커 갱신 속도).
@@ -81,6 +82,7 @@ Phase 단위는 spec §13 implementation roadmap 기준. Wave 는 실제 작업 
 - 2026-05-12 ADR-020 (Activity 4 contemplation apply) + ADR-021 (fast_path aging): **803 + 2 skip + 1 xfail** (+6 `tests/test_self_model_contemplation.py` + 3 `tests/test_dmn_activity4_contemplation_apply.py` + 6 `tests/test_fast_path_aging.py` + 4 `tests/test_maintenance_fast_path_decay.py`).
 - 2026-05-12 ADR-022 (marker 자동 형성 hook): **809 + 2 skip + 1 xfail** (+6 `tests/test_marker_formation_hook.py`).
 - 2026-05-12 ADR-023~027 (dormant code audit fix 5건): **833 + 2 skip + 1 xfail** (+24 across 5 test files).
+- 2026-05-12 ADR-028 (marker registry 재시작 영속): **840 + 2 skip + 1 xfail** (+7 `tests/test_marker_registry_restore.py` + 1 추가 hook test).
 
 ## Active work
 
@@ -137,7 +139,7 @@ scripts/        sensitivity report helper
 - spec §12 시나리오 27 (collective transcendence): skip — 시뮬레이션 환경이 1-person.
 - ADR-021 로 fast_path 패턴 aging (Hebbian 하향) 까지 동작. 다만 narrative section (`[누적 자기인식]` / `[혼잣말]`) 의 time-based aging 은 미구현 — 현재는 LIFO drop 으로 capacity-bounded 망각만. 별도 ADR 후보.
 - ADR-022 의 marker pattern_id 는 앞 15자 normalized prefix — 어순 살짝 다르면 다른 marker 가 됨. 더 robust 한 keyword 추출 (LLM noun / embedding cluster) 은 후속 ADR 후보.
-- marker registry 자체의 인스턴스 재시작 영속은 별도 (현재 fast_path 만 dmn_artifacts 로 복원). marker → dmn_artifacts row 추가 ADR 후보.
+- ADR-028 로 marker registry 도 영속/복원된다. 다만 maintenance turn 마다의 strength decay 는 다음 marker 형성 시점에 간접 반영 — 명시 영속 hook 필요 시 별도 ADR.
 - yaml `narrative_pressure` / `relationship_threshold` 는 여전히 dead config — 의도 추측 단계라 적용 방법 별도 분석 필요 (G7 잔여).
 - `trigger_registry.check_all()` 도 호출 없음 (G9). event_bus + 수동 turn-type 으로 사실상 대체됨. 정리 또는 재설계 ADR 후보.
 - `tests/persona_eval/` 의 전체 scope (11 시나리오 × 21 페르소나) 는 실제 LLM 콜 ~214 회 + judge 채점 + rate-limit guard 로 ~100분 + LLM 비용. 매번 안 돌린다. 좁은 scope (대표 4 × 대표 5 = 16) 만 회귀 검증용으로 권장 — `uv run python tests/persona_eval/runner.py --scenario <a,b,c> --persona <a,b,c>`.
