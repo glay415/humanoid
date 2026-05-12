@@ -69,6 +69,7 @@ class EventLogEntry(BaseModel):
         'stage_timing',     # payload: {stage, duration_ms, ...} — 스테이지 단위 latency
         'llm_call',         # payload: {model, duration_ms, attempt, success} — LLM 콜 단위 latency
         'regenerate_cycle', # 이미 orchestrator 가 emit 중이었으나 Literal 에서 누락
+        'introspection_error',  # background 자기 분석 LLM 실패 — payload: {message}
     ]
     payload: dict = Field(default_factory=dict)
     turn: int = 0  # 발화 시점의 turn 번호
@@ -82,3 +83,36 @@ class DriftLogEntry(BaseModel):
     baselines: dict[str, float]
     baseline_ema: dict[str, float]
     drift_delta_norm: float        # ||baseline_after - baseline_before||
+
+
+# ---------------------------------------------------------------------------
+# 비동기 자기 분석(introspection) — 매 turn 끝에 background LLM 콜로 작성.
+# 결과는 instances/<id>/introspection.jsonl 에 누적.
+# ---------------------------------------------------------------------------
+
+
+class IntrospectionResult(BaseModel):
+    """페르소나가 1인칭으로 쓴 자기 일기 1건. LLM 출력 스키마.
+
+    필드 의미:
+      - change_explanation : 직전 몇 턴 동안 *왜* 내 안이 이렇게 변했는가 (한두 문장).
+      - self_observation   : 오늘의 나에게서 발견한 패턴 한두 문장.
+      - suggested_direction: 더 나은 방향. 결심이 아니라 부드러운 방향성, 페르소나 톤.
+      - summary            : 한 줄 요약 (일기의 제목).
+    """
+
+    change_explanation: str
+    self_observation: str
+    suggested_direction: str
+    summary: str
+
+
+class IntrospectionLogEntry(BaseModel):
+    """introspection.jsonl 한 줄. 분석 시점의 스냅샷을 함께 보관."""
+
+    ts: str
+    turn: int
+    persona_id: str
+    state_snapshot: dict[str, float]   # 9-dim internal state
+    mood: dict[str, float]
+    result: IntrospectionResult
