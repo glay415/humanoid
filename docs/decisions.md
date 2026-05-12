@@ -226,11 +226,64 @@ Legacy 5 페르소나 → MBTI 매핑: extrovert_warm=ENFP, introvert_thoughtful
 
 ---
 
+## ADR-014 — DMN.unappraised_queue 자동 push 통합 (2026-05-12)
+
+**Context**: spec §1.4 의 "미평가 → 재처리 큐" 와 §2.4 의 DMN 우선순위 큐 1번
+(미평가 입력 재처리) 은 *수동 push* 만으로는 동작하지 않는다. 그동안
+`DMN.unappraised_queue` 는 list 로 존재했고 `_try_unappraised_reprocess` 도
+pop 만 구현되어 있었지만, 어떤 자극이 어느 시점에 push 되는지는 미정 — 결과적으로
+emotion_appraisal LLM 실패가 발생해도 fallback 응답으로 흐름만 이어졌고
+DMN 의 재처리 기회는 *생성되지 않았다*.
+
+**Decision**: orchestrator 의 두 emotion_appraisal fallback catch 블록 안에서
+`Orchestrator._push_unappraised(...)` 헬퍼를 silent 하게 호출한다.
+
+- Hook 위치
+  - `process_conversation_turn` line ~314 — `except (LLMError, AttributeError, KeyError)`
+    안 (reason: `emotion_appraisal_failed`).
+  - `stream_unified_turn` line ~1167 — post-stream emotion fallback
+    (reason: `emotion_appraisal_failed_post_stream`).
+- Payload shape — `DMN._try_unappraised_reprocess` 가 그대로 보존해서 다음 DMN 턴에
+  전달할 minimal record:
+  ```python
+  {
+      'appraised': False,            # spec §1.4 표준 마커
+      'user_input': str,
+      'raw_core_affect': {'valence': float, 'arousal': float},
+      'turn_number': int,
+      'reason': str,                  # 'emotion_appraisal_failed' 등 — 진단용
+      'error': str,                   # LLMError 원문 (optional)
+  }
+  ```
+- Capacity — `Orchestrator._UNAPPRAISED_QUEUE_MAX = 32`. 초과 시 FIFO drop —
+  반복적인 LLM 실패가 인스턴스 메모리 / state serializer 를 폭주시키지 않게 보호.
+- Silent failure — `dmn=None`, `unappraised_queue` 가 list 가 아닌 stub, 또는
+  큐 append 자체의 예외 모두 응답 흐름을 막지 않는다. 로깅은 `dmn_unappraised_push`
+  이벤트로 best-effort 기록.
+
+**Out of scope (별도 작업)**:
+- DMN cycle 의 *retrospective appraisal LLM 콜* 과 episodic memory 의 *delayed
+  encoding*. 현재는 `_try_unappraised_reprocess` 가 pop + "flagged for orchestrator"
+  표시까지만. 큐 처리 본 구현은 별도 ADR 후보.
+- 메타인지가 skip 한 강한 자극, 마커 형성 못 한 강한 임팩트의 push (다른 hook
+  지점) — spec 의 가장 자연스러운 첫 분류 (LLM 실패 fallback) 만 본 ADR 범위.
+
+**Files**:
+- `core/orchestrator.py` — `_push_unappraised` 헬퍼 + 두 fallback hook.
+- `tests/test_dmn_auto_push.py` — 6 신규 테스트 (hook, no-op, capacity,
+  stream_unified_turn).
+- `tests/test_phase5_multiturn_e2e.py:617` — 기존 "수동 push" 시나리오를
+  "자동 push 후 소진" 으로 업데이트.
+
+**Status**: accepted.
+
+---
+
 ## Future ADRs (placeholder)
 
 다음과 같은 결정이 일어나면 ADR 를 append:
 
-- DMN.unappraised_queue 의 orchestrator 자동 push 통합 정책.
+- DMN.unappraised_queue 의 retrospective LLM 처리 + delayed encoding 정책 (ADR-014 후속).
 - Phase 6 W 행렬 미세조정 절차와 데이터 출처.
 - 멀티 인스턴스 동시 turn 의 LLM rate-limit 정책.
 - prompts/ 의 다국어 분기 (한국어 → 영어 / 일어 등) 도입.

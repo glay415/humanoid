@@ -615,20 +615,18 @@ async def test_full_conversation_turn_emits_response_field_after_phase5_changes(
 
 
 async def test_dmn_unappraised_queue_drains_after_emotion_failure(tmp_path, mock_llm):
-    """현재 orchestrator 는 emotion 실패 시 dmn.unappraised_queue 에 자동으로 push 하지 않는다.
+    """ADR-014: orchestrator 는 emotion 실패 시 dmn.unappraised_queue 에 자동 push 한다.
 
-    이 테스트는 두 가지 동작을 분리해서 검증한다:
-      A) emotion_appraisal.evaluate 가 LLMError 를 던져도 fallback 으로 대화 턴이 완료된다.
-      B) unappraised_queue 에 항목을 수동으로 push 하면 process_dmn_turn 의 첫 활동인
-         UNAPPRAISED_REPROCESS 가 큐를 1건 pop 하고 'unappraised_reprocess' 활동을 반환한다.
-
-    Note: 자동 push 는 미구현 — 추후 orchestrator 가 fallback 시 dmn.unappraised_queue 에
-    user_input 을 push 하면 (A)+(B) 가 자연스럽게 연결될 것. 본 테스트는 invariant 만 게이트한다.
+    이 테스트는 두 단계를 검증한다:
+      A) emotion_appraisal.evaluate 가 LLMError 를 던져도 fallback 으로 대화 턴이 완료되며
+         동시에 dmn.unappraised_queue 에 1 항목이 자동 push 된다.
+      B) 그 다음 process_dmn_turn 의 첫 활동 UNAPPRAISED_REPROCESS 가 큐를 1건 pop 하고
+         'unappraised_reprocess' 활동을 반환 — 큐는 소진된다.
     """
-    # ─ A: emotion fallback 검증 ─
+    # ─ A: emotion fallback + 자동 push 검증 ─
     # mock_llm.responses 에 emotion 자리만 깨진 JSON, 나머지는 정상.
     mock_llm.responses = [
-        "this is not json",  # emotion → LLMError → fallback
+        "this is not json",  # emotion → LLMError → fallback + auto-push
         _candidates_payload(),
         _final_payload(),
         _tone_payload(),
@@ -643,18 +641,17 @@ async def test_dmn_unappraised_queue_drains_after_emotion_failure(tmp_path, mock
 
     result = await orch.process_conversation_turn("음...")
     assert result['response']  # fallback 으로도 응답은 생성됨
-    # 자동 push 가 미구현이므로 이 시점엔 큐가 비어 있어야 한다.
-    assert real_dmn.unappraised_queue == [], (
-        "현재 orchestrator 는 emotion fallback 시 dmn.unappraised_queue 에 자동 push 하지 않음. "
-        "이 invariant 가 깨지면 본 테스트의 (B) 단계도 재설계가 필요."
+    # ADR-014: 큐에 자동 push 된 1 항목이 있어야 한다.
+    assert len(real_dmn.unappraised_queue) == 1, (
+        f"emotion fallback 시 자동 push 미동작: queue={real_dmn.unappraised_queue!r}"
     )
+    item = real_dmn.unappraised_queue[0]
+    assert item['appraised'] is False
+    assert item['user_input'] == "음..."
+    assert item['reason'] == 'emotion_appraisal_failed'
+    assert 'raw_core_affect' in item and 'valence' in item['raw_core_affect']
 
-    # ─ B: 수동 push 후 process_dmn_turn 이 큐를 소진하는지 검증 ─
-    real_dmn.unappraised_queue.append({
-        'user_input': "재평가 필요한 입력",
-        'turn_number': result['turn_number'],
-    })
-
+    # ─ B: process_dmn_turn 이 큐를 소진하는지 검증 ─
     dmn_result = await orch.process_dmn_turn()
     assert dmn_result['activity'] == 'unappraised_reprocess', (
         f"DMN 이 unappraised_reprocess 를 반환하지 않음: {dmn_result}"

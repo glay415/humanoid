@@ -313,6 +313,13 @@ class Orchestrator:
                         'stage': 'emotion_appraisal',
                         'message': str(exc),
                     })
+                # ADR-014: 평가 실패 입력은 DMN 재처리 큐로 자동 push.
+                self._push_unappraised(
+                    user_input=user_input,
+                    raw_core_affect=low_result['raw_core_affect'],
+                    reason='emotion_appraisal_failed',
+                    error=str(exc),
+                )
         else:
             emotion_result = self._emotion_fallback(low_result['raw_core_affect'])
         _emotion_ms = timings.record('emotion_appraisal', _ts)
@@ -1156,8 +1163,16 @@ class Orchestrator:
                 emotion_result = await self.emotion_appraisal.evaluate(
                     user_input, low_result['raw_core_affect']
                 )
-            except (LLMError, AttributeError, KeyError):
+            except (LLMError, AttributeError, KeyError) as exc:
                 emotion_result = self._emotion_fallback(low_result['raw_core_affect'])
+                # ADR-014: stream_unified_turn 의 post-stream 감정 평가가 실패한
+                # 경우에도 DMN 큐로 push. 사용자 응답은 이미 흘러나갔으므로 silent.
+                self._push_unappraised(
+                    user_input=user_input,
+                    raw_core_affect=low_result['raw_core_affect'],
+                    reason='emotion_appraisal_failed_post_stream',
+                    error=str(exc),
+                )
         else:
             emotion_result = self._emotion_fallback(low_result['raw_core_affect'])
         timings.record('emotion_appraisal_post', _ts)
@@ -1593,6 +1608,63 @@ class Orchestrator:
                 'novelty': 0.0,
             },
         }
+
+    # ------------------------------------------------------------------
+    # ADR-014 — DMN.unappraised_queue 자동 push (감정 평가 fallback hook)
+    # ------------------------------------------------------------------
+
+    # 큐 무한 증가 방지 — push 시점에서 가장 오래된 항목을 drop. 한 인스턴스가
+    # 오랫동안 LLM 실패만 누적해도 메모리/시리얼라이저가 폭주하지 않게.
+    _UNAPPRAISED_QUEUE_MAX = 32
+
+    def _push_unappraised(
+        self,
+        *,
+        user_input: str,
+        raw_core_affect: dict,
+        reason: str,
+        error: str | None = None,
+    ) -> None:
+        """감정 평가 실패 시 DMN 재처리 큐에 1 항목 push.
+
+        spec §1.4 "미평가 → 재처리 큐": fallback 으로 넘어간 입력은
+        ``{ appraised: false }`` 상태로 다음 DMN 턴에서 재평가된다. 본 메서드는
+        그 push 만 담당 — 실제 재처리는 ``DMN._try_unappraised_reprocess`` 가
+        수행.
+
+        Silent: dmn 이 없거나 큐 push 자체가 예외를 던져도 응답 흐름을 막지 않는다.
+        """
+        dmn = self.dmn
+        if dmn is None:
+            return
+        queue = getattr(dmn, 'unappraised_queue', None)
+        # 일부 stub/fake 는 unappraised_queue 를 None 으로 둔다 — 그 경우 skip.
+        if not isinstance(queue, list):
+            return
+        item = {
+            'appraised': False,
+            'user_input': user_input,
+            'raw_core_affect': {
+                'valence': float(raw_core_affect.get('valence', 0.0)),
+                'arousal': float(raw_core_affect.get('arousal', 0.0)),
+            },
+            'turn_number': int(self.turn_number),
+            'reason': reason,
+        }
+        if error is not None:
+            item['error'] = error
+        try:
+            queue.append(item)
+            # FIFO drop — 오래된 것부터 버려서 ``_UNAPPRAISED_QUEUE_MAX`` 유지.
+            while len(queue) > self._UNAPPRAISED_QUEUE_MAX:
+                queue.pop(0)
+        except Exception:
+            # 큐 자체 조작 실패도 silent — 응답 흐름이 최우선.
+            return
+        self._log_event_safe('dmn_unappraised_push', {
+            'reason': reason,
+            'queue_size': len(queue),
+        })
 
     @staticmethod
     def _default_social_result() -> dict:

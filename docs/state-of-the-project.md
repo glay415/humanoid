@@ -26,7 +26,7 @@ Phase 단위는 spec §13 implementation roadmap 기준. Wave 는 실제 작업 
 - [x] **Wave 11** — instance management + persona catalog + frontend gallery + docs handoff. 5 default 페르소나, 인스턴스별 `./instances/<uuid>/` 격리, 신규 `/api/personas` / `/api/instances*` 라우트, frontend gallery + spawn modal + switcher.
 - [x] **Wave 12** — destructive operations: 인스턴스별 hard reset (`/api/instances/{id}/hard-reset`, 페르소나 + jitter_seed 보존, chroma/sqlite/state 삭제) + 전체 wipe (`/api/admin/wipe`, body `{confirm:"WIPE"}`). UI: 카드별 kebab 메뉴 + 갤러리 footer `WipeConfirmModal` (typed token).
 - [ ] Phase 6 — 실 대화 데이터 기반 W 행렬 미세조정.
-- [ ] DMN.unappraised_queue orchestrator 자동 push 통합.
+- [x] DMN.unappraised_queue orchestrator 자동 push 통합 (ADR-014, 2026-05-12). `Orchestrator._push_unappraised` 헬퍼 + 두 emotion fallback hook (`process_conversation_turn` / `stream_unified_turn`). +6 tests (`tests/test_dmn_auto_push.py`). DMN cycle 의 retrospective LLM 처리는 별도 PR.
 
 ## Wave history
 
@@ -54,6 +54,7 @@ Phase 단위는 spec §13 implementation roadmap 기준. Wave 는 실제 작업 
 - Wave 11 끝 (2026-05-08): 513 + 1 skip + 1 xfail.
 - Wave 12 끝 (2026-05-08): **528 + 1 skip + 1 xfail**.
 - 2026-05-12 state_reactivity 추가: **716 + 2 skip + 1 xfail** (+35 신규 `tests/test_state_reactivity.py`. 528 → 716 차이는 다른 sub-agent 의 main 직커밋 합산 포함).
+- 2026-05-12 DMN auto-push (ADR-014): **738 + 2 skip + 1 xfail** (+6 신규 `tests/test_dmn_auto_push.py` + 1 기존 e2e 테스트 업데이트. 716 → 738 차이는 다른 sub-agent 의 main 직커밋 합산 포함).
 
 ## Active work
 
@@ -69,7 +70,7 @@ Phase 단위는 spec §13 implementation roadmap 기준. Wave 는 실제 작업 
 
 자연스러운 다음 작업 후보:
 - Phase 6 — 실 대화 데이터 W 행렬 미세조정 (sensitivity 결과 활용).
-- DMN.unappraised_queue 의 orchestrator 자동 push (현재 수동만; ADR 후보).
+- DMN.unappraised_queue 의 retrospective LLM 재처리 + delayed encoding (auto-push 는 ADR-014 로 완료, cycle 처리는 별도 PR).
 - 시나리오 #25 (나-너) 부분 통과를 full pass 로 확장.
 - Persona별 prompt 변형 (현재는 baseline / drive_ratios 만 jitter; 톤 가이드도 personalize 검토).
 - 멀티 인스턴스 동시 turn 처리 시 LLM 비용/레이트리밋 정책.
@@ -103,7 +104,7 @@ scripts/        sensitivity report helper
 - 5 worktree directories may persist on disk after `git worktree remove` (Windows file locks). Cleanup manually or skip — git records say cleaned.
 - spec §12 시나리오 26 (non-dual awareness): xfail strict — "표현 시 이원성 복원" 은 텍스트 기반 존재의 ontological 한계.
 - spec §12 시나리오 27 (collective transcendence): skip — 시뮬레이션 환경이 1-person.
-- DMN.unappraised_queue 는 emotion fallback 시 orchestrator 가 자동 push 하지 않는다 (manual push 만 동작). 통합은 향후 작업.
+- DMN.unappraised_queue 의 retrospective LLM 재처리는 미구현 — `_try_unappraised_reprocess` 는 큐를 pop 만 한다 (auto-push 는 ADR-014 로 통합 완료). LLM 콜 + delayed encoding 본 구현은 별도 PR.
 - `model: gpt-5.5` 인식하는 LiteLLM 버전이 필요. 인식 못 하면 `pyproject.toml` 의 litellm pin 을 올린다.
 - `chroma_db/` 와 `storage_data/` (기질 이름별 단일 인스턴스 경로) 는 Wave 11 이후 legacy. `instances/<uuid>/` 가 정식. legacy `_default` 인스턴스가 자동 생성되어 기존 `/api/turn`, `/api/state` 가 backward-compat. 단일화 ADR 후보.
 - Frontend dark mode 는 `localStorage` 기반 — incognito 에서는 매 세션 초기화.
