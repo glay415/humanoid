@@ -347,6 +347,12 @@ class Orchestrator:
             })),
         })
 
+        # ADR-022 — marker 자동 형성. spec §1.4 의 "어떤 자극 → 마커" hook 이
+        # Wave 7 이후 빠져있던 갭. emotion_appraisal 이 채운 experience_dimensions
+        # 의 reward/threat 가 임계 이상이면 markers.maybe_form 호출. 이로써
+        # ADR-018 의 Activity 2 가 실 대화에서도 fire 가능.
+        self._maybe_form_marker(user_input, emotion_result)
+
         await self.event_bus.publish(
             Event('emotion_appraised', emotion_result, 'emotion', self.turn_number)
         )
@@ -1184,6 +1190,10 @@ class Orchestrator:
             emotion_result = self._emotion_fallback(low_result['raw_core_affect'])
         timings.record('emotion_appraisal_post', _ts)
 
+        # ADR-022 — stream_unified_turn 의 post-stream emotion_appraisal 결과로도
+        # marker 자동 형성. 대화 latency 영향 없음 (이 시점 사용자 응답은 이미 흘렀음).
+        self._maybe_form_marker(user_input, emotion_result)
+
         # 6. experience_vector 합성 + prev_experience 갱신.
         goal_progress = self.metacognition.goal_progress if self.metacognition else None
         social_result = self._default_social_result()  # unified mode 는 social LLM 콜 없음
@@ -1329,7 +1339,14 @@ class Orchestrator:
                 )
             ctx = DMNContext(
                 episodic=self.episodic_memory,
-                marker_store=getattr(self, 'marker_store', None),
+                # ADR-022 — Activity 2 (case_promote) 가 ctx.marker_store.load_all
+                # 로 마커들을 읽는다. self.marker_store 는 항상 None 이므로
+                # in-memory MarkerRegistry 를 직접 전달 (load_all 시그니처 호환).
+                # self.marker_store override 가 있으면 그쪽 우선.
+                marker_store=(
+                    getattr(self, 'marker_store', None)
+                    or (self.low_level.markers if self.low_level is not None else None)
+                ),
                 self_model=self.self_model,
                 other_model=self.other_model,
                 snapshot_manager=getattr(self, 'snapshot_manager', None),
@@ -1644,6 +1661,73 @@ class Orchestrator:
                 'novelty': 0.0,
             },
         }
+
+    # ------------------------------------------------------------------
+    # ADR-022 — marker 자동 형성 hook (spec §1.4 의 Wave 7 갭 메우기)
+    # ------------------------------------------------------------------
+
+    # 마커 형성 임계 — exp.reward 또는 exp.threat 가 이 값을 넘어야 maybe_form.
+    # MarkerRegistry 자체의 formation_threshold (default 0.6) 보다 낮게 두면
+    # 1차 가드 (orch) 가 통과해도 2차 가드 (registry) 에서 추가 필터.
+    _MARKER_FORM_TRIGGER = 0.3
+    _MARKER_PATTERN_MAX_CHARS = 15
+
+    @staticmethod
+    def _derive_marker_pattern_id(user_input: str, max_chars: int) -> str:
+        """user_input 에서 짧은 marker pattern_id 도출.
+
+        정책 (pragmatic, ADR-022 도입 시점):
+          - 공백 정규화 + lowercase
+          - 앞 ``max_chars`` 자만 보존
+
+        한계: 긴 자극의 끝부분은 잘림. 동일 자극이 살짝 다른 어순으로 오면 다른
+        pattern_id 가 되어 별도 marker 형성. 더 robust 한 keyword 추출은 후속
+        ADR (예: LLM 기반 추출 또는 embedding clustering) 후보.
+        """
+        s = (user_input or '').strip().lower()
+        s = ' '.join(s.split())  # 공백 정규화
+        return s[:max_chars]
+
+    def _maybe_form_marker(self, user_input: str, emotion_result: dict) -> None:
+        """spec §1.4 — 자극별 감정 강도가 임계를 넘으면 마커 형성.
+
+        emotion_appraisal 의 experience_dimensions (reward / threat) 을 그대로
+        MarkerRegistry.maybe_form 에 전달. pattern_id 는 user_input 의 첫 15자
+        normalized prefix (간이 keyword) — 반복 자극이 같은 pattern_id 로 모이도록.
+
+        결과: 충분히 강한 자극은 in-memory 마커가 생기고, low_level.markers 가
+        signal_rise / DMN Activity 2 / case_promote 의 입력으로 사용됨. 영속은
+        별도 (state.json 직렬화 / SnapshotManager 경로) — ADR-022 본 hook 의
+        scope 는 *형성 발화 자체* 만.
+
+        silent — 모든 예외 무시 (대화 흐름 보호).
+        """
+        try:
+            if self.low_level is None or self.low_level.markers is None:
+                return
+            exp = emotion_result.get('experience_dimensions') or {}
+            reward_v = float(exp.get('reward', 0.0))
+            threat_v = float(exp.get('threat', 0.0))
+            if max(reward_v, threat_v) < self._MARKER_FORM_TRIGGER:
+                return  # 임계 미만 — 약한 자극은 무시.
+            pid = self._derive_marker_pattern_id(
+                user_input, self._MARKER_PATTERN_MAX_CHARS,
+            )
+            if not pid:
+                return
+            formed = self.low_level.markers.maybe_form(
+                pattern_id=pid,
+                reward=reward_v,
+                threat=threat_v,
+            )
+            if formed is not None:
+                self._log_event_safe('marker_formed', {
+                    'pattern_id': pid,
+                    'valence': float(formed.valence),
+                    'strength': float(formed.strength),
+                })
+        except Exception:
+            return  # silent
 
     # ------------------------------------------------------------------
     # ADR-014 — DMN.unappraised_queue 자동 push (감정 평가 fallback hook)
