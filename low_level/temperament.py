@@ -31,9 +31,22 @@ class Temperament:
         self.beta = self.config.get('temperament_drift_beta', 0.0002)
         self.gamma = self.config.get('temperament_drift_gamma', 0.001)
 
+        # 페르소나 stat 변동 가중치. yaml 에 state_reactivity 가 없으면 None
+        # (InternalState 가 ones 로 fallback — backward compat).
+        self.state_reactivity = self.config.get('state_reactivity', None)
+
         # EMA 초기화 = 현재 기저선
         self._baseline_ema = np.array(
             [self.baselines[p] for p in InternalState.PARAMS],
+            dtype=np.float64,
+        )
+
+    def reactivity_vector(self) -> np.ndarray | None:
+        """state_reactivity dict → PARAMS 순서 9-dim ndarray. 없으면 None."""
+        if self.state_reactivity is None:
+            return None
+        return np.array(
+            [float(self.state_reactivity.get(p, 1.0)) for p in InternalState.PARAMS],
             dtype=np.float64,
         )
 

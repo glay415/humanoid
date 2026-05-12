@@ -33,7 +33,11 @@ class InternalState:
     # spec §8.5: 보호되는 attribute 들. ``__setattr__`` 가 caller 위치를 검사.
     _PROTECTED_ATTRS = frozenset({'state', 'baselines'})
 
-    def __init__(self, baselines: dict[str, float]):
+    def __init__(
+        self,
+        baselines: dict[str, float],
+        reactivity_vector: np.ndarray | None = None,
+    ):
         # __setattr__ 가 _PROTECTED_ATTRS 를 검사하기 때문에, init 단계에서는
         # ``object.__setattr__`` 로 우회해 초기화한다 (init caller 가 build_low_level
         # 같은 main.py 일 수 있어 caller 검사를 통과 못함).
@@ -46,6 +50,19 @@ class InternalState:
         # cached eigenvalues of J = W - D (lazy). W/D 는 init 후 변하지 않으므로
         # 첫 호출 시 1회 계산해 저장 — debug 페이로드 매 턴 재계산 회피.
         self._cached_eigenvalues: np.ndarray | None = None
+
+        # 페르소나-specific stat 변동 가중치. None 이면 모든 stat 1.0 (backward
+        # compat — 기존 동작과 동일). 호출 측은 PARAMS 순서대로 9-dim ndarray 를
+        # 넘긴다 (Temperament.reactivity_vector_for_state()).
+        if reactivity_vector is None:
+            self.reactivity_vector = np.ones(len(self.PARAMS), dtype=np.float64)
+        else:
+            rv = np.asarray(reactivity_vector, dtype=np.float64)
+            if rv.shape != (len(self.PARAMS),):
+                raise ValueError(
+                    f"reactivity_vector shape {rv.shape} != ({len(self.PARAMS)},)"
+                )
+            self.reactivity_vector = rv
 
         # A: 경험 벡터(5) → 내부 상태(9) 매핑
         # fmt: off
@@ -110,6 +127,9 @@ class InternalState:
             + self.W @ deviation
             + self.D @ (self.baselines - self.state)
         )
+        # 페르소나 reactivity 가중치 적용 — 같은 자극에도 페르소나마다 변동 강도 다름.
+        # default (None 으로 초기화된 경우) 는 ones → 동작 변화 없음.
+        delta = delta * self.reactivity_vector
         delta = np.clip(delta, -self.DELTA_MAX, self.DELTA_MAX)
         # __setattr__ 가 caller 를 본다 — 이 라인은 low_level/internal_state.py 에
         # 있으므로 검사를 통과한다.

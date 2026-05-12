@@ -184,6 +184,40 @@ def clamp(x: float, lo: float = 0.0, hi: float = 1.0) -> float:
     return max(lo, min(hi, x))
 
 
+# stat 변동 가중치 (reactivity). 기준 1.0 = NEUTRAL. clamp [0.5, 1.5].
+# 같은 exp_vec 자극에 페르소나마다 다른 변동 강도를 부여.
+REACTIVITY_NEUTRAL = {
+    'reward': 1.0, 'patience': 1.0, 'arousal': 1.0, 'learning': 1.0,
+    'excitation': 1.0, 'inhibition': 1.0, 'stress': 1.0, 'bonding': 1.0,
+    'comfort': 1.0,
+}
+
+
+REACTIVITY_DELTAS = {
+    'E': {'bonding': +0.30, 'excitation': +0.30, 'arousal': +0.20, 'inhibition': -0.10},
+    'I': {'bonding': -0.30, 'excitation': -0.20, 'arousal': -0.10, 'patience': +0.20, 'inhibition': +0.20},
+    'N': {'learning': +0.20, 'arousal': +0.10},
+    'S': {'comfort': +0.20, 'patience': +0.20, 'learning': -0.10},
+    'F': {'reward': +0.20, 'bonding': +0.20, 'stress': +0.20},
+    'T': {'reward': -0.10, 'bonding': -0.10, 'stress': -0.10, 'comfort': +0.10, 'inhibition': +0.10},
+    'J': {'patience': +0.20, 'inhibition': +0.20, 'arousal': -0.10},
+    'P': {'arousal': +0.10, 'excitation': +0.10, 'patience': -0.10},
+}
+
+
+def reactivity_for(mbti: str) -> dict:
+    """MBTI 4 축의 reactivity delta 를 합산해 [0.5, 1.5] clamp.
+
+    같은 exp_vec 자극에 페르소나마다 다른 변동 강도 (예: E 의 bonding 자극 반응이
+    I 보다 크게). Stage 4 — sample_life 의 시간 drift 와 별개의 default vector.
+    """
+    r = dict(REACTIVITY_NEUTRAL)
+    for axis in mbti:
+        for k, dv in REACTIVITY_DELTAS[axis].items():
+            r[k] = clamp(r[k] + dv, 0.5, 1.5)
+    return {k: round(v, 2) for k, v in r.items()}
+
+
 def baselines_for(mbti: str) -> dict:
     bl = dict(NEUTRAL)
     for axis in mbti:
@@ -296,6 +330,19 @@ drive_ratios:
   safety: {drive_safety}
   pleasure: {drive_pleasure}
 
+# stat 변동 가중치 — 같은 exp_vec 자극에 페르소나마다 다른 변동 강도.
+# 기준 1.0 = NEUTRAL. clamp [0.5, 1.5]. (Stage 4 — sample_life 와 별개.)
+state_reactivity:
+  reward: {react_reward}
+  patience: {react_patience}
+  arousal: {react_arousal}
+  learning: {react_learning}
+  excitation: {react_excitation}
+  inhibition: {react_inhibition}
+  stress: {react_stress}
+  bonding: {react_bonding}
+  comfort: {react_comfort}
+
 relationship_threshold: {rel_threshold}
 mood_decay_eta: {mood_eta}
 
@@ -319,6 +366,7 @@ def render(mbti: str) -> str:
     info = PERSONA_INFO[mbti]
     bl = baselines_for(mbti)
     dr = drive_ratios_for(mbti)
+    rx = reactivity_for(mbti)
     return YAML_TEMPLATE.format(
         mbti=mbti,
         lower=mbti.lower(),
@@ -342,6 +390,15 @@ def render(mbti: str) -> str:
         rel_threshold=relationship_threshold_for(mbti),
         mood_eta=mood_decay_eta_for(mbti),
         neg_weight=negativity_weight_for(mbti),
+        react_reward=rx['reward'],
+        react_patience=rx['patience'],
+        react_arousal=rx['arousal'],
+        react_learning=rx['learning'],
+        react_excitation=rx['excitation'],
+        react_inhibition=rx['inhibition'],
+        react_stress=rx['stress'],
+        react_bonding=rx['bonding'],
+        react_comfort=rx['comfort'],
     )
 
 

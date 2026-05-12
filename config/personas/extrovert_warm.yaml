@@ -62,6 +62,19 @@ drive_ratios:
   safety: 0.10
   pleasure: 0.20
 
+# stat 변동 가중치 — 같은 exp_vec 자극에 페르소나마다 다른 변동 강도.
+# 기준 1.0 = NEUTRAL. clamp [0.5, 1.5]. (Stage 4 — sample_life 와 별개.)
+state_reactivity:
+  reward: 1.2
+  patience: 0.9
+  arousal: 1.4
+  learning: 1.2
+  excitation: 1.4
+  inhibition: 0.9
+  stress: 1.2
+  bonding: 1.5
+  comfort: 1.0
+
 # 관계
 relationship_threshold: 80     # 빨리 친해짐
 

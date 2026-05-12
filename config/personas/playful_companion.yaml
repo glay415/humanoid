@@ -61,6 +61,19 @@ drive_ratios:
   preservation: 0.10
   safety: 0.10
   pleasure: 0.35       # 쾌락 드라이브 강함 — humor 후보 선호 유도
+
+# stat 변동 가중치 — 같은 exp_vec 자극에 페르소나마다 다른 변동 강도.
+# 기준 1.0 = NEUTRAL. clamp [0.5, 1.5]. (Stage 4 — sample_life 와 별개.)
+state_reactivity:
+  reward: 1.2
+  patience: 1.1
+  arousal: 1.3
+  learning: 0.9
+  excitation: 1.4
+  inhibition: 0.9
+  stress: 1.2
+  bonding: 1.5
+  comfort: 1.2
 # (참고: humor 스타일 후보 선호는 candidate_generation 의 mood/marker_signal 흐름에서
 #  높은 reward + 낮은 stress 기저선으로 자연스럽게 표현됨.)
 
