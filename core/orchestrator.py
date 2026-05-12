@@ -172,6 +172,9 @@ class Orchestrator:
         introspection_logger: 'IntrospectionLogger | None' = None,
         # introspection 결과를 식별하는 persona 라벨. 미지정 시 'unknown'.
         persona_id: str = 'unknown',
+        # ADR-016: DMN 활동 산출물 영속화 스토어. None 이면 commit_sink 가
+        # no-op 인 종전 동작 (Wave 7 호환). 인스턴스 격리 빌드에서만 동봉.
+        dmn_artifacts: 'DMNArtifactStore | None' = None,
     ):
         self.low_level = low_level
         self.event_bus = event_bus
@@ -218,6 +221,10 @@ class Orchestrator:
         self.introspection = introspection
         self.introspection_logger = introspection_logger
         self.persona_id = persona_id
+
+        # ADR-016 — DMN 활동 산출물 영속화. None 이면 SnapshotManager.commit 의
+        # sink 가 no-op (legacy).
+        self.dmn_artifacts = dmn_artifacts
 
         # 동기화 지점 (spec §1.4) — 진단 용도.
         # 감정 평가 / 사회인지 / 기억 인출 세 이벤트가 도착해야 후보 생성으로 진행.
@@ -1312,6 +1319,14 @@ class Orchestrator:
                 drives_status = self.low_level.drives.compute(
                     self.low_level.internal_state.to_dict()
                 )
+            # ADR-016 — dmn_artifacts 가 있으면 SnapshotManager.commit 의 sink 로
+            # 그 store.make_sink(turn_provider=) 를 주입. None 이면 None 그대로
+            # 전달해 DMN 안에서 _noop_commit_sink 로 폴백.
+            _sink = None
+            if self.dmn_artifacts is not None:
+                _sink = self.dmn_artifacts.make_sink(
+                    turn_provider=lambda: int(self.turn_number),
+                )
             ctx = DMNContext(
                 episodic=self.episodic_memory,
                 marker_store=getattr(self, 'marker_store', None),
@@ -1324,6 +1339,7 @@ class Orchestrator:
                 drives=drives_status,
                 unappraised_queue=getattr(self.dmn, 'unappraised_queue', None),
                 turn=int(self.turn_number),
+                commit_sink=_sink,
             )
             raw = await self.dmn.run_cycle(ctx)
         else:

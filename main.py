@@ -121,6 +121,7 @@ def build_full_orchestrator(
     from storage.self_model import SelfModel
     from storage.other_model import OtherModel
     from storage.introspection_log import IntrospectionLogger
+    from storage.dmn_artifacts import DMNArtifactStore
 
     low_level = build_low_level(config_path)
     cfg = low_level.temperament.config
@@ -136,12 +137,14 @@ def build_full_orchestrator(
         root.mkdir(parents=True, exist_ok=True)
         chroma_dir = str(root / 'chroma_db')
         prospective_db = str(root / 'prospective.db')
+        dmn_artifacts_db = str(root / 'dmn_artifacts.db')
     else:
         # 기존 동작: 기질 이름별 글로벌 분리
         chroma_dir = f"./chroma_db/humanoid_{name}"
         storage_dir = Path(f"./storage_data/{name}")
         storage_dir.mkdir(parents=True, exist_ok=True)
         prospective_db = str(storage_dir / "prospective.db")
+        dmn_artifacts_db = str(storage_dir / "dmn_artifacts.db")
 
     vector_db = VectorDB(
         collection_name=f"episodic_{name}",
@@ -152,6 +155,10 @@ def build_full_orchestrator(
         reconsolidation_alpha=cfg.get('reconsolidation_alpha', 0.3),
     )
     prospective = ProspectiveQueue(db_path=prospective_db)
+    # ADR-016 — DMN 활동 산출물 SQLite 영속화 (반추 통찰 / 일반 규칙 /
+    # 자기 서사 델타 / 사색 텍스트 / delayed appraisal). orchestrator 가
+    # DMNContext.commit_sink 로 wiring.
+    dmn_artifacts = DMNArtifactStore(db_path=dmn_artifacts_db)
 
     # 고수준 모듈
     emotion_appraisal = EmotionAppraisal(llm_client=llm_client)
@@ -225,6 +232,7 @@ def build_full_orchestrator(
         introspection=introspection,
         introspection_logger=introspection_logger,
         persona_id=str(name),
+        dmn_artifacts=dmn_artifacts,
     )
     orch.register_default_triggers()
 
