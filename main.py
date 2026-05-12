@@ -36,7 +36,10 @@ def build_low_level(config_path: Path | str | None = None) -> LowLevelPipeline:
     temperament = Temperament(config_path)
     cfg = temperament.config
 
-    internal_state = InternalState(temperament.baselines)
+    internal_state = InternalState(
+        temperament.baselines,
+        reactivity_vector=temperament.reactivity_vector(),
+    )
     assert internal_state.validate_stability(), "W-D 행렬 안정성 검증 실패!"
 
     emotion_base = EmotionBase(
@@ -111,11 +114,13 @@ def build_full_orchestrator(
     from high_level.output_postprocess import OutputPostprocess
     from high_level.metacognition import Metacognition
     from high_level.dmn import DMN
+    from high_level.introspection import Introspection
     from storage.vector_db import VectorDB
     from storage.memory_store import EpisodicMemory
     from storage.prospective import ProspectiveQueue
     from storage.self_model import SelfModel
     from storage.other_model import OtherModel
+    from storage.introspection_log import IntrospectionLogger
 
     low_level = build_low_level(config_path)
     cfg = low_level.temperament.config
@@ -185,6 +190,15 @@ def build_full_orchestrator(
     self_model = SelfModel()
     other_model = OtherModel()
 
+    # 비동기 자기 분석 — 매 turn 끝의 background 일기 쓰기.
+    # storage_root 가 주어진 경우에만 logger 동봉 (인스턴스 격리). 없으면 introspection
+    # 모듈만 만들고 logger 는 None — 외부 (UI backend) 가 set 할 여지를 둔다.
+    introspection = Introspection(llm_client=llm_client)
+    if storage_root is not None:
+        introspection_logger = IntrospectionLogger(Path(storage_root))
+    else:
+        introspection_logger = None
+
     orch = Orchestrator(
         low_level=low_level,
         event_bus=EventBus(),
@@ -208,6 +222,9 @@ def build_full_orchestrator(
         episodic_memory=episodic,
         self_model=self_model,
         other_model=other_model,
+        introspection=introspection,
+        introspection_logger=introspection_logger,
+        persona_id=str(name),
     )
     orch.register_default_triggers()
 

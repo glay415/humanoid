@@ -22,6 +22,8 @@ from llm.client import LLMError
 from storage.log_schemas import (
     DriftLogEntry,
     EventLogEntry,
+    IntrospectionLogEntry,
+    IntrospectionResult,
     TurnLogEntry,
 )
 
@@ -36,10 +38,12 @@ if TYPE_CHECKING:
     from high_level.unified_response import UnifiedResponse
     from high_level.metacognition import Metacognition
     from high_level.dmn import DMN
+    from high_level.introspection import Introspection
     from storage.memory_store import EpisodicMemory
     from storage.self_model import SelfModel
     from storage.other_model import OtherModel
     from storage.logger import InstanceLogger
+    from storage.introspection_log import IntrospectionLogger
 
 
 def _iso_now() -> str:
@@ -163,6 +167,11 @@ class Orchestrator:
         self_model: 'SelfModel | None' = None,
         other_model: 'OtherModel | None' = None,
         logger: 'InstanceLogger | None' = None,
+        # 비동기 자기 분석 — 매 turn 끝의 background 일기 쓰기. None 이면 비활성.
+        introspection: 'Introspection | None' = None,
+        introspection_logger: 'IntrospectionLogger | None' = None,
+        # introspection 결과를 식별하는 persona 라벨. 미지정 시 'unknown'.
+        persona_id: str = 'unknown',
     ):
         self.low_level = low_level
         self.event_bus = event_bus
@@ -203,6 +212,12 @@ class Orchestrator:
 
         # Wave 14A — JSONL 로거. None 이면 비활성 (backward compat).
         self.logger = logger
+
+        # 비동기 자기 분석 — 매 turn 끝의 background 일기 쓰기.
+        # 둘 다 주어진 경우에만 활성. logger 와 별개의 라이프사이클.
+        self.introspection = introspection
+        self.introspection_logger = introspection_logger
+        self.persona_id = persona_id
 
         # 동기화 지점 (spec §1.4) — 진단 용도.
         # 감정 평가 / 사회인지 / 기억 인출 세 이벤트가 도착해야 후보 생성으로 진행.
@@ -1210,6 +1225,16 @@ class Orchestrator:
             'experience_vector': dict(experience_vector or {}),
         })
 
+        # 11. background — 페르소나의 자기 분석 일기. fire-and-forget.
+        # 사용자 turn 의 latency 에 영향 없음. 결과는 introspection.jsonl 에 누적.
+        # 예외는 _run_introspection_safe 내부에서 swallow.
+        if self.introspection is not None and self.introspection_logger is not None:
+            try:
+                asyncio.create_task(self._run_introspection_safe())
+            except RuntimeError:
+                # 러닝 루프 없음 등 — 일기 쓰기 실패가 본 turn 을 막지 않음.
+                pass
+
         return {
             'response': response_text,
             'action': 'pass',
@@ -1713,3 +1738,153 @@ class Orchestrator:
             drift_delta_norm=float(delta_norm),
         )
         self.logger.log_drift(entry)
+
+    # ------------------------------------------------------------------
+    # 비동기 자기 분석 (introspection) — stream_unified_turn 끝 background hook.
+    # 사용자 turn 의 latency 에 영향 없음. 모든 예외 swallow.
+    # ------------------------------------------------------------------
+
+    async def _run_introspection_safe(self) -> None:
+        """Background fire-and-forget. 페르소나의 자기 일기 1줄을 jsonl 에 누적.
+
+        흐름:
+          1) 현재 state/mood + 직전 5턴의 delta 요약 + dialogue_buffer + 마커 변화 수집.
+          2) introspection.analyze() (small_model, reasoning_effort=low) 호출.
+          3) IntrospectionLogEntry 로 introspection_logger.log().
+          4) 어디에서든 예외가 나면 swallow + (logger 가 있으면) introspection_error
+             이벤트로 기록만 남긴다.
+
+        본 메서드는 stream_unified_turn 이 done 을 emit 한 *후* 에 호출되므로
+        사용자 응답 latency 에 영향이 없다.
+        """
+        try:
+            # --- 1. 현재 스냅샷 수집 ----------------------------------------
+            if self.low_level is None:
+                return
+            try:
+                cur_state = {
+                    k: float(v)
+                    for k, v in (self.low_level.internal_state.to_dict() or {}).items()
+                }
+            except Exception:
+                cur_state = {}
+            try:
+                cur_mood = {
+                    k: float(v) for k, v in (self.low_level.emotion_base.mood or {}).items()
+                }
+            except Exception:
+                cur_mood = {}
+
+            persona_narrative = ''
+            if self.self_model is not None:
+                try:
+                    persona_narrative = str(self.self_model.to_dict().get('narrative', ''))
+                except Exception:
+                    persona_narrative = ''
+
+            recent_turns_summary = self._summarize_recent_turns_for_introspection(limit=5)
+            recent_dialogue_text = _fmt_recent_dialogue_for_stream(self.dialogue_buffer)
+            marker_changes = self._summarize_recent_marker_changes(limit=5)
+
+            # --- 2. LLM 콜 -------------------------------------------------
+            if self.introspection is None or self.introspection_logger is None:
+                return
+            result = await self.introspection.analyze(
+                persona_narrative=persona_narrative,
+                recent_turns_summary=recent_turns_summary,
+                recent_dialogue_text=recent_dialogue_text,
+                marker_changes=marker_changes,
+                current_state=cur_state,
+                current_mood=cur_mood,
+            )
+
+            # --- 3. 로그 1줄 ------------------------------------------------
+            entry = IntrospectionLogEntry(
+                ts=_iso_now(),
+                turn=int(self.turn_number),
+                persona_id=str(self.persona_id or 'unknown'),
+                state_snapshot=cur_state,
+                mood=cur_mood,
+                result=IntrospectionResult(**result),
+            )
+            self.introspection_logger.log(entry)
+        except Exception as exc:
+            # 일기 쓰기 실패는 본 시스템을 멈추지 않는다 — events.jsonl 에만 기록.
+            self._log_event_safe('introspection_error', {'message': repr(exc)[:200]})
+
+    def _summarize_recent_turns_for_introspection(self, limit: int = 5) -> str:
+        """직전 N턴 turns.jsonl 의 state/mood/drives delta 를 1줄당 1턴 텍스트로.
+
+        introspection prompt 의 recent_turns_summary 슬롯에 들어간다. 변수명은
+        prompt 의 1인칭 어조로 환원하지 않고, *값의 흐름* 만 노출. LLM 측에서
+        시스템 용어를 입에 담지 않도록 system 메시지가 막는다.
+
+        반환 형태 예:
+          'T12: state {energy:+0.05, stress:-0.02} mood {pleasant:+0.10}'
+          'T13: state {...} mood {...}'
+        """
+        if self.logger is None:
+            return ''
+        try:
+            rows = self.logger.read_turns(limit=limit + 1)
+        except Exception:
+            return ''
+        if not rows:
+            return ''
+
+        lines: list[str] = []
+        prev: dict | None = None
+        for row in rows:
+            if prev is not None:
+                lines.append(_format_turn_delta(prev, row))
+            prev = row
+        if not lines and rows:
+            # 직전 턴이 1개 뿐이면 절대값 1줄만이라도.
+            r = rows[-1]
+            lines.append(f"T{r.get('turn', '?')}: 첫 기록 (이전 비교 대상 없음)")
+        return '\n'.join(lines[-limit:])
+
+    def _summarize_recent_marker_changes(self, limit: int = 5) -> str:
+        """events.jsonl 에서 marker_formed / marker_decayed 최근 N개를 평문으로."""
+        if self.logger is None:
+            return ''
+        try:
+            formed = self.logger.read_events(type_filter='marker_formed', limit=limit)
+            decayed = self.logger.read_events(type_filter='marker_decayed', limit=limit)
+        except Exception:
+            return ''
+        lines: list[str] = []
+        for ev in formed:
+            p = ev.get('payload', {}) or {}
+            lines.append(
+                f"형성: pattern={p.get('pattern_id', '?')} "
+                f"valence={p.get('valence', '?')} strength={p.get('strength', '?')}"
+            )
+        for ev in decayed:
+            p = ev.get('payload', {}) or {}
+            lines.append(f"감쇠: pattern={p.get('pattern_id', '?')}")
+        return '\n'.join(lines[-limit:])
+
+
+def _format_turn_delta(prev_row: dict, cur_row: dict) -> str:
+    """turns.jsonl 2 줄 → 'T{n}: state {…} mood {…}' 한 줄."""
+    cur_turn = cur_row.get('turn', '?')
+
+    def _delta_dict(prev_d: dict, cur_d: dict) -> str:
+        parts: list[str] = []
+        for k, v in (cur_d or {}).items():
+            try:
+                cv = float(v)
+                pv = float((prev_d or {}).get(k, cv))
+                diff = cv - pv
+                if abs(diff) < 0.01:
+                    continue
+                sign = '+' if diff >= 0 else ''
+                parts.append(f"{k}:{sign}{diff:.2f}")
+            except (TypeError, ValueError):
+                continue
+        return '{' + ', '.join(parts) + '}' if parts else '{변화 미미}'
+
+    state_d = _delta_dict(prev_row.get('state', {}), cur_row.get('state', {}))
+    mood_d = _delta_dict(prev_row.get('mood', {}), cur_row.get('mood', {}))
+    return f"T{cur_turn}: state {state_d} mood {mood_d}"
