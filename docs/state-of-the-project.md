@@ -2,12 +2,13 @@
 
 > Living document. Wave 머지 / 중요 결정 / baseline 변동 시마다 갱신한다. 규칙은 [`CLAUDE.md`](../CLAUDE.md) 참조.
 
-## Current baseline (as of 2026-05-11, latency optimization in progress)
+## Current baseline (as of 2026-05-12, ADR-013/014 emergent persona + DMN auto-push)
 
-- Tests: **643 passed + 1 skipped** (`pytest tests/ -q`, ~3min)
-- Branch: `main` past v0.3.0 (commit `41a8dd6` + ADR-011 후속 작업)
+- Tests: **738 passed + 2 skipped + 1 xfailed** (`pytest tests/ -q --ignore=tests/persona_eval --ignore=tests/e2e_trends`, ~4min)
+- Branch: `main` past v0.3.0 (latest `a3e909c`)
 - Release: `release` branch at `v0.3.0` (Phase 3 / §8 enforcement / analyze.py / logs UI tab).
-- LLM tier: `small` / `large` / `dmn` 모두 `gpt-5.5`. `reasoning_effort` per-tier (small=low, large=medium, dmn=low). 콜별 override 가능 — ADR-011.
+- LLM tier: `small` / `large` / `dmn` 모두 `gpt-5.5`. `reasoning_effort` per-tier (small=low, large=medium, dmn=low). 콜별 override 가능 — ADR-011. Unified single-call stream — ADR-012.
+- persona_eval (`tests/persona_eval/`) scoped regression: **16/16 PASS** on 4 시나리오 × 5 페르소나 (실 LLM, 별도 비용 — pytest 에 포함 X).
 - Repo: https://github.com/glay415/humanoid
 
 ## Implementation status
@@ -27,6 +28,7 @@ Phase 단위는 spec §13 implementation roadmap 기준. Wave 는 실제 작업 
 - [x] **Wave 12** — destructive operations: 인스턴스별 hard reset (`/api/instances/{id}/hard-reset`, 페르소나 + jitter_seed 보존, chroma/sqlite/state 삭제) + 전체 wipe (`/api/admin/wipe`, body `{confirm:"WIPE"}`). UI: 카드별 kebab 메뉴 + 갤러리 footer `WipeConfirmModal` (typed token).
 - [ ] Phase 6 — 실 대화 데이터 기반 W 행렬 미세조정.
 - [x] DMN.unappraised_queue orchestrator 자동 push 통합 (ADR-014, 2026-05-12). `Orchestrator._push_unappraised` 헬퍼 + 두 emotion fallback hook (`process_conversation_turn` / `stream_unified_turn`). +6 tests (`tests/test_dmn_auto_push.py`). DMN cycle 의 retrospective LLM 처리는 별도 PR.
+- [x] ADR-013 emergent persona 동작 검증 (2026-05-12). `tests/persona_eval/` 프레임워크 — LLM-as-judge regression. 11 시나리오 (3 grounding 정합 수정 + 신규 `meta_identity_low_metacog`). 좁은 scope 회귀 검증 (4 시나리오 × 5 페르소나) **16/16 PASS**. 두 핵심 fix: judge 가 sample_life 합성 narrative 도 보게 (`runner.py::fetch_instance_narrative`), 그리고 `prompts/unified_response.txt` 의 "사람이다" rule 의 *표현 강도* 가 metacog 자원에 따라 emergent (자원<0.4 → 흔들림 + AI disclosure 금지 유지).
 
 ## Wave history
 
@@ -55,8 +57,11 @@ Phase 단위는 spec §13 implementation roadmap 기준. Wave 는 실제 작업 
 - Wave 12 끝 (2026-05-08): **528 + 1 skip + 1 xfail**.
 - 2026-05-12 state_reactivity 추가: **716 + 2 skip + 1 xfail** (+35 신규 `tests/test_state_reactivity.py`. 528 → 716 차이는 다른 sub-agent 의 main 직커밋 합산 포함).
 - 2026-05-12 DMN auto-push (ADR-014): **738 + 2 skip + 1 xfail** (+6 신규 `tests/test_dmn_auto_push.py` + 1 기존 e2e 테스트 업데이트. 716 → 738 차이는 다른 sub-agent 의 main 직커밋 합산 포함).
+- 2026-05-12 ADR-013 verification: 통상 pytest 카운트는 변동 없음 (`tests/persona_eval/` 는 pytest 에서 ignore). persona_eval scoped regression (4 시나리오 × 5 페르소나) **16 PASS / 0 FAIL** — 실 LLM 콜 기반 별도 검증.
 
 ## Active work
+
+**ADR-013 persona behavior framework — Stage 1~5 verified** (2026-05-12): 페르소나가 본인 결로 emergent 하게 동작하는지 LLM-as-judge 로 검증. 좁은 scope (4 시나리오 × 5 페르소나) 16/16 PASS. 두 잠재 결함이 분석 과정에서 드러나 fix 됨 — (1) judge 가 spawn 직후의 `self_model.narrative` (sample_life 합성분) 를 못 봐서 instance 가 무작위로 받은 관심사를 "narrative 결 안 맞음" 으로 오판한 건, runner 가 GET /api/instances/{id} 로 런타임 narrative 도 받아 채점에 전달. (2) 자원 낮은 metacog 상태에서 "사람이다" hard rule 이 자기 의문 emergent 동작을 막아버린 건, `prompts/unified_response.txt` 의 hard rule section 안에 *표현 강도가 자원에 따라 다르다* 는 명시 carve-out 추가 (자원<0.4 → 흔들림 + AI disclosure 절대 금지 유지). 전체 scope (11 × 21 = ~214 runs, ~100min 비용) 는 아직 안 돌림.
 
 **Persona stat reactivity** (2026-05-12, in-progress → completed for stage 1): 페르소나별 stat 변동 가중치 (state_reactivity 9-dim) 도입. 같은 exp_vec 에 페르소나마다 다른 변동 강도 (예: ENFP bonding 1.5 vs ISTJ 0.6). InternalState.update() 에서 delta 에 reactivity 가중치 곱 후 Δmax clamp. yaml 의 `state_reactivity` 블록 (drive_ratios 다음 위치) — 21 페르소나 모두 보유. backward compat: yaml 에 없거나 `reactivity_vector=None` 이면 ones (동작 변화 없음). MBTI 4축 매핑은 `scripts/generate_mbti_personas.py::reactivity_for()`. (Stage 2 — reactivity drift over time — 미구현.)
 
@@ -105,6 +110,7 @@ scripts/        sensitivity report helper
 - spec §12 시나리오 26 (non-dual awareness): xfail strict — "표현 시 이원성 복원" 은 텍스트 기반 존재의 ontological 한계.
 - spec §12 시나리오 27 (collective transcendence): skip — 시뮬레이션 환경이 1-person.
 - DMN.unappraised_queue 의 retrospective LLM 재처리는 미구현 — `_try_unappraised_reprocess` 는 큐를 pop 만 한다 (auto-push 는 ADR-014 로 통합 완료). LLM 콜 + delayed encoding 본 구현은 별도 PR.
+- `tests/persona_eval/` 의 전체 scope (11 시나리오 × 21 페르소나) 는 실제 LLM 콜 ~214 회 + judge 채점 + rate-limit guard 로 ~100분 + LLM 비용. 매번 안 돌린다. 좁은 scope (대표 4 × 대표 5 = 16) 만 회귀 검증용으로 권장 — `uv run python tests/persona_eval/runner.py --scenario <a,b,c> --persona <a,b,c>`.
 - `model: gpt-5.5` 인식하는 LiteLLM 버전이 필요. 인식 못 하면 `pyproject.toml` 의 litellm pin 을 올린다.
 - `chroma_db/` 와 `storage_data/` (기질 이름별 단일 인스턴스 경로) 는 Wave 11 이후 legacy. `instances/<uuid>/` 가 정식. legacy `_default` 인스턴스가 자동 생성되어 기존 `/api/turn`, `/api/state` 가 backward-compat. 단일화 ADR 후보.
 - Frontend dark mode 는 `localStorage` 기반 — incognito 에서는 매 세션 초기화.
