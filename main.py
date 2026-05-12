@@ -209,8 +209,16 @@ def build_full_orchestrator(
         except AttributeError:
             pass
 
-    self_model = SelfModel()
-    other_model = OtherModel()
+    # ADR-030: yaml 의 narrative_pressure 가 SelfModel 의 section cap (max_lines)
+    # 을 결정. 미설정 시 default 0.5 → cap 5 (기존 동작).
+    self_model = SelfModel(
+        narrative_pressure=cfg.get('narrative_pressure', 0.5),
+    )
+    # ADR-030: yaml 의 relationship_threshold (E=70, I=130 등) 가 OtherModel 의
+    # relationship_stage 전환 임계. 미설정 시 100 (neutral).
+    other_model = OtherModel(
+        relationship_threshold=int(cfg.get('relationship_threshold', 100)),
+    )
 
     # 비동기 자기 분석 — 매 turn 끝의 background 일기 쓰기.
     # storage_root 가 주어진 경우에만 logger 동봉 (인스턴스 격리). 없으면 introspection
