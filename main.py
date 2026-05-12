@@ -236,6 +236,37 @@ def build_full_orchestrator(
     )
     orch.register_default_triggers()
 
+    # ADR-019 — 인스턴스 재시작 시 dmn_artifacts.db 의 case_promote history 에서
+    # fast_path 패턴 복원. 첫 spawn 시엔 store 가 비어 있어 no-op. 재시작 후에는
+    # 이전 세션의 학습된 자동 경로가 살아나 spec §4.2 절차기억 동작 영속화.
+    if low_level.fast_path is not None:
+        try:
+            rows = dmn_artifacts.latest_case_promotes()
+            from low_level.fast_path import FastPathPattern as _FPP
+            restored_count = 0
+            for r in rows:
+                payload = r.get('payload') or {}
+                trigger = str(payload.get('pattern_id', '')).strip()
+                state_changes = payload.get('state_changes')
+                confidence = payload.get('confidence')
+                if not trigger or not isinstance(state_changes, dict) or confidence is None:
+                    continue  # ADR-019 이전 row (필드 누락) — skip.
+                low_level.fast_path.register_or_update(
+                    _FPP(
+                        trigger=trigger,
+                        state_changes=dict(state_changes),
+                        confidence=float(confidence),
+                    )
+                )
+                restored_count += 1
+            if restored_count > 0:
+                orch._log_event_safe('fast_path_restored', {
+                    'count': restored_count,
+                })
+        except Exception:
+            # best-effort — 복원 실패가 새 인스턴스 빌드를 막지 않게.
+            pass
+
     # LLM 콜 단위 latency 도 events.jsonl 에 흘려보낸다. logger 가 set_logger 로
     # 나중에 붙더라도 _log_event_safe 가 None 체크하므로 안전.
     def _llm_event_sink(payload: dict) -> None:
