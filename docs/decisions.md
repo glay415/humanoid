@@ -200,6 +200,30 @@ SSE event 시퀀스 변화 (unified path): low_level → memory → response_chu
 
 **Status**: accepted.
 
+## ADR-013 (2026-05-12): Per-persona stat reactivity vector (stage 1 — default per MBTI)
+
+**Context**: 같은 자극에 9-dim 매질의 변동 강도가 페르소나마다 달라야 자연스럽다. 기존 InternalState 는 모든 페르소나가 동일한 A·exp + W·dev + D·rec 식을 거쳐 동일 delta 를 받는다. 차이는 baselines / drive_ratios / negativity_weight 정도. 동일 "공격적 발언" 에 ESFP 와 INTP 의 stress 가 똑같이 오르는 건 부자연스럽다.
+
+**Decision**: 페르소나 yaml 에 9-dim `state_reactivity` 블록 (각 stat 마다 1.0 기준, [0.5, 1.5] clamp) 을 추가. `InternalState.update()` 에서 delta 에 reactivity_vector 를 element-wise 곱한 뒤 기존 Δmax + [0,1] clamp 적용. Temperament 가 yaml 로드 시 `state_reactivity` 를 dict 로 들고, `reactivity_vector()` 가 PARAMS 순서 9-dim ndarray 로 변환해 InternalState init 에 전달.
+
+MBTI 4축 매핑 (`scripts/generate_mbti_personas.py::REACTIVITY_DELTAS`):
+- E: bonding +.30, excitation +.30, arousal +.20, inhibition -.10
+- I: bonding -.30, excitation -.20, arousal -.10, patience +.20, inhibition +.20
+- N: learning +.20, arousal +.10
+- S: comfort +.20, patience +.20, learning -.10
+- F: reward +.20, bonding +.20, stress +.20
+- T: reward -.10, bonding -.10, stress -.10, comfort +.10, inhibition +.10
+- J: patience +.20, inhibition +.20, arousal -.10
+- P: arousal +.10, excitation +.10, patience -.10
+
+Legacy 5 페르소나 → MBTI 매핑: extrovert_warm=ENFP, introvert_thoughtful=INFJ, playful_companion=ESFP, sensitive_empathic=INFP, steady_analytical=ISTJ.
+
+**Backward compat**: `InternalState(__init__, reactivity_vector=None)` 또는 yaml 에 `state_reactivity` 없으면 ones (동작 변화 없음). 기존 테스트 모두 통과.
+
+**Out of scope (stage 2 candidate)**: 시간에 따른 reactivity drift (sample_life 와 별개 슬로 EMA 등). 본 ADR 은 default vector 만 — 평생 고정.
+
+**Status**: accepted.
+
 ---
 
 ## Future ADRs (placeholder)

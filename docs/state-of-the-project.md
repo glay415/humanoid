@@ -53,8 +53,15 @@ Phase 단위는 spec §13 implementation roadmap 기준. Wave 는 실제 작업 
 - Wave 10 끝: 480 + 1 skip + 1 xfail.
 - Wave 11 끝 (2026-05-08): 513 + 1 skip + 1 xfail.
 - Wave 12 끝 (2026-05-08): **528 + 1 skip + 1 xfail**.
+- 2026-05-12 state_reactivity 추가: **716 + 2 skip + 1 xfail** (+35 신규 `tests/test_state_reactivity.py`. 528 → 716 차이는 다른 sub-agent 의 main 직커밋 합산 포함).
 
 ## Active work
+
+**Persona stat reactivity** (2026-05-12, in-progress → completed for stage 1): 페르소나별 stat 변동 가중치 (state_reactivity 9-dim) 도입. 같은 exp_vec 에 페르소나마다 다른 변동 강도 (예: ENFP bonding 1.5 vs ISTJ 0.6). InternalState.update() 에서 delta 에 reactivity 가중치 곱 후 Δmax clamp. yaml 의 `state_reactivity` 블록 (drive_ratios 다음 위치) — 21 페르소나 모두 보유. backward compat: yaml 에 없거나 `reactivity_vector=None` 이면 ones (동작 변화 없음). MBTI 4축 매핑은 `scripts/generate_mbti_personas.py::reactivity_for()`. (Stage 2 — reactivity drift over time — 미구현.)
+
+파일: `low_level/internal_state.py` (reactivity_vector 인자 + update() 가중치 적용), `low_level/temperament.py` (state_reactivity 로드 + `reactivity_vector()` 헬퍼), `main.py::build_low_level` (Temperament → InternalState 전달), `scripts/generate_mbti_personas.py` (`reactivity_for()` + yaml 템플릿), `config/personas/*.yaml` × 21 (state_reactivity 블록 추가, narrative_seed/baselines/drive_ratios 등 기존 필드 미변경), `tests/test_state_reactivity.py` (+35 tests).
+
+
 
 **Latency reduction sprint** (2026-05-11, ADR-011): gpt-5.5 reasoning latency 가 dominant cost 로 측정됨 (턴 평균 40~50s). 다축 변경 진행 중 — `reasoning_effort` per-tier, reappraisal depth 3→1, `final_judgment + tone_verification + tone_adjust` 1콜 통합 (`high_level/judge_finalize.py`), prompt caching prefix, SSE response_chunk streaming, candidate 4→3. 목표 15~20s/턴.
 
