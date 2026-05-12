@@ -55,6 +55,10 @@ class DMNContext:
     # ADR-018: 사례 승격 (Activity 2) 의 결과를 실제 fast_path 패턴으로 register.
     # None 이면 종전대로 텍스트 규칙 영속 (ADR-016) 까지만, 자동 경로 미생성.
     fast_path: object | None = None       # low_level.FastPath
+    # ADR-026: Activity 4 (contemplate) 의 reflection 을 ProspectiveQueue 에 push
+    # 해 다음 대화 턴의 memory_retrieval 이 "다음에 꺼낼 거리" 로 인출 가능.
+    # None 이면 enqueue skip (backward compat).
+    prospective: object | None = None     # storage.ProspectiveQueue
     drives: dict | None = None            # {'fulfillment': {...}, 'deficits': {...}}
     unappraised_queue: list = field(default_factory=list)
     rumination_counter: dict = field(default_factory=dict)
@@ -699,6 +703,22 @@ class DMN:
             # 적용 실패도 silent — DMN 사이클 흐름 보호 (영속은 이미 됨).
             pass
 
+        # ADR-026 — reflection 을 prospective queue 에 push. 다음 대화 턴의
+        # memory_retrieval.prospective.fetch_top 이 인출해 LLM context 로 흐름.
+        # priority 는 결핍 강도 (= 사색 동기의 절실함).
+        prospective_enqueued = False
+        try:
+            if ctx.prospective is not None and hasattr(ctx.prospective, 'enqueue') and (reflection or '').strip():
+                deficit_priority = float(deficits.get(chosen_drive, 0.0))
+                ctx.prospective.enqueue(
+                    content=(reflection or '').strip(),
+                    priority=max(0.0, min(1.0, deficit_priority)),
+                    turn=int(ctx.turn),
+                )
+                prospective_enqueued = True
+        except Exception:
+            pass
+
         return DMNCycleResult(
             activity='contemplate',
             activity_type=int(DMNActivityType.CONTEMPLATE),
@@ -707,6 +727,7 @@ class DMN:
                 'drive': chosen_drive,
                 'reflection': (reflection or '').strip(),
                 'contemplation_applied': contemplation_applied,
+                'prospective_enqueued': prospective_enqueued,
             },
             committed=committed,
         )

@@ -1361,6 +1361,13 @@ class Orchestrator:
                 fast_path=(
                     self.low_level.fast_path if self.low_level is not None else None
                 ),
+                # ADR-026: Activity 4 contemplate 의 reflection → prospective queue.
+                prospective=(
+                    self.memory_retrieval.prospective
+                    if (self.memory_retrieval is not None
+                        and hasattr(self.memory_retrieval, 'prospective'))
+                    else None
+                ),
                 drives=drives_status,
                 unappraised_queue=getattr(self.dmn, 'unappraised_queue', None),
                 turn=int(self.turn_number),
