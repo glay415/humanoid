@@ -142,6 +142,40 @@ class MetacogDebugRequest(BaseModel):
     resource: float
 
 
+class StateDebugRequest(BaseModel):
+    """ADR-033 — debug 용 범용 state override 요청.
+
+    9-dim internal_state 의 각 파라미터 + emotion_base 의 mood/raw_core_affect
+    를 자유롭게 override. 모든 필드 옵셔널 — 주어진 것만 적용.
+
+    내부 state 9 dim (range [0.0, 1.0]):
+      reward, patience, arousal, learning, excitation, inhibition,
+      stress, bonding, comfort
+
+    mood / raw_core_affect (range [-1.0, 1.0]):
+      mood_valence, mood_arousal, raw_valence, raw_arousal
+
+    intent: persona_eval / 실 검증 시 의도된 *짜증 / 우울 / 흥분 / 피곤* 등
+    상태를 강제 후 응답 톤·길이·완결성 변화 관찰. 사람의 대화 form 이 state 의
+    함수임을 시각적으로 확인.
+    """
+    # 9-dim internal_state — 모두 [0,1] 범위.
+    reward: float | None = None
+    patience: float | None = None
+    arousal: float | None = None
+    learning: float | None = None
+    excitation: float | None = None
+    inhibition: float | None = None
+    stress: float | None = None
+    bonding: float | None = None
+    comfort: float | None = None
+    # emotion_base — [-1,1] 범위.
+    mood_valence: float | None = None
+    mood_arousal: float | None = None
+    raw_valence: float | None = None
+    raw_arousal: float | None = None
+
+
 class InstanceCardModel(BaseModel):
     instance_id: str
     display_name: str
@@ -423,6 +457,97 @@ async def debug_set_metacog_resource(
     return {
         'instance_id': instance_id,
         'resource': float(orch.metacognition.resource),
+    }
+
+
+@app.post("/api/instances/{instance_id}/debug/state", status_code=200)
+async def debug_set_state(
+    instance_id: str,
+    body: StateDebugRequest,
+) -> dict:
+    """ADR-033 — debug 전용 범용 state override.
+
+    9-dim internal_state + mood + raw_core_affect 의 임의 필드를 즉시 override.
+    persona_eval / 실 대화 검증 시 *짜증 / 우울 / 피곤 / 흥분* 등 의도된 상태로
+    인스턴스를 흔들어 응답 form (길이, 완결성, 침묵) 의 변화 관찰.
+
+    body 의 모든 필드 옵셔널 — 주어진 것만 적용.
+    범위 검증:
+      - 9-dim internal_state: [0.0, 1.0]. 그 외는 400.
+      - mood / raw_core_affect: [-1.0, 1.0]. 그 외는 400.
+
+    반환: {"instance_id": "...", "applied": {<적용된 필드>: <값>}}
+    """
+    if not MANAGER.exists(instance_id):
+        raise HTTPException(status_code=404, detail=f"instance not found: {instance_id}")
+    orch = MANAGER.get(instance_id)
+    if orch.low_level is None or orch.low_level.internal_state is None:
+        raise HTTPException(
+            status_code=400, detail="orchestrator has no internal_state",
+        )
+    internal = orch.low_level.internal_state
+    emotion = orch.low_level.emotion_base
+
+    nine_dim_keys = (
+        'reward', 'patience', 'arousal', 'learning',
+        'excitation', 'inhibition', 'stress', 'bonding', 'comfort',
+    )
+    mood_keys = ('mood_valence', 'mood_arousal', 'raw_valence', 'raw_arousal')
+
+    payload = body.model_dump(exclude_none=True)
+    if not payload:
+        raise HTTPException(
+            status_code=400,
+            detail="at least one field required",
+        )
+
+    # 범위 검증.
+    for k, v in payload.items():
+        if k in nine_dim_keys and not (0.0 <= float(v) <= 1.0):
+            raise HTTPException(
+                status_code=400,
+                detail=f"{k} out of range [0.0, 1.0]: {v}",
+            )
+        if k in mood_keys and not (-1.0 <= float(v) <= 1.0):
+            raise HTTPException(
+                status_code=400,
+                detail=f"{k} out of range [-1.0, 1.0]: {v}",
+            )
+
+    applied: dict = {}
+
+    # 9-dim 적용 — InternalState.state ndarray 직접 수정.
+    if any(k in payload for k in nine_dim_keys):
+        import numpy as _np  # local import to keep app imports light
+        new_state = internal.state.copy()
+        for i, k in enumerate(internal.PARAMS):
+            if k in payload:
+                new_state[i] = float(payload[k])
+        # internal_state 의 _PROTECTED_ATTRS 가드 우회: ndarray __setitem__.
+        for i, k in enumerate(internal.PARAMS):
+            if k in payload:
+                internal.state[i] = _np.clip(float(payload[k]), 0.0, 1.0)
+                applied[k] = float(internal.state[i])
+
+    # mood / raw_core_affect 적용. EmotionBase 의 _PROTECTED_ATTRS 가 직접 할당
+    # 차단하므로 *dict in-place 갱신* (안의 키만 변경) 으로 spec 우회.
+    if emotion is not None:
+        if 'mood_valence' in payload and getattr(emotion, 'mood', None) is not None:
+            emotion.mood['valence'] = float(payload['mood_valence'])
+            applied['mood_valence'] = emotion.mood['valence']
+        if 'mood_arousal' in payload and getattr(emotion, 'mood', None) is not None:
+            emotion.mood['arousal'] = float(payload['mood_arousal'])
+            applied['mood_arousal'] = emotion.mood['arousal']
+        if 'raw_valence' in payload and getattr(emotion, 'raw_core_affect', None) is not None:
+            emotion.raw_core_affect['valence'] = float(payload['raw_valence'])
+            applied['raw_valence'] = emotion.raw_core_affect['valence']
+        if 'raw_arousal' in payload and getattr(emotion, 'raw_core_affect', None) is not None:
+            emotion.raw_core_affect['arousal'] = float(payload['raw_arousal'])
+            applied['raw_arousal'] = emotion.raw_core_affect['arousal']
+
+    return {
+        'instance_id': instance_id,
+        'applied': applied,
     }
 
 
