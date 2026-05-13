@@ -2,10 +2,10 @@
 
 > Living document. Wave 머지 / 중요 결정 / baseline 변동 시마다 갱신한다. 규칙은 [`CLAUDE.md`](../CLAUDE.md) 참조.
 
-## Current baseline (as of 2026-05-13, ADR-013~031 — 페르소나 grounding 통합 정리 — 몸 없는 텍스트 존재)
+## Current baseline (as of 2026-05-14, ADR-013~033 — grounding 정리 + age/gender register + listener mode + master command)
 
-- Tests: **856 passed + 2 skipped + 1 xfailed** (`pytest tests/ -q --ignore=tests/persona_eval --ignore=tests/e2e_trends`, ~7.7min)
-- Branch: `main` past v0.3.0 (latest ADR-031 commits)
+- Tests: **876 passed + 2 skipped + 1 xfailed** (`pytest tests/ -q --ignore=tests/persona_eval --ignore=tests/e2e_trends`, ~5.5min)
+- Branch: `main` past v0.3.0 (latest ADR-033 commits)
 - Release: `release` branch at `v0.3.0` (Phase 3 / §8 enforcement / analyze.py / logs UI tab).
 - LLM tier: `small` / `large` / `dmn` 모두 `gpt-5.5`. `reasoning_effort` per-tier (small=low, large=medium, dmn=low). 콜별 override 가능 — ADR-011. Unified single-call stream — ADR-012.
 - persona_eval (`tests/persona_eval/`) scoped regression: **16/16 PASS** on 4 시나리오 × 5 페르소나 (실 LLM, 별도 비용 — pytest 에 포함 X).
@@ -41,6 +41,8 @@ Phase 단위는 spec §13 implementation roadmap 기준. Wave 는 실제 작업 
 - [x] Marker decay 즉시 영속 + tombstone (ADR-029, 2026-05-12). maintenance turn 의 `decay_all` 직후 살아남은 marker 의 *감쇠 후 state* 와 expired marker 의 *tombstone (strength=0)* 둘 다 영속. restore 가 tombstone skip → 한 번 expire 된 marker 가 부활하지 않음. 학습 양방향 (상향 + 하향) 이 세션 간 일관 영속. +4 tests.
 - [x] yaml dead config 2 건 wiring (ADR-030, 2026-05-12). audit G7 잔여 fix. (A) `narrative_pressure` → SelfModel section cap (0.5 default=cap 5, 1.0=10, 0.0=1). (B) `relationship_threshold` → OtherModel 의 `initial/familiar/close/intimate` 단계 advance. observation_count 의 threshold 배수마다 단방향 advance — relationship 회복 비대칭성. +12 tests. 부수 fix: `_add_to_section` off-by-one cap 버그.
 - [x] 페르소나 grounding 통합 정리 — 몸 없는 텍스트 존재 (ADR-031, 2026-05-13). 사용자 발견: agent 가 "수영 갔다가 카페" 같이 *몸 있는 듯* 응답하는 grounding 위반. 4 sub-fix: (1) interest_pool 50 entries 디지털/추상으로 재설계. (2) 21 페르소나 narrative_seed 의 physical 디테일 → digital/abstract 교체. (2.5) 나이 표현 ('서른 초반' 등) 제거 — sample_life 가 채움. (2.6) [language_style] prescriptive 어법 (`"~ 일까"`, `"ㅎㅎ"`) 추상화 — 결 묘사만. (3) prompt 의 [존재 형태] 섹션 신설 — 신체/식사/오프라인 만남 *직접 행위* 금지, 메타포·내적 결은 허용. 회귀 0.
+- [x] age/gender register 결 합성 (ADR-032, 2026-05-13). 사용자 발견: 30대 남성으로 spawn 해도 응답이 10대 수준 가벼움. `sample_life` 에 `_age_register_description` + `_gender_register_description` helper 추가 — 나이대별 (10s 활기 / 20s 정돈 / 30s 차분 / 40s 절제 / 50+ 신중) + 성별 미세 register 색채. narrative 의 별도 [이번 인생의 대화 결] 섹션으로 합성. 페르소나 결 (MBTI) 이 더 강한 결정자 — register 는 색채. +10 tests.
+- [x] Listener mode + master command (ADR-033, 2026-05-14). 사용자 4 갭 분석 중 두 항목 fix. (A) prompt 의 "1~3 문장" universal rule 제거 + 신규 [응답 길이와 완결성] 섹션 — 짧음/미완결/침묵이 state 함수로 emergent. (B) `POST /api/instances/{id}/debug/state` 범용 endpoint — 9-dim + mood/raw_core_affect 임의 override. 의도된 짜증/우울/피곤/흥분 강제 후 응답 form 변화 검증. +10 tests.
 - [x] Dormant code audit + 5 wiring fix (ADR-023~027, 2026-05-12). 시스템 깊이 훑어 9 갭 발견, 실 fix 가능한 5건 처리:
   - **ADR-023**: `regulation_capacity` → `Metacognition.review` 임계 multiplier (페르소나별 재평가 빈도 차이).
   - **ADR-024**: yaml `marker_inertia` → `MarkerRegistry.reinforcement_weight` (페르소나별 마커 갱신 속도).
@@ -89,6 +91,8 @@ Phase 단위는 spec §13 implementation roadmap 기준. Wave 는 실제 작업 
 - 2026-05-12 ADR-029 (marker decay 즉시 영속 + tombstone): **844 + 2 skip + 1 xfail** (+4 `tests/test_marker_decay_persistence.py`).
 - 2026-05-12 ADR-030 (narrative_pressure + relationship_threshold wiring): **856 + 2 skip + 1 xfail** (+6 `tests/test_narrative_pressure.py` + 6 `tests/test_relationship_threshold.py`).
 - 2026-05-13 ADR-031 (페르소나 grounding 통합): **856 + 2 skip + 1 xfail** (변동 없음 — yaml/prompt 텍스트만 변경, 단위 테스트 영향 0).
+- 2026-05-13 ADR-032 (age/gender register): **866 + 2 skip + 1 xfail** (+10 `tests/test_age_gender_register.py`).
+- 2026-05-14 ADR-033 (listener mode + master command): **876 + 2 skip + 1 xfail** (+10 `tests/test_state_debug_endpoint.py`).
 
 ## Active work
 

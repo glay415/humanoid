@@ -1180,6 +1180,83 @@ after:
 
 ---
 
+## ADR-033 — Listener mode + master command (2026-05-14)
+
+**Context**: 사용자 4 갭 분석 중 두 항목 해결.
+
+1. (갭 4) **Listener mode 없음** — 매 턴 완결된 1~3 문장이 나오는 chatbot 결.
+   사람 대화는 절반이 짧은 응답·미완결·침묵. 응답 *길이/완결성* 이 state 함수
+   여야 하는데 prompt 가 "1~3 문장" universal rule 로 평준화.
+
+2. **Master command 부재** — 의도된 *짜증 / 우울 / 피곤 / 흥분* 상태로 강제
+   후 응답 form 변화 검증할 도구 없음. ADR-013 의 debug/metacog 만 있음.
+
+**Decision**: 두 변경을 한 ADR 로 묶음. listener mode 가 prompt 측 변경,
+master command 가 검증 도구. 함께 가야 의미.
+
+### Part A — Listener mode (prompt 재설계)
+
+`prompts/unified_response.txt` 변경:
+- "1~3 문장 친구처럼 편하게" universal rule **제거**.
+- 신규 `[응답 길이와 완결성 — state 와 결의 함수]` 섹션:
+  - 차분·여유 → 한두 문장.
+  - 피로/스트레스 ↑ → 짧음·미완결.
+  - 흥분/활기 ↑ → 길어짐·옆가지.
+  - 회피/거리두기 → 짧고 단정.
+  - 메타인지 약함 + 부재 → 비-응답 응답.
+- example 단어 노출 자제 — "본 가이드 예시 단어는 시범, 자기 페르소나 어휘로
+  비슷한 결을 자체 도출".
+
+기존 [톤] 가이드는 별 섹션으로 분리 — 메타·카탈로그 금지, AI 어휘 금지 등 유지.
+
+### Part B — Master command (POST /debug/state)
+
+`ui/backend/app.py` 신규 endpoint `POST /api/instances/{id}/debug/state`.
+
+지원 필드 (모두 옵셔널, 주어진 것만 적용):
+- 9-dim internal_state: reward / patience / arousal / learning / excitation /
+  inhibition / stress / bonding / comfort — range [0.0, 1.0]
+- emotion_base: mood_valence / mood_arousal / raw_valence / raw_arousal —
+  range [-1.0, 1.0]
+
+응답: `{instance_id, applied: {<적용된 필드>: <값>}}`
+
+구현 디테일:
+- `InternalState.state` 는 ndarray 직접 setitem (`PARAMS` 인덱스 기반).
+- `EmotionBase.mood / raw_core_affect` 는 `_PROTECTED_ATTRS` 라 *dict in-place
+  갱신* 으로 spec 우회 (안의 키만 변경, 객체 참조는 그대로).
+
+검증 (+10 tests):
+- 단일/다중 9-dim, mood+core_affect, 혼합.
+- 범위 외 → 400 + 명확한 detail.
+- 빈 body → 400.
+- 존재하지 않는 instance → 404.
+- 잘못된 타입 → 422.
+
+### 연쇄 효과
+
+두 변경을 결합하면 검증 흐름:
+1. spawn (예: 30대 남성 ENFP).
+2. master command 로 stress=0.9 / mood_valence=-0.6 강제.
+3. 같은 "안녕" 입력에 응답이 *원래 결* (활기) 보다 짧아지고 더 단정 → 직접 관찰.
+4. listener mode prompt 가 state-conditional length 를 emergent 하게 도출.
+
+**Out of scope (다음 단계 P2~P4)**:
+- (갭 2) state → response *form* layer — 현재는 prompt instruction 으로 LLM
+  이 자체 추론. 더 강력하게는 *prompt 후처리* 또는 *length cap* 의 state 함수.
+- (갭 1) prompt blacklist 정리 — 본 ADR 의 [톤] 섹션 정리는 했지만 여전히 7+종
+  hard rule.
+- (갭 3) narrative 1인칭화 — 별도 ADR.
+
+**Files**:
+- `prompts/unified_response.txt` — [응답 길이와 완결성] 섹션 신설 + [톤] 분리.
+- `ui/backend/app.py` — StateDebugRequest 모델 + endpoint.
+- `tests/test_state_debug_endpoint.py` (신설, +10).
+
+**Status**: accepted.
+
+---
+
 ## Future ADRs (placeholder)
 
 다음과 같은 결정이 일어나면 ADR 를 append:
