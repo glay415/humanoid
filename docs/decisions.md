@@ -1091,6 +1091,95 @@ cap=1 일 때 정확히 1 라인 유지 (off-by-one 버그 fix).
 
 ---
 
+## ADR-031 — 페르소나 grounding: 몸 없는 텍스트 존재로 정리 (2026-05-13)
+
+**Context**: 사용자가 실 대화에서 발견. agent 가 "이번 주말 어떻게 할래" 에
+"수영 갔다가 카페" 추천. 인지 아키텍처 v12 의 agent 는 *몸이 없는 텍스트
+존재* 인데 narrative 에 박힌 물리/오프라인 디테일이 응답에 *몸 있는 듯한*
+페이지로 새어 나옴. grounding 핵심 위반.
+
+추가 발견 사항 (작업 중):
+- narrative_seed 의 첫 줄에 "서른 초반" / "이십 대 후반" 같은 *나이 표현* 박힘
+  → sample_life 의 age_range 와 충돌. 같은 페르소나의 다른 인스턴스가 다른
+  나이대로 spawn 가능해야 하는데 base 의 나이가 영구히 강제.
+- `[language_style]` 섹션이 *어미 example 직접 인용* ("~ 일까", "ㅎㅎ", "음...")
+  하는 prescriptive 형태라 LLM 이 그 단어를 *응답에 직접 mirror*. 사용자가
+  본 "잔잔" leak 과 동일 mechanism.
+
+**Decision**: 4 sub-fix 로 페르소나 grounding 통합 정리.
+
+### Part 1/3 — interest_pool 디지털/추상 재설계
+
+`config/interest_pool.yaml` 50 entries 전면 재설계. 모든 관심사를 (a) 인터넷/
+디지털 활동, (b) 추상·정신적 활동, (c) 디지털 매체 감상으로 한정. 기존
+lifestyle (요리·카페투어), physical (수영·등산) 카테고리 통째 제거. 새 카테고리:
+creative 6 / media 10 / intellectual 10 / practical 7 / social_digital 6 /
+abstract 11 = 50.
+
+### Part 2/3 — 21 페르소나 narrative_seed physical → digital
+
+agent 위임으로 21 페르소나의 narrative_seed 안 *몸/공간/오프라인* 표현
+(수영·카페·후드티·헬스·식사·출퇴근 등) 을 디지털/추상 활동으로 line-level 대체.
+페르소나 결 (cognitive_style, emotional_pattern, social_pattern,
+values_and_quirks, memory_voids) 은 그대로 유지. 결을 깎지 않고 *단어만 교체*.
+
+### Part 2.5 — 나이 표현 제거
+
+narrative_seed 첫 줄의 "이십 대 X. " / "서른 X. " 등 나이 표현 일괄 regex
+제거. 이제 sample_life 가 spawn 시 yaml 의 `age_range` / `gender` 를 받아
+[이번 인생의 기본 정보] 섹션을 *유일한 demographic source* 로 박는다. 같은
+페르소나의 다른 나이대 인스턴스 가능.
+
+15 페르소나 수정 (estj, legacy 5 는 처음부터 나이 없음).
+
+### Part 2.6 — [language_style] prescriptive 어법 추상화
+
+agent 위임으로 16 MBTI 페르소나의 `[language_style]` 섹션에서 *직접 인용 단어*
+(어미 example, 멈춤 단어, 이모티콘) 제거. 결 묘사 ("유보적", "한 박자 멈춤",
+"괄호 옆가지 부연", "농담 형식") 는 유지.
+
+before (INFJ):
+  어미는 ... "~ 같아요", "~ 일까". "음...", "글쎄..." 같은 멈춤이 많다.
+  ... "ㅎㅎ" 정도. "ㅋㅋ" 보단 "ㅎㅎ".
+
+after:
+  어미가 부드럽고 여운을 남기는 결 — 단정하지 않고 유보적인 흐름. 말 사이에
+  한 박자 멈춤이 자주 끼는 결. ... 이모티콘은 적게, 가벼운 웃음 표시가 가끔
+  묻는 정도.
+
+5 legacy 페르소나는 `[language_style]` 헤더 자체가 없어서 작업 범위 외.
+
+### Part 3/3 — prompt 안전망
+
+`prompts/unified_response.txt` 에 `[존재 형태]` 섹션 신설. 신체 활동·식사·옷·
+오프라인 만남 등 *직접 행위 묘사 금지* 명시. 메타포 ("산책하듯 생각을 흘려") 와
+*내적 결 묘사* ("물에 잠기는 감각이 좋다") 는 허용.
+
+**Out of scope**:
+- ADR-031 이전에 spawn 된 기존 인스턴스의 self_model.narrative — 그건 spawn
+  시점의 *합성 narrative* 가 박혀있으므로 본 변경 미적용. hard_reset 또는 새
+  spawn 만 효과.
+- narrative_seed 의 [interests pool placeholder] 와 [knowledge] 섹션은 별도
+  pool 에서 합성되므로 영향 없음.
+
+**라이턴시**: 0 영향. yaml 변경, prompt 변경, 모두 텍스트 자료.
+
+**Files**:
+- `config/interest_pool.yaml` — 50 entries 재설계.
+- `config/personas/*.yaml` × 21 (legacy 5 의 [language_style] 작업 범위 외)
+  — narrative_seed 의 physical / 나이 / 어법 정리.
+- `prompts/unified_response.txt` — [존재 형태] 섹션 신설.
+
+**회귀**: 856/856 통과. yaml validity 검증 21/21. leak 패턴 자동 검색 0건 잔존.
+
+**검증법**: backend 재시작 후 같은 입력 "이번 주말 뭐 할지" 를 INTP / ENFP 에
+보내봐. 응답에 수영·카페·등산·점심 같은 직접 물리 행위 사라져야. 페르소나
+결은 cognitive/emotional 결로부터 emergent.
+
+**Status**: accepted.
+
+---
+
 ## Future ADRs (placeholder)
 
 다음과 같은 결정이 일어나면 ADR 를 append:
