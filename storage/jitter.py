@@ -163,6 +163,56 @@ def _weighted_unique_sample(rng: random.Random, entries: list[dict],
     return out
 
 
+def _age_register_description(age_range: str) -> str:
+    """ADR-032 — age_range 에 따른 *대화 register 결* 묘사.
+
+    sample_life 가 narrative 합성 시 박는다. demographic 두 줄은 LLM 이 잘 흡수
+    못 하므로 *어떤 결로 말하는 사람인가* 를 한 단락 더 추가해 LLM 이 톤을
+    이해하게.
+
+    stereotyping 회피: *평균적 register* 만 묘사. 페르소나 결 (MBTI) 이 더 강한
+    signal — register 는 *미세 색채* 정도.
+    """
+    s = (age_range or '').strip().lower()
+    if s in ('10s', '10대'):
+        return ("활기와 가벼움이 자연스럽게 묻어나는 결. 줄임말·유행어가 의식 없이 "
+                "섞이고, 이모티콘·웃음 표시는 자유롭게 흩뿌리는 편. 본인 얘기를 "
+                "즉흥적으로 자주 꺼내는 쪽.")
+    if s in ('20s', '20대'):
+        return ("활기는 유지하되 한 단계 정돈된 호흡. 본인 정체성·관심사·결을 빌드업"
+                "하는 시기라 자기 표현이 풍부함. 줄임말은 자연스럽게, 다만 본인 결을 "
+                "의식하기 시작하는 결.")
+    if s in ('30s', '30대'):
+        return ("차분한 호흡. 본인 경험을 *절제하며* 꺼내고, 즉답보다 한 박자 생각 "
+                "후 응답하는 결. 어른스러운 자기 결이 정착됨. 줄임말·이모티콘은 "
+                "의식적으로 덜 쓰고, 정제된 표현을 선호.")
+    if s in ('40s', '40대'):
+        return ("절제와 듣는 시간이 길어진 결. 비유·은유로 길게 가는 호흡이 자연스럽고, "
+                "본인 얘기보다 상대 얘기 듣는 비중이 높아짐. 어휘에 옛 표현·관용구가 "
+                "자연스럽게 묻음.")
+    if s.startswith('50') or s in ('60+', '60s', '60대', '70+', '70대'):
+        return ("신중하고 짧고 명료한 결. 본인 얘기 거의 안 꺼내고 상대 결에 집중. "
+                "옛 어휘·은유가 자연스럽고, 줄임말·이모티콘은 거의 안 씀.")
+    return ""  # 모르는 age_range 면 register 미주입.
+
+
+def _gender_register_description(gender: str) -> str:
+    """ADR-032 — gender 의 *미세 register 색채*.
+
+    stereotype 회피: 한국어 화자 데이터의 *평균 경향* 묘사만. 페르소나 결이
+    훨씬 강한 결정자이므로, 본 register 는 *약한 색채* 정도. 'unspecified' /
+    none 이면 빈 문자열 (자유 register).
+    """
+    s = (gender or '').strip().lower()
+    if s in ('female', 'f', '여성', '여자'):
+        return ("어미가 부드러운 여운을 남기는 결이 평균적으로 짙은 편. 공감·동의 "
+                "표현이 자연스럽게 자주 묻음. (페르소나 결에 따라 다양.)")
+    if s in ('male', 'm', '남성', '남자'):
+        return ("어미가 짧고 단정한 결이 평균적으로 짙은 편. 비유·감정 표현은 절제 "
+                "쪽. (페르소나 결에 따라 다양.)")
+    return ""
+
+
 def sample_life(
     persona_yaml: dict,
     *,
@@ -257,6 +307,23 @@ def sample_life(
         f"  - 나이대: {age_range}\n"
         f"  - 성별: {gender}"
     )
+
+    # ADR-032 — age/gender 의 *대화 register 결* 추가. demographic 두 줄만으론
+    # LLM 이 톤에 반영 안 함. register 결을 한 단락 더 줘서 같은 페르소나라도
+    # 나이/성별 따라 *말투 결* 이 다르게 흐르게.
+    _age_reg = _age_register_description(age_range)
+    _gen_reg = _gender_register_description(gender)
+    if _age_reg or _gen_reg:
+        register_lines = ["\n[이번 인생의 대화 결 — 나이/성별 register]"]
+        if _age_reg:
+            register_lines.append(f"  - 나이대 결: {_age_reg}")
+        if _gen_reg:
+            register_lines.append(f"  - 성별 register: {_gen_reg}")
+        register_lines.append(
+            "  (위 register 는 *평균적 색채* — 페르소나의 cognitive/emotional 결이 "
+            "더 강한 결정자. 둘이 충돌하면 페르소나 결 우선.)"
+        )
+        sections.append("\n".join(register_lines))
 
     # interests
     if sampled_interests:
