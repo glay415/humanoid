@@ -545,6 +545,29 @@ async def debug_set_state(
             emotion.raw_core_affect['arousal'] = float(payload['raw_arousal'])
             applied['raw_arousal'] = emotion.raw_core_affect['arousal']
 
+    # ADR-033 fix — 9-dim override 가 raw_core_affect 에 즉시 반영되도록 재계산.
+    # EmotionBase.update_raw_core_affect 가 9-dim 으로부터 raw_valence/arousal 도출.
+    # 사용자가 raw_valence/raw_arousal 을 *직접* override 했다면 그 값을 보존.
+    if (
+        emotion is not None
+        and any(k in payload for k in nine_dim_keys)
+        and 'raw_valence' not in payload
+        and 'raw_arousal' not in payload
+    ):
+        try:
+            state_dict = internal.to_dict() if hasattr(internal, 'to_dict') else {
+                k: float(internal.state[i]) for i, k in enumerate(internal.PARAMS)
+            }
+            # max_deficit 은 drives 의 함수지만 단순화 위해 0.0 로. drives 갱신은
+            # 다음 turn 의 low_level pipeline 에서 자연스럽게 일어남.
+            emotion.update_raw_core_affect(state_dict, max_drive_deficit=0.0)
+            applied['_recomputed_raw_core_affect'] = {
+                'valence': float(emotion.raw_core_affect['valence']),
+                'arousal': float(emotion.raw_core_affect['arousal']),
+            }
+        except Exception:
+            pass  # silent — 응답 흐름 보호
+
     return {
         'instance_id': instance_id,
         'applied': applied,

@@ -65,7 +65,10 @@ async def test_debug_state_sets_single_internal_param(isolated_manager):
             json={'stress': 0.9},
         )
     assert r.status_code == 200, r.text
-    assert r.json()['applied'] == {'stress': pytest.approx(0.9)}
+    applied = r.json()['applied']
+    assert applied.get('stress') == pytest.approx(0.9)
+    # ADR-033 fix: 9-dim override 시 raw_core_affect 재계산 결과 함께 반환.
+    assert '_recomputed_raw_core_affect' in applied
     orch = mgr.get(iid)
     stress_idx = orch.low_level.internal_state.PARAMS.index('stress')
     assert orch.low_level.internal_state.state[stress_idx] == pytest.approx(0.9)
@@ -87,11 +90,11 @@ async def test_debug_state_sets_multiple_internal_params(isolated_manager):
         )
     assert r.status_code == 200
     applied = r.json()['applied']
-    assert applied == {
-        'stress': pytest.approx(0.8),
-        'bonding': pytest.approx(0.2),
-        'comfort': pytest.approx(0.1),
-    }
+    assert applied.get('stress') == pytest.approx(0.8)
+    assert applied.get('bonding') == pytest.approx(0.2)
+    assert applied.get('comfort') == pytest.approx(0.1)
+    # ADR-033 fix: 9-dim override 시 raw_core_affect 재계산 키 동봉.
+    assert '_recomputed_raw_core_affect' in applied
 
 
 # ---------------------------------------------------------------------------
@@ -137,7 +140,11 @@ async def test_debug_state_mixed_internal_and_mood(isolated_manager):
         )
     assert r.status_code == 200
     applied = r.json()['applied']
-    assert set(applied.keys()) == {'stress', 'inhibition', 'mood_valence'}
+    # 사용자 입력 3 필드 모두 적용.
+    for k in ('stress', 'inhibition', 'mood_valence'):
+        assert k in applied, f'{k} not in applied: {applied}'
+    # ADR-033 fix: 9-dim 변경으로 raw_core_affect 재계산 키 동봉.
+    assert '_recomputed_raw_core_affect' in applied
 
 
 # ---------------------------------------------------------------------------

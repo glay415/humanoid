@@ -1148,6 +1148,9 @@ class Orchestrator:
                 marker_signal=marker_signal,
                 memory_summary=memory_summary,
                 metacog_resource=_metacog_resource,
+                # ADR-033 fix — 9-dim dict 도 함께 전달해 form_hint 가 stress/
+                # inhibition 직접 참조. raw_core_affect stale 한 경우 보호.
+                internal_state=low_result.get('state'),
             ):
                 response_parts.append(token)
                 await _emit('response_chunk', {'text': token})
