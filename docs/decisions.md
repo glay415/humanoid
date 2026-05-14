@@ -1241,17 +1241,79 @@ master command 가 검증 도구. 함께 가야 의미.
 3. 같은 "안녕" 입력에 응답이 *원래 결* (활기) 보다 짧아지고 더 단정 → 직접 관찰.
 4. listener mode prompt 가 state-conditional length 를 emergent 하게 도출.
 
-**Out of scope (다음 단계 P2~P4)**:
-- (갭 2) state → response *form* layer — 현재는 prompt instruction 으로 LLM
-  이 자체 추론. 더 강력하게는 *prompt 후처리* 또는 *length cap* 의 state 함수.
-- (갭 1) prompt blacklist 정리 — 본 ADR 의 [톤] 섹션 정리는 했지만 여전히 7+종
-  hard rule.
-- (갭 3) narrative 1인칭화 — 별도 ADR.
+### Part C — state → response form layer (P2)
 
-**Files**:
-- `prompts/unified_response.txt` — [응답 길이와 완결성] 섹션 신설 + [톤] 분리.
-- `ui/backend/app.py` — StateDebugRequest 모델 + endpoint.
+P1 의 prompt instruction 만으론 LLM 자체 추론에 의존. 더 명시적으로 코드 측에서
+state → form 변환 후 prompt 변수로 주입.
+
+- `high_level/unified_response.py` 에 `_compute_response_form_hint()` 헬퍼:
+  * metacog < 0.3 → 비-응답 응답 허용.
+  * 강한 부정 + 높은 arousal (짜증) → 짧고 단정.
+  * 강한 부정 + 낮은 arousal (우울/피로) → 짧고 미완결, 침묵 OK.
+  * 강한 긍정 + 높은 arousal (흥분) → 길어짐.
+  * summary 의 '스트레스/억제/피로' 키워드 → 짧음.
+  * 중립 → 자유.
+- `UnifiedResponse.stream()` 이 호출 시 hint 계산 후 `{response_form_hint}` prompt
+  변수로 주입.
+- system message 의 "1~3 문장" 흔적도 함께 제거.
+
++7 tests (test_response_form_hint.py).
+
+### Part D — prompt blacklist 정리 (P3)
+
+145 → 124 줄 (-21), 금지 표현 16 → 12 (-4).
+- [지식 grounding] 섹션 축약 — 3 enumerated rule + 5 example block 제거.
+  핵심 원칙만 한 단락 + narrative cognitive_style 이 캐리.
+- [톤] 섹션 8 bullet → 3 bullet. narrative-derived 항목 (메타 카탈로그 금지,
+  모르는 영역 인정, 마커 톤, tone vocab mirror 금지) 제거. 기술 필수 (사실
+  보존, 페르소나 인용 금지, 시스템 어휘 금지) 만 유지.
+
+### Part E — narrative 1인칭화 (P4)
+
+(갭 3) 21 페르소나 narrative_seed 의 3인칭 분석체를 1인칭 독백체로 재작성.
+
+- MBTI 인지 함수 (Ti/Te/Fi/Fe/Ni/Ne/Si/Se) 명시 → 완전 제거. 결을 1인칭 일상
+  표현으로 ("정합성을 따지는 결" / "분위기를 잘 놓치는 편").
+- "본인은 / 이 사람은 / 그 사람은" 3인칭 자기 지칭 → "나는 / 내가".
+- "—" 메타 설명 → 본인 독백 흐름.
+
+before (INTP):
+> "Ti 주도 + Ne 보조 + Si 3차 + Fe 열등. 거의 모든 정보를 일단 내부 모델에
+> 통과시킨다 — 남이 한 말을 그대로 받아들이는 게 아니라..."
+
+after:
+> "뭐든 일단 머릿속에서 한 번 굴려보는 결. 누가 한 말을 그대로 받기보단
+> '근데 그게 정합적인가?' 가 먼저 뜬다."
+
+검증:
+- 21/21 yaml valid.
+- 3인칭 자기 지칭 잔존 0건.
+- MBTI 함수 명시 0건.
+- 다른 yaml 키 모두 byte-identical 보존.
+- 평균 라인 변화 -1.7 줄/파일 (비슷한 길이 유지).
+
+**전체 ADR-033 통합 효과 (4 part, 5 sub-fix)**:
+- Part A: listener mode (prompt 의 "1~3 문장" rule 제거 + [응답 길이/완결성] 섹션).
+- Part B: master command (POST /debug/state 범용 endpoint).
+- Part C: state → form layer (코드 측 form_hint 계산).
+- Part D: prompt blacklist 정리.
+- Part E: narrative 1인칭화.
+
+사용자 4 갭 전부 fix:
+- 갭 1 (blacklist) → Part D
+- 갭 2 (state → form) → Part A + C
+- 갭 3 (3인칭 분석체) → Part E
+- 갭 4 (listener mode) → Part A
+
+**Files (전체)**:
+- `prompts/unified_response.txt` — [응답 길이/완결성] 섹션 + [톤] 축약 + 지식
+  grounding 축약 + form_hint 변수.
+- `high_level/unified_response.py` — `_compute_response_form_hint` 헬퍼 + stream
+  주입.
+- `ui/backend/app.py` — StateDebugRequest + POST /debug/state.
+- `config/personas/*.yaml` × 21 — narrative_seed 1인칭 독백체.
 - `tests/test_state_debug_endpoint.py` (신설, +10).
+- `tests/test_response_form_hint.py` (신설, +7).
 
 **Status**: accepted.
 
