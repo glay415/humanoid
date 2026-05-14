@@ -161,6 +161,53 @@ export async function getDriftLog(
   return (await res.json()) as DriftLogEntry[];
 }
 
+// ADR-033 part B — debug: 9-dim + mood/raw_core_affect 임의 override.
+// 모든 필드 옵셔널, 주어진 것만 적용. 의도된 짜증/우울/피곤/흥분 강제 후 응답
+// form (길이·완결성) 변화 직접 검증용.
+export type DebugStateRequest = Partial<{
+  // 9-dim internal_state — [0.0, 1.0]
+  reward: number;
+  patience: number;
+  arousal: number;
+  learning: number;
+  excitation: number;
+  inhibition: number;
+  stress: number;
+  bonding: number;
+  comfort: number;
+  // emotion_base — [-1.0, 1.0]
+  mood_valence: number;
+  mood_arousal: number;
+  raw_valence: number;
+  raw_arousal: number;
+}>;
+
+export type DebugStateResponse = {
+  instance_id: string;
+  applied: Record<string, number>;
+};
+
+export async function forceDebugState(
+  instanceId: string,
+  body: DebugStateRequest,
+): Promise<DebugStateResponse> {
+  const res = await fetch(
+    `/api/instances/${encodeURIComponent(instanceId)}/debug/state`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+  );
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new Error(
+      `POST /api/instances/${instanceId}/debug/state ${res.status} ${detail}`.trim(),
+    );
+  }
+  return (await res.json()) as DebugStateResponse;
+}
+
 // Global wipe: deletes ALL instances. Server requires `confirm === "WIPE"`.
 export async function wipeAll(confirm: string): Promise<WipeResponse> {
   const res = await fetch('/api/admin/wipe', {

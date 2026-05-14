@@ -125,6 +125,10 @@ export default function App() {
                 internalState={server?.internal_state ?? null}
                 baselines={server?.baselines ?? null}
                 pendingLowLevel={chat.state.pendingLowLevel}
+                instanceId={inst.selectedId}
+                onApplied={() => {
+                  void chat.refreshState();
+                }}
               />
 
               <MoodTimeline
