@@ -35,6 +35,88 @@ type StatePanelProps = {
   onApplied?: () => void;
 };
 
+// State preset 정의 — 의도된 정서 상태 패턴. force 모드의 슬라이더 시작점.
+// 사용자가 추가 조정 가능하지만, preset 클릭만으로도 즉시 Apply 가능.
+type StatePreset = {
+  id: string;
+  label: string;
+  overrides: DebugStateRequest;
+};
+
+const STATE_PRESETS: StatePreset[] = [
+  {
+    id: 'irritated',
+    label: '짜증',
+    overrides: {
+      stress: 0.9,
+      inhibition: 0.15,
+      patience: 0.2,
+      mood_valence: -0.4,
+      raw_valence: -0.5,
+      raw_arousal: 0.75,
+    },
+  },
+  {
+    id: 'depressed',
+    label: '우울',
+    overrides: {
+      stress: 0.7,
+      comfort: 0.15,
+      bonding: 0.25,
+      reward: 0.2,
+      mood_valence: -0.7,
+      raw_valence: -0.55,
+      raw_arousal: 0.2,
+    },
+  },
+  {
+    id: 'excited',
+    label: '흥분',
+    overrides: {
+      comfort: 0.8,
+      bonding: 0.9,
+      reward: 0.85,
+      excitation: 0.85,
+      arousal: 0.75,
+      mood_valence: 0.7,
+      raw_valence: 0.6,
+      raw_arousal: 0.8,
+    },
+  },
+  {
+    id: 'fatigued',
+    label: '피곤',
+    overrides: {
+      patience: 0.2,
+      arousal: 0.55,
+      stress: 0.65,
+      inhibition: 0.7,
+      excitation: 0.2,
+      mood_valence: -0.2,
+      raw_arousal: 0.3,
+    },
+  },
+  {
+    id: 'calm',
+    label: '차분',
+    overrides: {
+      stress: 0.2,
+      comfort: 0.7,
+      patience: 0.7,
+      arousal: 0.3,
+      mood_valence: 0.2,
+      raw_valence: 0.15,
+      raw_arousal: 0.25,
+    },
+  },
+  {
+    id: 'reset',
+    label: '평소',
+    // baseline 로 복원 — 아래 applyPreset 에서 baselines 사용.
+    overrides: {},
+  },
+];
+
 // Color graded by absolute deviation from baseline. Internal-state values
 // are in [0, 1] in the v12 architecture, so a 0.2 delta is large.
 function deviationColor(delta: number): string {
@@ -98,6 +180,25 @@ export function StatePanel({
     }
   }
 
+  function loadPreset(preset: StatePreset) {
+    // 'reset' preset: baselines 로 복원 (페르소나 평소 상태).
+    if (preset.id === 'reset' && baselines) {
+      const baselineOverrides: DebugStateRequest = {};
+      for (const k of PARAM_ORDER) {
+        baselineOverrides[k] = baselines[k];
+      }
+      // mood / core_affect 도 중립으로.
+      baselineOverrides.mood_valence = 0;
+      baselineOverrides.mood_arousal = 0;
+      baselineOverrides.raw_valence = 0;
+      baselineOverrides.raw_arousal = 0;
+      setOverrides(baselineOverrides);
+    } else {
+      setOverrides({ ...preset.overrides });
+    }
+    setApplyError(null);
+  }
+
   const hasOverrides = Object.keys(overrides).length > 0;
   const canForce = !!instanceId;
 
@@ -127,6 +228,31 @@ export function StatePanel({
           </button>
         )}
       </div>
+      {forceMode && (
+        <div className="mb-3 -mt-1">
+          <div className="flex flex-wrap gap-1.5">
+            {STATE_PRESETS.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => loadPreset(p)}
+                disabled={applying}
+                className="text-[10px] font-mono px-2 py-1 rounded-md border border-ink-200 dark:border-zinc-700 text-ink-600 dark:text-zinc-300 hover:bg-ink-100 dark:hover:bg-zinc-800 disabled:opacity-40"
+                title={
+                  p.id === 'reset'
+                    ? 'baseline 으로 복원'
+                    : `${p.label} 상태 슬라이더 채우기 (Apply 클릭해야 적용)`
+                }
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+          <p className="text-[10px] font-mono text-ink-400 dark:text-zinc-500 mt-1.5">
+            preset 클릭 → 슬라이더 채워짐 → 미세 조정 후 Apply
+          </p>
+        </div>
+      )}
       {!live && (
         <p className="text-xs text-ink-400 dark:text-zinc-500 font-mono">상태 로드 중...</p>
       )}
