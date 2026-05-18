@@ -223,7 +223,11 @@ ADR-040 이 선언한 "humanoid vs Generative Agents vs vanilla GPT-4 blind
   아님(메타-premise 구조적 미스). **B1 재설계 확정**: I3 신체화/존재양식
   = NLI-contradiction 유지(구체 의미 모순, NLI 적합), I2 날조 = ADR-039
   `likely_factual_claim` + *구체 narrative 미-entail*(근거 부재) 로 전환.
-  slice 2 에서 분기 구현 + Korean NLI 후보 재-smoke.
+  **slice 2 구현·실측 완료**: FP 0.12 → **0.00**(휴리스틱이 비-사실
+  차단, 메타포 처벌 구조적 소멸), I2 recall 0.50 — 남은 갭은 NLI 아닌
+  ADR-039 휴리스틱 scope(거주/가족/학교·직업; 여행/만남 미포함) =
+  별개·싼 레버. I3 신체화 NLI-contradiction 축은 별도 slice(Korean NLI
+  후보 재-smoke 후보).
 - C_human 조건의 비용(사람이 21 persona × 프로브 응답 작성). 표본 축소
   설계 필요.
 - ablation 토글이 `build_full_orchestrator` 에 깨끗한 플래그 표면을

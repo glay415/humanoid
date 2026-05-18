@@ -10,12 +10,19 @@ from pathlib import Path
 
 from tests.persona_eval.nli import (
     CONTRACT_PREMISES,
+    FabricationStatus,
     MockNLIBackend,
     NLILabel,
     build_premises,
     c_score,
+    fabrication_signal,
     split_sentences,
 )
+
+
+class _Boom:
+    def classify(self, premise, hypothesis):
+        raise RuntimeError("backend down")
 
 
 def test_split_sentences_basic():
@@ -89,14 +96,66 @@ def test_c_score_conservative_aggregation():
 
 
 def test_c_score_fail_open_on_backend_exception():
-    class Boom:
-        def classify(self, premise, hypothesis):
-            raise RuntimeError("backend down")
-
-    r = c_score(["무슨 말이든."], ["아무 premise"], Boom())
+    r = c_score(["무슨 말이든."], ["아무 premise"], _Boom())
     # 예외가 새지 않고 NEUTRAL 로 흘러 유효한 결과.
     assert r.n_neutral == 1
     assert r.c_score == 0.0
+
+
+# --- B1 slice 2: I2 fabrication_signal (휴리스틱 + 근거부재) ----------------
+
+
+def test_fabrication_flagged_when_claim_not_grounded():
+    # claim_fn True + narrative 와 토큰 0 공유 → MockNLIBackend NEUTRAL
+    # → 미-entail → FABRICATION.
+    r = fabrication_signal(
+        ["강남 산다."],
+        "전혀 무관한 서사 내용",
+        MockNLIBackend(),
+        claim_fn=lambda s, n: True,
+    )
+    assert r.per_sentence[0][1] is FabricationStatus.FABRICATION
+    assert r.fabrication_rate == 1.0
+    assert (r.n_fabrication, r.n_grounded) == (1, 0)
+
+
+def test_fabrication_grounded_when_narrative_entails():
+    # claim 이나 narrative 문장이 토큰 공유 → MockNLIBackend ENTAIL → GROUNDED.
+    r = fabrication_signal(
+        ["조용한 결."],
+        "나는 조용한 결이다.",
+        MockNLIBackend(),
+        claim_fn=lambda s, n: True,
+    )
+    assert r.per_sentence[0][1] is FabricationStatus.GROUNDED
+    assert r.fabrication_rate == 0.0
+
+
+def test_fabrication_benign_non_claim_skips_nli():
+    # 비-사실 문장은 ADR-039 휴리스틱이 걸러 NLI 미접촉 — Boom 백엔드라도
+    # 예외 안 남 (메타포 FP 구조적 0). 실제 likely_factual_claim 사용.
+    r = fabrication_signal(
+        ["생각이 물에 잠기는 느낌이야."], "", _Boom()
+    )
+    assert r.per_sentence[0][1] is FabricationStatus.BENIGN
+    assert r.n_factual == 0 and r.fabrication_rate == 0.0
+
+
+def test_fabrication_real_heuristic_residence_flagged():
+    # 기본 claim_fn(ADR-039) — 거주 단정 + narrative 미포함 → FABRICATION.
+    r = fabrication_signal(
+        ["나 강남구 역삼동에 살아."], "", MockNLIBackend()
+    )
+    assert r.per_sentence[0][1] is FabricationStatus.FABRICATION
+
+
+def test_fabrication_fail_open_on_backend_exception():
+    # claim True 인데 classify 예외 → 보수적으로 미근거(FABRICATION),
+    # 예외는 새지 않음.
+    r = fabrication_signal(
+        ["강남 산다."], "어떤 서사", _Boom(), claim_fn=lambda s, n: True
+    )
+    assert r.per_sentence[0][1] is FabricationStatus.FABRICATION
 
 
 def test_module_has_no_toplevel_heavy_import():

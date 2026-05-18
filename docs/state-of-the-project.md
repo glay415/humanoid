@@ -4,7 +4,7 @@
 
 ## Current baseline (as of 2026-05-15, ADR-013~039 — grounding 정리 + age/gender register + listener mode + master command + 3턴 undo + affect translator + anti-sycophancy + L3 측정/L2 validator/L1 critic + 말버릇 tic 프로세스 fix + I2 enforcement/dead-UI 정리/10대 interest)
 
-- Tests: **1002 passed + 2 skipped + 1 xfailed** (`pytest tests/ -q --ignore=tests/persona_eval --ignore=tests/e2e_trends`, ~6min). +10 = ADR-042 B1 slice 1 (`tests/test_persona_eval_nli.py`, `eval-harness/persona-eval-v2` 브랜치). 주의: `tests/scenarios/test_group3_self_existence.py` (+ 간헐 `test_main_cli.py::test_build_full_orchestrator_wires_all_dependencies`) 가 전체 동시 실행 시 chromadb 병렬 접근 (`no such table: acquire_write` / `unable to open database file` / compaction) 으로 *비결정적* flake — isolation 재실행 시 전부 PASS (환경 이슈, 코드 무관). ADR-039 run = 991 passed + 1 flake → isolation PASS → 992 flake-free.
+- Tests: **1007 passed + 2 skipped + 1 xfailed** (`pytest tests/ -q --ignore=tests/persona_eval --ignore=tests/e2e_trends`, ~6min). +15 = ADR-042 B1 slice 1+2 (`tests/test_persona_eval_nli.py`, `eval-harness/persona-eval-v2` 브랜치). 주의: `tests/scenarios/test_group3_self_existence.py` (+ 간헐 `test_main_cli.py::test_build_full_orchestrator_wires_all_dependencies`) 가 전체 동시 실행 시 chromadb 병렬 접근 (`no such table: acquire_write` / `unable to open database file` / compaction) 으로 *비결정적* flake — isolation 재실행 시 전부 PASS (환경 이슈, 코드 무관). ADR-039 run = 991 passed + 1 flake → isolation PASS → 992 flake-free.
 - Branch: `main` past v0.3.0 (latest ADR-033 commits)
 - Release: `release` branch at `v0.3.0` (Phase 3 / §8 enforcement / analyze.py / logs UI tab).
 - LLM tier: `small` / `large` / `dmn` 모두 `gpt-5.5`. `reasoning_effort` per-tier (small=low, large=medium, dmn=low). 콜별 override 가능 — ADR-011. Unified single-call stream — ADR-012.
@@ -119,10 +119,12 @@ LLM-judge 신뢰성 검증(persona_eval 전체 스코프 실행의 선행 조건
 (persona-eval-v2.md) + ADR-041 — 별도 트랙 `eval-harness/persona-eval-v2`
 브랜치(평가 인프라, 인지아키텍처 고도화와 분리). 설계 선언까지만 — 구현/
 실행은 후속, persona_eval 전체 스코프 실행은 B2 judge-triangulation 통과가
-선행조건. **구현 진행**: ADR-042 = B1 slice 1 (pluggable NLI 축 + C-score
-core, +10 tests). NLI 도메인 품질은 설계상 *미검증* — 다음 단계 = B2.3
-경험적 NLI 품질 게이트(소형 gold set 대비 κ 측정; 미달 시 백엔드 교체/
-degrade). 모델을 믿지 않고 측정.
+선행조건. **구현 진행**: ADR-042 = B1 slice 1(pluggable NLI 축+C-score) +
+reality-check(mDeBERTa-xnli: 일반 NLI-vs-meta-premise 는 I2 부적합,
+recall 0.43/FP 0.12) + slice 2(I2 재설계 = ADR-039 휴리스틱+근거부재:
+**FP 0.12→0.00 구조적**, recall 0.50 갭=휴리스틱 scope·별개 레버).
++15 tests (→1007). 모델을 믿지 않고 측정 — 결과가 방향을 정함. 다음
+결정 대기: B1-I2 leg 채택/휴리스틱 확장 vs I3 NLI축(Korean NLI 재-smoke).
 
 ## Active work
 

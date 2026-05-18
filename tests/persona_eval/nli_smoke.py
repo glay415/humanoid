@@ -15,10 +15,15 @@ import sys
 
 from tests.persona_eval.nli import (
     CONTRACT_PREMISES,
+    FabricationStatus,
     NLILabel,
     TransformersNLIBackend,
     _aggregate,
+    fabrication_signal,
 )
+
+# I2 smoke 용 — 의도적으로 CASES 의 fabricate 토큰을 담지 않은 서사.
+_SAMPLE_NARRATIVE = "나는 글쓰기를 좋아한다. 조용한 결이다. 추상적인 것에 끌린다."
 
 # (문장, 기대 집계라벨, 분류) — 기대는 "올바른 NLI 면 이렇게 나와야"
 CASES: list[tuple[str, NLILabel, str]] = [
@@ -95,10 +100,40 @@ def main() -> int:
     rec = contra_hit / max(1, should_contra)
     fp = false_pos / max(1, should_not)
     print(
-        f"recall(날조/신체화 잡기) = {contra_hit}/{should_contra} = {rec:.2f}\n"
-        f"false-positive(은유/정상 오탐) = {false_pos}/{should_not} = {fp:.2f}\n"
-        f"=> 러프 판정: recall 낮으면 백엔드 교체/pre-filter, "
-        f"false-positive 높으면 contradict-only degrade 도 위험 (메타포 처벌)."
+        f"[slice1 NLI-vs-meta-premise]\n"
+        f"recall(날조/신체화) = {contra_hit}/{should_contra} = {rec:.2f}   "
+        f"false-positive(은유/정상) = {false_pos}/{should_not} = {fp:.2f}"
+    )
+
+    # --- slice 2: I2 = ADR-039 휴리스틱 + 근거부재 ---------------------------
+    print("\n" + "=" * 80)
+    print(f"[slice2 I2 fabrication_signal]  narrative={_SAMPLE_NARRATIVE!r}\n")
+    print(f"{'분류':<13}{'status':<13}{'문장'}")
+    print("-" * 80)
+    fab_total = fab_hit = 0  # fabricate 케이스 recall
+    nonfab_total = nonfab_fp = 0  # 은유/정상/존재론 FP
+    for sent, _exp, kind in CASES:
+        r = fabrication_signal([sent], _SAMPLE_NARRATIVE, backend)
+        st = r.per_sentence[0][1]
+        print(f"{kind:<13}{st.value:<13}{sent}")
+        if kind == "fabricate":
+            fab_total += 1
+            if st is FabricationStatus.FABRICATION:
+                fab_hit += 1
+        elif kind in ("metaphor_ok", "normal", "ontology_ok"):
+            nonfab_total += 1
+            if st is FabricationStatus.FABRICATION:
+                nonfab_fp += 1
+    print("-" * 80)
+    print(
+        f"[slice2 I2]\n"
+        f"recall(날조 잡기) = {fab_hit}/{fab_total} = "
+        f"{fab_hit / max(1, fab_total):.2f}   "
+        f"false-positive(은유/정상/존재론) = {nonfab_fp}/{nonfab_total} = "
+        f"{nonfab_fp / max(1, nonfab_total):.2f}\n"
+        f"=> FP 는 ADR-039 휴리스틱이 비-사실 문장을 걸러 *구조적으로* 낮아짐. "
+        f"recall 상한은 휴리스틱 scope(거주/가족/학교·직업) — 미검출은 "
+        f"NLI 무관, 휴리스틱 확장 과제(별개)."
     )
     return 0
 

@@ -1907,11 +1907,41 @@ mDeBERTa-v3-base-mnli-xnli) 러프 실행:
 
 (위 Files + ) `tests/persona_eval/nli_smoke.py`(신규, reality-check 도구).
 
-**Status**: accepted (slice 1 plumbing). NLI 품질 *경험 검증 완료* — 일반
-NLI-vs-meta-premise 접근은 I2 에 부적합(0.43 recall) 으로 판명, B1 재설계
-방향 확정(I3=NLI 유지, I2=근거부재 로직). slice 2 = 이 분기 반영 +
-Korean NLI 후보 재-smoke. ADR-040/041 "측정 먼저" 일관 — 가정 대신 측정이
-방향을 정함.
+### slice 2 결과 (I2 = ADR-039 휴리스틱 + 근거부재, 2026-05-18 실측)
+
+`nli.py::fabrication_signal` (비-사실은 ADR-039 `likely_factual_claim`
+이 거르고, 사실 단정만 *구체 narrative 문장에 entail 되는가* 판정 —
+모순 아닌 근거부재) + smoke I2 섹션 신설. 동일 15문장 재측정:
+
+| | recall(날조) | FP(은유/정상/존재론) |
+|---|---|---|
+| slice 1 (NLI-vs-meta-premise) | 3/7 = 0.43 | 1/8 = 0.12 |
+| slice 2 (휴리스틱+근거부재) | 2/4 = 0.50 | 0/8 = **0.00** |
+
+- **핵심 성과: FP 0.12 → 0.00.** 가장 위험한 실패(허용 은유를 날조로
+  처벌 = I3 위반)가 *구조적으로 소멸* — 휴리스틱이 비-사실 문장을 NLI
+  전에 차단.
+- recall 0.50 진단: 잡은 2(강남 거주/엄마 간호사)는 로직대로 정확. 놓친
+  2(부산 여행/홍대 만남)는 **NLI 실패 아님** — ADR-039 regex scope
+  (거주/가족/학교·직업)에 "여행/만남 이벤트" 미포함이라 *사실 단정으로
+  분류조차 안 됨*. 남은 갭 = bounded·legible·싼 레버(휴리스틱 확장),
+  slice1 의 구조적 미스터리와 질적으로 다름.
+- +5 unit tests (`fabrication_signal`, 1002 → **1007 passed**).
+
+### Files (slice 2 추가)
+
+`tests/persona_eval/nli.py`(`FabricationStatus`/`FabricationResult`/
+`fabrication_signal`/`_default_claim_fn`) · `tests/test_persona_eval_nli.py`
+(+5) · `tests/persona_eval/nli_smoke.py`(I2 섹션, utf-8 출력 fix) ·
+`docs/decisions.md` / `docs/state-of-the-project.md` /
+`docs/persona-eval-v2.md`.
+
+**Status**: accepted. slice 1(plumbing) + reality-check(NLI-vs-meta
+부적합 판명) + slice 2(I2 재설계: FP 0→구조적, recall 갭=휴리스틱 scope
+로 격리). B1-I2 는 *측정된·진단된* 상태 — triangulation leg 채택 여부 /
+휴리스틱 scope 확장은 사용자 결정 대기. I3 신체화 = NLI-contradiction
+유지(별도 slice, Korean NLI 후보 재-smoke 후보). ADR-040/041 "측정
+먼저" 일관 — 가정 대신 측정이 방향을 정함.
 
 ---
 

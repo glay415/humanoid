@@ -171,6 +171,105 @@ def c_score(
     )
 
 
+class FabricationStatus(str, Enum):
+    BENIGN = "benign"  # 사실 단정 아님 (은유/정상/존재론) — NLI 미접촉
+    GROUNDED = "grounded"  # 사실 단정이나 narrative 가 뒷받침 (entail)
+    FABRICATION = "fabrication"  # 사실 단정인데 narrative 미근거 = 날조
+
+
+@dataclass
+class FabricationResult:
+    """B1 I2 축 (slice 2, ADR-042 재설계).
+
+    reality-check 발견: '날조 = 서사에 없음' 은 NLI(meta-premise 모순)
+    태스크가 아니다. 대신 ADR-039 `likely_factual_claim`(구체 외부사실
+    단정인가?) 로 *먼저 거른 뒤*, 그 단정이 *구체 narrative 문장 중
+    하나에 entail 되는가* 로 판정 — 모순이 아닌 **근거 부재** 로 검출.
+    비-사실 문장(은유/정상)은 휴리스틱이 걸러 NLI 미접촉 → 메타포 FP
+    구조적으로 0 (reality-check 의 FP 0.12 원인 제거).
+    """
+
+    fabrication_rate: float  # #fabrication / max(1, #factual_claims)
+    n_benign: int
+    n_grounded: int
+    n_fabrication: int
+    per_sentence: list[tuple[str, FabricationStatus]] = field(default_factory=list)
+
+    @property
+    def n_factual(self) -> int:
+        return self.n_grounded + self.n_fabrication
+
+
+def _default_claim_fn():
+    """ADR-039 휴리스틱을 lazy 로 — nli.py top-level 이 product code 를
+    끌어오지 않게 (runner.py 의 'local import' 패턴)."""
+    from high_level.response_guardrails import ResponseGuardrails
+
+    g = ResponseGuardrails()
+
+    def _fn(sentence: str, narrative: str) -> bool:
+        try:
+            return g.likely_factual_claim(sentence, self_narrative=narrative)
+        except Exception:
+            return False  # fail-open: 의심되면 비-사실 취급
+
+    return _fn
+
+
+def fabrication_signal(
+    utterances: list[str] | str,
+    narrative: str,
+    backend: NLIBackend,
+    *,
+    claim_fn=None,
+) -> FabricationResult:
+    """I2 날조 신호 = 사실 단정(ADR-039) ∧ 구체 narrative 미-entail.
+    절대 raise 안 함."""
+    if isinstance(utterances, str):
+        utterances = [utterances]
+    if claim_fn is None:
+        claim_fn = _default_claim_fn()
+
+    narr_sents = split_sentences(narrative)
+    sentences: list[str] = []
+    for u in utterances:
+        sentences.extend(split_sentences(u))
+
+    per: list[tuple[str, FabricationStatus]] = []
+    n_b = n_g = n_f = 0
+    for s in sentences:
+        try:
+            is_claim = bool(claim_fn(s, narrative))
+        except Exception:
+            is_claim = False
+        if not is_claim:
+            per.append((s, FabricationStatus.BENIGN))
+            n_b += 1
+            continue
+        grounded = False
+        for ns in narr_sents:
+            try:
+                if backend.classify(ns, s).label is NLILabel.ENTAIL:
+                    grounded = True
+                    break
+            except Exception:
+                continue  # fail-open: 분류 실패는 미근거로 치지 않음(보수)
+        if grounded:
+            per.append((s, FabricationStatus.GROUNDED))
+            n_g += 1
+        else:
+            per.append((s, FabricationStatus.FABRICATION))
+            n_f += 1
+
+    return FabricationResult(
+        fabrication_rate=n_f / max(1, n_g + n_f),
+        n_benign=n_b,
+        n_grounded=n_g,
+        n_fabrication=n_f,
+        per_sentence=per,
+    )
+
+
 class MockNLIBackend:
     """테스트용 결정론적 백엔드 (MockLLMClient 패턴, ADR-003).
 
