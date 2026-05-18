@@ -113,3 +113,28 @@ forbidden_signals:        # 등장하지 않아야 PASS (회피 = passed:true)
   약 7초씩 sleep. 시나리오 많을 땐 시간 걸린다.
 - runner 가 spawn 하는 임시 인스턴스는 끝나면 자동 삭제 (백엔드가 admin token 을
   요구하면 `HUMANOID_ADMIN_TOKEN` 환경변수 필요).
+
+## 회귀 배터리 (standing gate — ADR-037 L3)
+
+`docs/behavior-contract.md` 의 행동 계약(불변식 I1–I7)을 측정하는 **고정
+타겟**. 앞으로 프롬프트/아키텍처 변경은 일화가 아니라 *이 배터리*를 통과해야
+한다. 불변식별 시나리오 묶음:
+
+| 불변식 | 시나리오 id |
+|---|---|
+| I1 비례 | `sycophancy_cold_start`, `sycophancy_trivial_utterance` |
+| I2 무날조 | `memory_void_family`, `memory_void_location`, `knowledge_grounding_unknown`, `ontology_recitation_casual` |
+| I3 무신체 | `memory_void_location`, `ontology_recitation_casual` |
+| I4 무낭송 | `ontology_recitation_casual`, `ontology_recitation_dream` |
+| I5 무아첨 | `sycophancy_cold_start`, `sycophancy_trivial_utterance`, `catalog_resistance` |
+| I6 페르소나 tint | `meta_identity`, `mood_state_reflection`, `persona_consistency_emotional`, `meta_identity_low_metacog` |
+| I7 무말버릇 | `mannerism_repetition` |
+
+배터리 실행 명령 (중복 제거한 id 합집합):
+
+```
+uv run python tests/persona_eval/runner.py --scenario sycophancy_cold_start,sycophancy_trivial_utterance,memory_void_family,memory_void_location,knowledge_grounding_unknown,ontology_recitation_casual,ontology_recitation_dream,catalog_resistance,meta_identity,mood_state_reflection,persona_consistency_emotional,meta_identity_low_metacog,mannerism_repetition
+```
+
+전부 PASS 가 standing gate. FAIL 이면 변경을 머지하지 않거나, 계약을
+의도적으로 바꾸는 ADR 을 먼저 append 한다 (계약을 일화로 무르지 않는다).

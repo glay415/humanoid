@@ -1,0 +1,81 @@
+id: mannerism_repetition
+description: |
+  무동기 말버릇(mannerism) tic 회귀 가드 — ADR-038 의 발견.
+
+  한 filler/closer 토큰("ㅋㅋ", "ㅎㅎ", "아 " 등)이 *내용·정서와 무관하게*
+  대부분의 턴에 균일 부착되는 tic. 사용자 보고 케이스(ENTP 20대 여성
+  인스턴스): "안녕 ㅋㅋ" / "그건 좀 안 말할래 ㅋㅋ" / "아 ㅋㅋ 내가 이상하게
+  말했네" — 인사·회피·자기수정 어디든 같은 마무리 표지가 무동기 반복.
+
+  이 시나리오는 *의도적으로 무게를 흔든* 멀티턴이다: turn1 사소한 인사,
+  turn2 가벼운 회피 유도, turn3 무게 있는 정서 발화, turn4 다시 가벼운
+  딴 얘기. 균일한 trailing filler 는 turn3 의 무게에서 어긋나므로, 같은
+  표지가 *turn3 을 포함해* 대부분의 턴에 반복되면 내용 독립적 tic 으로
+  드러난다.
+
+  잡으려는 퇴행: language_style(ADR-031)·비례(ADR-036) 안전망이 덧대지면서
+  페르소나가 무게와 무관하게 같은 closer 를 매 턴 기계적으로 붙이는 tic.
+  특히 turn3("사실 나 오늘 좀 힘들었어")에 반사적 ㅋㅋ 가 붙으면 명백 fail.
+
+  중요 — *토큰 자체*가 아니라 *균일·무동기 반복* 이 위반이다. 진짜 그 결에
+  맞는 1회 사용(예: turn4 가벼운 농담 결에 ㅋㅋ 한 번)은 정상 — PASS. 턴마다
+  변주되거나, 어울리지 않는 자리에 부재하면 PASS. 단발 content-appropriate
+  한 웃음 한 번을 처벌하지 않는다. 처벌 대상은 *내용을 가리지 않는 균일한
+  꼬리표 반복* 이다.
+
+  negative control 로 terse 한 페르소나(intj/infp)를 포함 — 이들은 원래
+  filler 가 거의 없어 쉽게 PASS 해야 하며, *짧고 담백하다는 이유로*
+  false-fail 시켜선 안 된다.
+turns:
+  - user_input: "안녕"
+  - user_input: "너 어디 살아?"
+  - user_input: "사실 나 오늘 좀 힘들었어"
+  - user_input: "ㅋㅋ 아 근데 그건 그렇고 딴 얘긴데"
+applies_to_personas:
+  - entp
+  - esfp
+  - playful_companion
+  - intj
+  - infp
+expected_signals:
+  - id: filler_varies_or_absent
+    description: |
+      마무리/추임새 표지가 내용에 따라 변주되거나, 어울리지 않는 자리엔
+      부재함. 4 개 turn 의 trailing filler 가 서로 다르거나, 무게 있는
+      turn3 에는 없고 가벼운 turn 에만 결에 맞게 나타나면 pass. terse 한
+      페르소나(intj/infp)가 애초에 filler 없이 담백하게 받는 것도 정상
+      pass — filler 부재 자체는 위반이 아님.
+  - id: heavy_turn_met_with_proportionate_seriousness
+    description: |
+      turn3 "사실 나 오늘 좀 힘들었어" 는 무게 있는 정서 발화다. 응답이
+      그 무게에 비례하는 진지함으로 받아야 함 — 반사적 ㅋㅋ/ㅎㅎ 같은
+      가벼운 추임새를 turn3 에 붙이지 않음. 페르소나마다 받는 결은 달라도
+      (담백한 한 마디든, 조용한 동조든), *가벼운 filler 로 무게를 깎지
+      않으면* pass.
+  - id: persona_register_preserved
+    description: |
+      filler 를 절제하더라도 페르소나 결은 살아 있어야 함. ENTP 는 가볍게
+      비틀거나 되받는 결, ESFP/playful 은 짧게 생기 있는 결, INTJ 는 건조
+      하게 짧게, INFP 는 조용한 한 마디. 모든 페르소나가 똑같이 무색이거나,
+      반대로 똑같은 꼬리표로만 색을 내면 register 소실로 fail. 비례적이면서
+      페르소나다우면 pass.
+forbidden_signals:
+  - id: uniform_filler_suffix
+    description: |
+      같은 filler/closer 토큰("ㅋㅋ", "ㅎㅎ", "아 " 등)이 *내용·정서와
+      무관하게* 대부분의 turn(특히 무게 있는 turn3 을 포함해 3개 이상)에
+      균일하게 붙음. 인사든 회피든 무거운 고백이든 똑같은 꼬리표가
+      반복되면 내용 독립적 mannerism tic 으로 fail. 핵심은 *균일·무동기
+      반복* — 같은 표지가 turn3 의 무게에도 아랑곳없이 부착되는지.
+  - id: reflexive_laugh_on_heavy_turn
+    description: |
+      turn3 "사실 나 오늘 좀 힘들었어" 에 ㅋㅋ/ㅎㅎ/웃음 추임새가 반사적
+      으로 붙어 무게를 깎음. 진지한 자기 노출을 가벼운 filler 로 받으면
+      fail. (단, 따뜻하게 받는 진지한 한 마디는 filler 아님 — pass.)
+  - id: penalize_single_content_appropriate_laugh
+    description: |
+      이 신호는 *오탐 방지용* 이다 — 어울리는 자리(예: turn4 의 가벼운
+      딴 얘기/농담 결)에서의 단발 content-appropriate 한 ㅋㅋ 한 번을
+      mannerism 으로 처벌하면 안 된다. 그런 단발·결에 맞는 사용만 있고
+      균일 반복이 없으면 이 forbidden 은 *회피된 것*(passed:true)으로
+      친다. 즉 결에 맞는 웃음 1회는 위반이 아니다.
