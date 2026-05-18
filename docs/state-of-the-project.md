@@ -126,9 +126,12 @@ recall 0.43/FP 0.12) + slice 2(I2 재설계 = ADR-039 휴리스틱+근거부재:
 +15 tests (→1007). 모델을 믿지 않고 측정 — 결과가 방향을 정함.
 ADR-043 = B2 slice 1: triangulation core(순수 Python κ/ρ + `validated`
 게이트) + 고정·버전드 human 캘리브레이션 seed(`calibration/seed_v1.yaml`,
-6항목). +12 tests (→**1019**). 다음: judge/B1 실주입 배선 → seed κ
-실측 → 미달 시 judge rubric 재설계. 그 후 B1-polish 를 이 검증된 자에
-대고 측정(2a ADR-039 휴리스틱 확장은 별도 product ADR).
+6항목). +12 tests (→**1019**). ADR-043 slice 2: seed 실주입 첫
+TriangulationReport — judge↔human κ=**+1.000**(n=6), B1↔human κ=+1.000
+(n=4), judge↔B1 ρ=+0.943, `validated=True`. 파이프라인 green·첫 정렬
+확보(블로커 질적 해소). 단 n 작아 *방향성*이지 통계 확정 아님 — judge
+전역 신뢰 + 전체 배터리 실행의 진짜 게이트는 B2.3 full(층화 표본+모호
+케이스+평정자 2+ κ). 그 후 B1-polish(2a 휴리스틱 확장은 별도 product ADR).
 
 ## Active work
 

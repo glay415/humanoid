@@ -209,7 +209,10 @@ ADR-040 이 선언한 "humanoid vs Generative Agents vs vanilla GPT-4 blind
 > 구현 진행(2026-05-18, `eval-harness/persona-eval-v2`): **B1 slice 1+2**
 > (ADR-042 — pluggable NLI 축 + C-score + I2 휴리스틱·근거부재, FP 0.12→
 > 0.00 실측) · **B2 slice 1**(ADR-043 — triangulation core κ/ρ +
-> `validated` 게이트 + 고정 캘리브레이션 seed). 아래는 *여전히* 비범위.
+> `validated` 게이트 + 고정 캘리브레이션 seed) · **B2 slice 2**(ADR-043
+> — seed 실주입 첫 TriangulationReport: judge↔human κ=1.0/n=6,
+> validated=True; *방향성* 확보, 통계 확정은 B2.3 full). 아래는 *여전히*
+> 비범위 (특히 B2.3 full 캘리브레이션이 judge 전역 신뢰의 진짜 게이트).
 
 - 코드·yaml·NLI 모델 학습·프로브 17 시나리오 파일 **미작성**. 본 문서는
   *설계 선언*. 구현은 후속 작업/별도 ADR.
