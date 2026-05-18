@@ -4,7 +4,7 @@
 
 ## Current baseline (as of 2026-05-15, ADR-013~039 — grounding 정리 + age/gender register + listener mode + master command + 3턴 undo + affect translator + anti-sycophancy + L3 측정/L2 validator/L1 critic + 말버릇 tic 프로세스 fix + I2 enforcement/dead-UI 정리/10대 interest)
 
-- Tests: **1007 passed + 2 skipped + 1 xfailed** (`pytest tests/ -q --ignore=tests/persona_eval --ignore=tests/e2e_trends`, ~6min). +15 = ADR-042 B1 slice 1+2 (`tests/test_persona_eval_nli.py`, `eval-harness/persona-eval-v2` 브랜치). 주의: `tests/scenarios/test_group3_self_existence.py` (+ 간헐 `test_main_cli.py::test_build_full_orchestrator_wires_all_dependencies`) 가 전체 동시 실행 시 chromadb 병렬 접근 (`no such table: acquire_write` / `unable to open database file` / compaction) 으로 *비결정적* flake — isolation 재실행 시 전부 PASS (환경 이슈, 코드 무관). ADR-039 run = 991 passed + 1 flake → isolation PASS → 992 flake-free.
+- Tests: **1019 passed + 2 skipped + 1 xfailed** (`pytest tests/ -q --ignore=tests/persona_eval --ignore=tests/e2e_trends`, ~6min). +27 = ADR-042 B1 slice 1+2 (`tests/test_persona_eval_nli.py`, +15) + ADR-043 B2 slice 1 triangulation (`tests/test_persona_eval_triangulate.py`, +12). `eval-harness/persona-eval-v2` 브랜치. 주의: `tests/scenarios/test_group3_self_existence.py` (+ 간헐 `test_main_cli.py::test_build_full_orchestrator_wires_all_dependencies`) 가 전체 동시 실행 시 chromadb 병렬 접근 (`no such table: acquire_write` / `unable to open database file` / compaction) 으로 *비결정적* flake — isolation 재실행 시 전부 PASS (환경 이슈, 코드 무관). ADR-039 run = 991 passed + 1 flake → isolation PASS → 992 flake-free.
 - Branch: `main` past v0.3.0 (latest ADR-033 commits)
 - Release: `release` branch at `v0.3.0` (Phase 3 / §8 enforcement / analyze.py / logs UI tab).
 - LLM tier: `small` / `large` / `dmn` 모두 `gpt-5.5`. `reasoning_effort` per-tier (small=low, large=medium, dmn=low). 콜별 override 가능 — ADR-011. Unified single-call stream — ADR-012.
@@ -123,8 +123,12 @@ LLM-judge 신뢰성 검증(persona_eval 전체 스코프 실행의 선행 조건
 reality-check(mDeBERTa-xnli: 일반 NLI-vs-meta-premise 는 I2 부적합,
 recall 0.43/FP 0.12) + slice 2(I2 재설계 = ADR-039 휴리스틱+근거부재:
 **FP 0.12→0.00 구조적**, recall 0.50 갭=휴리스틱 scope·별개 레버).
-+15 tests (→1007). 모델을 믿지 않고 측정 — 결과가 방향을 정함. 다음
-결정 대기: B1-I2 leg 채택/휴리스틱 확장 vs I3 NLI축(Korean NLI 재-smoke).
++15 tests (→1007). 모델을 믿지 않고 측정 — 결과가 방향을 정함.
+ADR-043 = B2 slice 1: triangulation core(순수 Python κ/ρ + `validated`
+게이트) + 고정·버전드 human 캘리브레이션 seed(`calibration/seed_v1.yaml`,
+6항목). +12 tests (→**1019**). 다음: judge/B1 실주입 배선 → seed κ
+실측 → 미달 시 judge rubric 재설계. 그 후 B1-polish 를 이 검증된 자에
+대고 측정(2a ADR-039 휴리스틱 확장은 별도 product ADR).
 
 ## Active work
 

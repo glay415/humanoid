@@ -206,6 +206,11 @@ ADR-040 이 선언한 "humanoid vs Generative Agents vs vanilla GPT-4 blind
 
 ## 9. 명시적 비범위 (이번에 안 한 것)
 
+> 구현 진행(2026-05-18, `eval-harness/persona-eval-v2`): **B1 slice 1+2**
+> (ADR-042 — pluggable NLI 축 + C-score + I2 휴리스틱·근거부재, FP 0.12→
+> 0.00 실측) · **B2 slice 1**(ADR-043 — triangulation core κ/ρ +
+> `validated` 게이트 + 고정 캘리브레이션 seed). 아래는 *여전히* 비범위.
+
 - 코드·yaml·NLI 모델 학습·프로브 17 시나리오 파일 **미작성**. 본 문서는
   *설계 선언*. 구현은 후속 작업/별도 ADR.
 - NLI 분류기 선정·한국어 도메인 적합성 실측 미수행(B1 한계 §).

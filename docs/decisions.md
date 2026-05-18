@@ -1945,6 +1945,62 @@ mDeBERTa-v3-base-mnli-xnli) 러프 실행:
 
 ---
 
+## ADR-043 — persona_eval v2 B2 slice 1: triangulation core + 고정 캘리브레이션 seed (2026-05-18)
+
+**Context**: B1(slice 1+2, ADR-042)이 judge-free 축으로 성립(FP=0 보수
+leg). 사용자 결정: B1-polish 보다 **B2(judge 검증 하니스) 먼저** — 검증
+안 된 자(15문장 smoke)에 B1 을 더 튜닝하면 "미검증 judge 로 전체 배터리
+돌리던" 그 함정을 B1 에서 반복. B2 가 *검증된 자*(human κ + triangulation)
+를 만든다. 의존성 단방향(B1-polish ← B2)이라 순서 확정.
+
+**Decision**: B2 의 *척추*(triangulation core)만 slice 1 로. judge 를
+피험자가 아닌 *측정도구* 로 보고 judge↔human↔B1 합의를 정량화.
+
+- `tests/persona_eval/triangulate.py`: 순수 Python(LLM/torch/numpy 불요 —
+  baseline 에서 실행) `cohens_kappa` / `spearman_rho`(동점 평균순위 +
+  [-1,1] clamp) / `CalibrationItem` / `load_calibration`(버전드 yaml,
+  깨진 항목 skip·never raise) / `triangulate` → `TriangulationReport`
+  (judge↔human κ, B1↔human κ, judge↔B1 ρ, per-invariant, `validated`
+  게이트 = judge↔human κ≥0.6 ∧ B1↔human κ≥0 ∧ n>0). 측정 누락 항목 제외.
+- `tests/persona_eval/calibration/seed_v1.yaml`: **고정·버전드** human
+  anchor seed(6 항목, I2/I3/I5/I6, human_label 정본). 변경 시 버전 bump
+  (seed_v2). triangulation 파이프라인 fixture 겸 최초 anchor.
+- `tests/test_persona_eval_triangulate.py`: κ(완전일치/완전불일치/기지값
+  0.615/degenerate) · ρ(단조/동점/무분산) · 로더 roundtrip · validated
+  게이트 true/false · 미측정 제외 · fail-open. **+12 (1007 → 1019)**.
+
+### 명시적 비범위 (후속 slice)
+
+- TRAIT 4-criterion *전체*(Content/Internal/Refusal/Reliability) — slice 1
+  은 κ/ρ 합의만. PERSIST permutation robustness 게이트(ΔPASS>k·SD),
+  distinctness 수렴(ρ≥0.80)/판별(≥0.40)은 후속.
+- seed 는 *소수* fixture/anchor — B2.3 full 캘리브레이션(층화 표본,
+  평정자 2+ κ)은 별도 slice. seed κ 자체는 아직 실측 안 함(파이프라인만).
+- judge_label/b1_score 실주입(runner ↔ judge.py ↔ nli.py 배선)은 후속
+  slice — slice 1 은 *계산 코어* 와 schema 까지.
+
+### 회귀
+
+- `pytest tests/test_persona_eval_triangulate.py tests/test_persona_eval_nli.py
+  -q` 27 passed. 전체 992→**1019**(+15 nli +12 triangulate, 신규 파일만;
+  full-run 머지 전 권장). 순수 Python — torch/LLM 미접촉, baseline 안전.
+- IDE mypy: `float|None` comprehension 미narrow 2건 명시 None-가드 루프로
+  type-clean 처리. yaml stub 경고는 repo 전반(runner.py 등 동일) — 비회귀.
+
+### Files
+
+- `tests/persona_eval/triangulate.py`(신규) ·
+  `tests/persona_eval/calibration/seed_v1.yaml`(신규) ·
+  `tests/test_persona_eval_triangulate.py`(신규) · `docs/decisions.md` /
+  `docs/state-of-the-project.md` / `docs/persona-eval-v2.md`.
+
+**Status**: accepted (slice 1 = triangulation 계산 코어 + 고정 anchor
+schema). 다음: judge/B1 실주입 배선 → seed κ 실측 → 미달 시 judge rubric
+재설계(ADR-040/041 "측정 먼저" 일관). 그 후 B1-polish 를 *이 자에 대고*
+측정(2a 는 별도 product ADR).
+
+---
+
 ## Future ADRs (placeholder)
 
 다음과 같은 결정이 일어나면 ADR 를 append:

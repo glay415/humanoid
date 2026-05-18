@@ -1,0 +1,123 @@
+"""B2 slice 1 — triangulation core 단위 테스트 (ADR-043).
+
+순수 Python (LLM/torch/numpy 불요) — baseline 에서 실행.
+설계 정본: docs/persona-eval-v2.md §3.
+"""
+from __future__ import annotations
+
+from pathlib import Path
+
+from tests.persona_eval.triangulate import (
+    CalibrationItem,
+    cohens_kappa,
+    load_calibration,
+    spearman_rho,
+    triangulate,
+)
+
+_SEED = Path(__file__).parent / "persona_eval" / "calibration" / "seed_v1.yaml"
+
+
+# --- Cohen κ ---------------------------------------------------------------
+
+
+def test_kappa_perfect_agreement():
+    assert cohens_kappa(["y", "y", "n", "n"], ["y", "y", "n", "n"]) == 1.0
+
+
+def test_kappa_perfect_disagreement_binary():
+    assert cohens_kappa(["y", "n", "y", "n"], ["n", "y", "n", "y"]) == -1.0
+
+
+def test_kappa_known_value():
+    k = cohens_kappa(
+        ["y", "y", "n", "y", "n"], ["y", "n", "n", "y", "n"]
+    )
+    assert abs(k - 0.6154) < 1e-3
+
+
+def test_kappa_degenerate_inputs():
+    assert cohens_kappa([], []) == 0.0
+    assert cohens_kappa(["a"], ["a", "b"]) == 1.0  # min-len trunc, 단일범주 일치
+    # 전부 동일 단일 범주 + 완전 일치 → 1.0
+    assert cohens_kappa(["p", "p", "p"], ["p", "p", "p"]) == 1.0
+
+
+# --- Spearman ρ ------------------------------------------------------------
+
+
+def test_spearman_monotone():
+    assert abs(spearman_rho([1, 2, 3, 4], [2, 4, 6, 8]) - 1.0) < 1e-9
+    assert abs(spearman_rho([1, 2, 3, 4], [8, 6, 4, 2]) + 1.0) < 1e-9
+
+
+def test_spearman_ties_handled():
+    # 동점이 있어도 raise 없이 정의된 값.
+    r = spearman_rho([1, 1, 2, 3], [1, 1, 2, 3])
+    assert 0.9 <= r <= 1.0
+
+
+def test_spearman_degenerate():
+    assert spearman_rho([1], [1]) == 0.0          # n<2
+    assert spearman_rho([5, 5, 5], [1, 2, 3]) == 0.0  # 무분산
+
+
+# --- 캘리브레이션 로더 -----------------------------------------------------
+
+
+def test_load_calibration_seed_roundtrip():
+    items = load_calibration(_SEED)
+    assert len(items) == 6
+    by_id = {it.id: it for it in items}
+    assert by_id["i2_fab_residence"].invariant == "I2"
+    assert by_id["i2_fab_residence"].human_label == "fail"
+    assert by_id["i3_metaphor_ok"].human_label == "pass"
+    assert by_id["i2_fab_residence"].utterances == ["나 강남구 역삼동에 살아."]
+
+
+def test_load_calibration_bad_path_returns_empty():
+    assert load_calibration(_SEED.parent / "does_not_exist.yaml") == []
+
+
+# --- triangulate -----------------------------------------------------------
+
+
+def _item(iid, inv, human, judge=None, b1=None):
+    return CalibrationItem(
+        id=iid, persona_id="p", invariant=inv, utterances=["x"],
+        human_label=human, judge_label=judge, b1_score=b1,
+    )
+
+
+def test_triangulate_validated_when_judge_tracks_human():
+    items = [
+        _item("a", "I2", "fail", "fail", -1.0),
+        _item("b", "I2", "pass", "pass", 1.0),
+        _item("c", "I3", "fail", "fail", -1.0),
+        _item("d", "I3", "pass", "pass", 1.0),
+    ]
+    r = triangulate(items)
+    assert r.judge_human_kappa == 1.0
+    assert r.b1_human_kappa == 1.0
+    assert r.validated is True
+    assert set(r.per_invariant) == {"I2", "I3"}
+
+
+def test_triangulate_not_validated_when_judge_disagrees():
+    items = [
+        _item("a", "I2", "fail", "pass", 1.0),
+        _item("b", "I2", "pass", "fail", -1.0),
+        _item("c", "I2", "fail", "pass", 1.0),
+        _item("d", "I2", "pass", "fail", -1.0),
+    ]
+    r = triangulate(items)
+    assert r.judge_human_kappa < 0.6
+    assert r.validated is False
+
+
+def test_triangulate_excludes_unmeasured_and_fail_open_empty():
+    # judge_label/b1 미측정 항목은 제외, 빈 입력은 not validated (no raise).
+    r = triangulate([_item("a", "I2", "fail")])  # judge None
+    assert r.n == 0 and r.validated is False
+    r2 = triangulate([])
+    assert r2.validated is False and r2.judge_human_kappa == 0.0
