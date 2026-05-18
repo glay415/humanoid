@@ -10,6 +10,7 @@
 - LLM tier: `small` / `large` / `dmn` 모두 `gpt-5.5`. `reasoning_effort` per-tier (small=low, large=medium, dmn=low). 콜별 override 가능 — ADR-011. Unified single-call stream — ADR-012.
 - persona_eval (`tests/persona_eval/`) scoped regression: **16/16 PASS** on 4 시나리오 × 5 페르소나 (실 LLM, 별도 비용 — pytest 에 포함 X). ADR-036 검증 (2026-05-14, 실 LLM judge): sycophancy-probe **10/10 PASS** (`sycophancy_cold_start` / `sycophancy_trivial_utterance` × infp·intj·estp·esfj·playful_companion — "안녕"→과잉칭찬·강박 follow-up 0, 페르소나 register 비례 보존: intj "안녕." / estp "안녕 ㅋㅋ" / esfj "안녕 :)"). 회귀 slice (meta_identity·catalog_resistance·persona_consistency_emotional·mood_state_reflection × 5) **18/19 PASS**; 1 FAIL (`catalog_resistance×estp` bullet leak) 은 재실행 시 PASS — catalog 프로브 고유의 LLM-output flake (ADR-035/036 무관, 비결정적). ADR-037 L3 회귀 배터리 (behavior-contract I1~I6 + `ontology_recitation_casual/dream` 신규) 의 real-LLM 실행은 사람이 수행 — `tests/persona_eval/README.md` "회귀 배터리" 절의 단일 커맨드. (probe wiring 은 offline 검증 완료, LLM judge 실행 미완.)
 - Repo: https://github.com/glay415/humanoid
+- 경험적 발견 (관찰→진단→개입→결과, 논문 인용 수준): [`docs/research-insights.md`](research-insights.md) — ADR 별 인사이트 + 메타 발견(M1~M6) + 타당성 위협.
 
 ## Implementation status
 
