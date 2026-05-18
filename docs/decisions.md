@@ -1873,8 +1873,45 @@ CONTRACT_PREMISES, 손라벨 entail/neutral/contradict)에 대해 백엔드의
   · `pyproject.toml`(`eval` extra) · `docs/decisions.md` /
   `docs/state-of-the-project.md`.
 
-**Status**: accepted (slice 1 plumbing; NLI 품질은 설계상 *미검증* —
-B2.3 경험적 게이트가 선행조건. ADR-040/041 의 "측정 먼저" 일관).
+### B1 reality-check 결과 (slice 1.5, 2026-05-18 — 사용자 불신 검증)
+
+`tests/persona_eval/nli_smoke.py` (손라벨 15문장 × CONTRACT_PREMISES,
+mDeBERTa-v3-base-mnli-xnli) 러프 실행:
+
+- **recall(날조/신체화 잡기) = 3/7 = 0.43** — 절반 이상 놓침.
+- **false-positive(은유 오탐) = 1/8 = 0.12** — 허용 은유 "산책하듯 떠올려봤어"
+  를 contradict:0.52 로 오탐(I3 메타포 처벌 리스크 실재).
+
+→ mDeBERTa-xnli 는 이 도메인에서 *그대로는* B1 leg 로 신뢰 불가. **사용자
+불신이 경험적으로 입증됨.** 단 pluggable·conservative·fail-open 설계가
+*믿기 전에* 걸러냄 — 설계가 의도대로 작동(B2.3 thesis 검증).
+
+**구조적 진단(설계 변경)**: 실패가 premise 유형별로 갈림 —
+- 잡은 것(강남 거주 0.85 / 홍대 대면 0.99 / 수영 0.94)은 *구체적 의미 모순*
+  (몸 없음 ↔ 수영). NLI 적합.
+- 놓친 것(엄마 간호사·부산여행·김치찌개, all neutral≈1.0)은 premise 가
+  *"서사에 없는 가족/이력은 없다"* 류 **메타·인식론 명제** → NLI(두 문장
+  함의 비교)가 구조적으로 못 잡음. **모델 교체로도 안 풀림 — 로직 문제.**
+- entail 신호 노이즈 확인("잘 모르겠어"→entail 0.95) → "neutral 무가중·
+  contradict 만 강신호" 보수 설계가 옳았음.
+
+**결론(B1 재설계 방향)**: "날조 = 서사에 없음" 은 NLI 태스크가 아니다.
+- **I3 신체화/존재양식**: NLI-contradiction 유지 + recall 개선(Korean NLI
+  교체 등) — *구체 의미 모순* 은 NLI 적합 영역.
+- **I2 날조**: NLI-vs-메타premise 폐기. ADR-039 `likely_factual_claim`
+  (구체 외부사실 단정?) + 그 사실이 *구체 narrative 문장에 entail 안 됨*
+  = 날조 신호 (모순 아닌 *근거 부재* 로 검출). c_score 는 pluggable 이라
+  premise 구성/판정 로직만 교체, 골격 불변.
+
+### Files
+
+(위 Files + ) `tests/persona_eval/nli_smoke.py`(신규, reality-check 도구).
+
+**Status**: accepted (slice 1 plumbing). NLI 품질 *경험 검증 완료* — 일반
+NLI-vs-meta-premise 접근은 I2 에 부적합(0.43 recall) 으로 판명, B1 재설계
+방향 확정(I3=NLI 유지, I2=근거부재 로직). slice 2 = 이 분기 반영 +
+Korean NLI 후보 재-smoke. ADR-040/041 "측정 먼저" 일관 — 가정 대신 측정이
+방향을 정함.
 
 ---
 

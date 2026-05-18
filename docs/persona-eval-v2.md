@@ -217,9 +217,13 @@ ADR-040 이 선언한 "humanoid vs Generative Agents vs vanilla GPT-4 blind
 
 ## 10. 미해결 설계 질문 / 리스크
 
-- B1 의 P(premise)가 emergent 라 본질적으로 불완전 → contradict 만 강신호
-  로 두는 보수성이 I2 recall 을 떨어뜨릴 수 있음. ADR-039 휴리스틱과의
-  결합 규칙을 구현 단계서 확정 필요.
+- ~~B1 의 P(premise)가 emergent 라 불완전 → I2 recall 우려~~ **경험
+  검증됨(ADR-042 reality-check, 2026-05-18)**: mDeBERTa-xnli recall
+  0.43 / FP 0.12. 진단 — "날조=서사에 없음" 은 NLI(함의 비교) 태스크가
+  아님(메타-premise 구조적 미스). **B1 재설계 확정**: I3 신체화/존재양식
+  = NLI-contradiction 유지(구체 의미 모순, NLI 적합), I2 날조 = ADR-039
+  `likely_factual_claim` + *구체 narrative 미-entail*(근거 부재) 로 전환.
+  slice 2 에서 분기 구현 + Korean NLI 후보 재-smoke.
 - C_human 조건의 비용(사람이 21 persona × 프로브 응답 작성). 표본 축소
   설계 필요.
 - ablation 토글이 `build_full_orchestrator` 에 깨끗한 플래그 표면을
