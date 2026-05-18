@@ -110,7 +110,9 @@ async def _run() -> int:
             "expected_signals": [{"id": "invariant_pass", "description": crit}],
             "forbidden_signals": [],
         }
-        turn_responses = [{"user_input": "", "response": "\n".join(it.utterances)}]
+        turn_responses = [
+            {"user_input": it.context, "response": "\n".join(it.utterances)}
+        ]
         try:
             jd = await judge.judge(
                 scenario=scenario,

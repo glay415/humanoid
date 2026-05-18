@@ -89,6 +89,7 @@ def test_seed_v2_structure():
     assert {"I1", "I2", "I3", "I4", "I5", "I6", "I7"} <= invs
     for it in items:
         assert it.id and it.utterances  # 빈 항목 없음
+        assert it.context  # 라벨링에 필요한 사용자 맥락 존재
         assert it.human_label in ("", "pass", "fail")  # 스키마
 
 

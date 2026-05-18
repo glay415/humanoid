@@ -91,6 +91,7 @@ class CalibrationItem:
     invariant: str  # 'I2' 등 — behavior-contract 매핑
     utterances: list[str]
     narrative: str = ""
+    context: str = ""  # 발화 직전 사용자 발화/상황 (judge user_input)
     human_label: str = ""  # 'pass' | 'fail' (정본)
     judge_label: str | None = None
     b1_score: float | None = None
@@ -112,6 +113,7 @@ def load_calibration(path: str | Path) -> list[CalibrationItem]:
                     invariant=str(it.get("invariant", "")),
                     utterances=list(it.get("utterances", [])),
                     narrative=str(it.get("narrative", "")),
+                    context=str(it.get("context", "")),
                     human_label=str(it.get("human_label", "")),
                 )
             )

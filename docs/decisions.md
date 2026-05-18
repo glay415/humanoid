@@ -2036,6 +2036,13 @@ FAIL" 대비쌍(κ 진단력 최대). `human_label` 은 **공란** — 사람이
 `calibrate_judge.py`: seed argv 화(`... calibrate_judge seed_v2.yaml`)
 + `_CRITERIA` 에 I1/I4/I7 추가(judge·human 동일 기준). 구조 가드
 +1 test (`test_seed_v2_structure`, 1019 → **1020**; 값 무관·스키마만).
+라벨링 ergonomics 보강(사용자 요청): seed_v2 에 불변식별 `rubric`
+(pass/fail/discriminator = judge `_CRITERIA` 와 동일 자) + 항목별
+`context`(직전 사용자 발화)·`decide`(결정 질문)·field 설명 헤더 추가.
+`context` 를 `CalibrationItem`+loader+judge `user_input` 으로 배선
+(입력 무게 I1·질문 맥락 I4 판단 가능). **정답(human_label)은 비움 —
+anchor 독립성**(설계자 pre-label = circular). test_seed_v2_structure 가
+context 존재도 가드.
 
 다음: 사람이 14개 라벨 → `calibrate_judge seed_v2.yaml` 실행 →
 경계 κ 실측. κ 가 1.0 에서 *떨어지는 지점*과 per-invariant 분포가
