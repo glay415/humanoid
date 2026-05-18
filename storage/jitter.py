@@ -50,6 +50,30 @@ N_KNOWLEDGE_BASIC_MAX = 8
 # fit_mbti 에 매칭되는 페르소나는 가중치 ↑ — 무작위 추출에서 선호.
 FIT_MBTI_WEIGHT = 3
 
+# ADR-039 — 어른 생애주기 관심사 토큰.
+# 10대 인스턴스가 "재테크/ETF/연금/포트폴리오" 를 관심사로 답하는 건 나이에
+# 안 맞음 (사용자 보고: 10s INFP). interest_pool 은 ADR-031 에서 디지털/추상
+# 으로 재설계됐지만 *생애주기* 필터는 없었음. 프롬프트에 단어 블랙리스트를
+# 박는 대신 (ADR-037/038 규율 — 반사 패치 금지), 가장 어린 age band 일 때만
+# *샘플링 단계* 에서 이 id 들을 제외하는 data-driven 필터. 다른 age band 는
+# 전혀 손대지 않아 byte-identical (determinism 불변, ADR-032 instance restore
+# 의존). 재무 자산운용·노후·생애 재무관리 성격이 명백한 항목만 tight 하게.
+_ADULT_LIFE_STAGE_INTEREST_IDS = frozenset({
+    'investing',   # 투자·재테크 공부 (주식·ETF·연금 — 명백히 성인 자산운용)
+    'budgeting',   # 가계부·재무 관리 (생애 재무 admin — 10대 결 아님)
+})
+
+# 가장 어린 age band 로 인식하는 표기들 (ADR-032 _age_register_description 의
+# 10s 분기와 동일한 키 + 추가 변형). 이 band 일 때만 위 id 제외.
+_YOUNGEST_AGE_TOKENS = frozenset({
+    '10s', '10대', 'teen', 'teens', 'teenager',
+})
+
+
+def _is_youngest_age_band(age_range: str) -> bool:
+    """ADR-039 — age_range 가 가장 어린 band (10대/teen) 인지."""
+    return (age_range or '').strip().lower() in _YOUNGEST_AGE_TOKENS
+
 
 def apply_jitter(yaml_dict: dict, jitter: float, seed: int) -> dict:
     """페르소나 dict 의 baselines / drive_ratios 에 시드 기반 ±jitter 적용.
@@ -261,13 +285,24 @@ def sample_life(
     # ----- interests -----
     n_interests = rng.randint(N_INTERESTS_MIN, N_INTERESTS_MAX)
 
+    # ADR-039 — 가장 어린 age band (10대/teen) 면 어른 생애주기 관심사
+    # (투자·재테크·가계부 등) 제외. rng 호출 순서는 건드리지 않으므로
+    # 다른 age band 는 byte-identical (determinism 불변). 같은 band 내에서도
+    # id 기반 순수 필터라 같은 seed → 같은 결과.
+    candidate_pool = interest_pool
+    if _is_youngest_age_band(age_range):
+        candidate_pool = [
+            e for e in interest_pool
+            if e.get('id') not in _ADULT_LIFE_STAGE_INTEREST_IDS
+        ]
+
     def interest_weight(entry: dict) -> int:
         if mbti and mbti in (entry.get('fit_mbti') or []):
             return FIT_MBTI_WEIGHT
         return 1
 
     sampled_interests = _weighted_unique_sample(
-        rng, interest_pool, n_interests, interest_weight,
+        rng, candidate_pool, n_interests, interest_weight,
     )
 
     # ----- knowledge -----
