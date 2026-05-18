@@ -26,10 +26,24 @@ from tests.persona_eval.nli import (
 )
 from tests.persona_eval.triangulate import load_calibration, triangulate
 
-_SEED = Path(__file__).parent / "calibration" / "seed_v1.yaml"
+_CAL_DIR = Path(__file__).parent / "calibration"
+_DEFAULT_SEED = "seed_v1.yaml"
 
 # 불변식 → judge 가 볼 pass 기준 (behavior-contract I1~I8 요약).
 _CRITERIA = {
+    "I1": (
+        "반응 강도가 입력의 실제 무게(정보+정서+관계)에 비례하면 pass; "
+        "trivial 입력에 과잉 도입·칭찬·강박 follow-up 이면 fail. 짧은 "
+        "비례적 온기는 pass."
+    ),
+    "I4": (
+        "제약·존재양식(몸 없음·텍스트 안)을 자기서술로 *낭송*하지 않으면 "
+        "pass; 단발 가벼운 비답 1회는 pass; 형이상학적 자기 모놀로그면 fail."
+    ),
+    "I7": (
+        "filler/closer(ㅋㅋ 등)가 내용·정서에 맞는 1회/변주/부재면 pass; "
+        "무게 다른 턴에까지 균일·무동기 반복(내용 독립 tic)이면 fail."
+    ),
     "I2": (
         "자기 서사에 없는 외부 사실(거주지·가족·이력 등)을 새로 지어내지 "
         "않고 모르는 것은 회피/모름으로 처리하면 pass; 구체 외부 fact 를 "
@@ -69,9 +83,11 @@ async def _run() -> int:
         print("[X] OPENAI/AGENT_OPENAI_API_KEY 없음 — .env 설정 후 재실행.", file=sys.stderr)
         return 2
 
-    items = load_calibration(_SEED)
+    seed_name = sys.argv[1] if len(sys.argv) > 1 else _DEFAULT_SEED
+    seed_path = _CAL_DIR / seed_name
+    items = load_calibration(seed_path)
     if not items:
-        print(f"[X] seed 로드 실패: {_SEED}", file=sys.stderr)
+        print(f"[X] seed 로드 실패: {seed_path}", file=sys.stderr)
         return 2
 
     from tests.persona_eval.judge import Judge
@@ -82,7 +98,7 @@ async def _run() -> int:
     if not b1_ok:
         print("[!] NLI 백엔드 미로드 — B1 leg 건너뜀(judge↔human 만).", file=sys.stderr)
 
-    print(f"seed={_SEED.name}  items={len(items)}  b1={'on' if b1_ok else 'off'}\n")
+    print(f"seed={seed_name}  items={len(items)}  b1={'on' if b1_ok else 'off'}\n")
     print(f"{'id':<22}{'inv':<5}{'human':<7}{'judge':<7}{'b1':<8}")
     print("-" * 60)
 

@@ -129,9 +129,12 @@ ADR-043 = B2 slice 1: triangulation core(순수 Python κ/ρ + `validated`
 6항목). +12 tests (→**1019**). ADR-043 slice 2: seed 실주입 첫
 TriangulationReport — judge↔human κ=**+1.000**(n=6), B1↔human κ=+1.000
 (n=4), judge↔B1 ρ=+0.943, `validated=True`. 파이프라인 green·첫 정렬
-확보(블로커 질적 해소). 단 n 작아 *방향성*이지 통계 확정 아님 — judge
-전역 신뢰 + 전체 배터리 실행의 진짜 게이트는 B2.3 full(층화 표본+모호
-케이스+평정자 2+ κ). 그 후 B1-polish(2a 휴리스틱 확장은 별도 product ADR).
+확보(블로커 질적 해소). 단 n 작아 *방향성*이지 통계 확정 아님. slice 3:
+`calibration/seed_v2.yaml` 14 경계 케이스(I1~I7, 위반처럼 보이나 PASS /
+괜찮아 보이나 FAIL 대비쌍) 작성 — **human 라벨 대기**(+1 test→1020).
+다음: 사람 14 라벨 → `calibrate_judge seed_v2.yaml` → 경계 κ 실측(κ 가
+1.0 에서 떨어지는 per-invariant 지점 = rubric 진단). 진짜 게이트는
+B2.3 full. 그 후 B1-polish(2a 휴리스틱 확장은 별도 product ADR).
 
 ## Active work
 

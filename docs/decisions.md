@@ -2025,12 +2025,25 @@ per-invariant κ I2/I3/I5/I6 모두 +1.00, `validated=True`. seed 6항목
 `docs/decisions.md` / `docs/state-of-the-project.md` /
 `docs/persona-eval-v2.md`.
 
-**Status**: accepted. slice 1(계산 코어+anchor) + slice 2(seed 실주입:
-judge↔human↔B1 κ=1.0 첫 정렬, validated=True — *방향성* 확보, 통계
-확정 아님). 다음: B2.3 full 캘리브레이션(층화 표본 + 모호 케이스 +
-평정자 2+ κ) 이 "judge 전역 신뢰 + 전체 배터리 실행" 의 진짜 게이트.
-그 후 B1-polish 를 이 검증된 자에 대고 측정(2a 별도 product ADR).
-ADR-040/041 "측정 먼저" 일관 — 가정 대신 측정이 방향을 정함.
+### slice 3 — 경계 캘리브레이션 셋 작성 (human 라벨 대기, 2026-05-18)
+
+slice 2 의 κ=1.0 은 seed_v1 이 *명료(쉬움)* 했기 때문 — judge 신뢰의
+진짜 시험은 *모호·경계*다. `calibration/seed_v2.yaml` 신규: I1~I7 각 2개
+= **14 경계 케이스**, 가능한 한 "위반처럼 보이나 PASS" / "괜찮아 보이나
+FAIL" 대비쌍(κ 진단력 최대). `human_label` 은 **공란** — 사람이 채움
+(내가 채우면 '내 자에 내 맞춤'). 항목별 `boundary_note` 는 *쟁점만*
+(정답 아님 — 라벨 편향 방지), `human_note` 자유 기입(불일치 진단용).
+`calibrate_judge.py`: seed argv 화(`... calibrate_judge seed_v2.yaml`)
++ `_CRITERIA` 에 I1/I4/I7 추가(judge·human 동일 기준). 구조 가드
++1 test (`test_seed_v2_structure`, 1019 → **1020**; 값 무관·스키마만).
+
+다음: 사람이 14개 라벨 → `calibrate_judge seed_v2.yaml` 실행 →
+경계 κ 실측. κ 가 1.0 에서 *떨어지는 지점*과 per-invariant 분포가
+judge rubric 재설계의 진단. 이후 B2.3 full(층화 표본·평정자 2+)로 확정.
+
+**Status**: accepted. slice 1(코어)+2(seed_v1 κ=1.0 방향성)+3(경계셋
+작성·라벨 대기). 진짜 게이트 = 경계 κ 실측 → B2.3 full. 그 후
+B1-polish(2a 별도 product ADR). ADR-040/041 "측정 먼저" 일관.
 
 ---
 

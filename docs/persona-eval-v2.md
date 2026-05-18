@@ -212,7 +212,9 @@ ADR-040 이 선언한 "humanoid vs Generative Agents vs vanilla GPT-4 blind
 > `validated` 게이트 + 고정 캘리브레이션 seed) · **B2 slice 2**(ADR-043
 > — seed 실주입 첫 TriangulationReport: judge↔human κ=1.0/n=6,
 > validated=True; *방향성* 확보, 통계 확정은 B2.3 full). 아래는 *여전히*
-> 비범위 (특히 B2.3 full 캘리브레이션이 judge 전역 신뢰의 진짜 게이트).
+> 비범위. **B2 slice 3**: 경계 캘리브레이션 `seed_v2.yaml`(14, I1~I7)
+> 작성 — human 라벨 대기. 경계 κ 실측이 judge rubric 진단, B2.3 full 이
+> 전역 신뢰의 진짜 게이트.
 
 - 코드·yaml·NLI 모델 학습·프로브 17 시나리오 파일 **미작성**. 본 문서는
   *설계 선언*. 구현은 후속 작업/별도 ADR.

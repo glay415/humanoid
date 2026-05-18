@@ -79,6 +79,19 @@ def test_load_calibration_bad_path_returns_empty():
     assert load_calibration(_SEED.parent / "does_not_exist.yaml") == []
 
 
+def test_seed_v2_structure():
+    # 경계 캘리브레이션 셋(ADR-043 slice 3) 구조 가드 — human_label 값과
+    # 무관(아직 미라벨 가능). 불변식 커버리지 + 항목 무결성만 검증.
+    items = load_calibration(_SEED.parent / "seed_v2.yaml")
+    assert len(items) >= 12
+    invs = {it.invariant for it in items}
+    assert invs <= {f"I{n}" for n in range(1, 9)}
+    assert {"I1", "I2", "I3", "I4", "I5", "I6", "I7"} <= invs
+    for it in items:
+        assert it.id and it.utterances  # 빈 항목 없음
+        assert it.human_label in ("", "pass", "fail")  # 스키마
+
+
 # --- triangulate -----------------------------------------------------------
 
 
