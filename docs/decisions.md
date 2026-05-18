@@ -1813,6 +1813,71 @@ triangulation.
 
 ---
 
+## ADR-042 — persona_eval v2 B1 구현 slice 1: pluggable NLI 축 + C-score core (2026-05-18)
+
+**Context**: ADR-041 이 B(설계)를 선언했고 구현 순서를 B1→B2→(B3‖B4)→B5
+로 못박았다. B1 = judge-free 객관 축(DNLI C-score). 사용자 결정(ADR-040):
+NLI 백엔드는 로컬 다국어 NLI(transformers+torch) — LLM-as-NLI 는
+judge↔C-score 가 LLM↔LLM(공유 오류)이 되어 judge 독립검증을 무효화하므로
+배제. 트랙: `eval-harness/persona-eval-v2` 브랜치(평가 인프라).
+
+**미해결 리스크(사용자 제기, 타당)**: 로컬 다국어 NLI 가 한국어 구어 +
+존재론 발화 도메인에서 *제대로 된 성능이 안 나온* 경험적 전례. 이 불신은
+근거 있다 (mDeBERTa-xnli 는 번역 XNLI 학습 — 한국어 native colloquial /
+은유 / 존재론 발화는 hard domain).
+
+**Decision**: slice 1 은 *NLI 품질을 가정하지 않는* pluggable plumbing 만
+구현. 모델을 믿지 않고 *측정* 하는 게 설계 thesis (B2.3) — 따라서 slice 1
+의 가치는 NLI 성능과 무관하다.
+
+- `tests/persona_eval/nli.py`: `NLIBackend` Protocol(백엔드 교체 가능 —
+  mDeBERTa 에 lock 아님) + `NLILabel`/`NLIResult` + `MockNLIBackend`
+  (결정론 테스트용, ADR-003 패턴) + `TransformersNLIBackend`(heavy import
+  백엔드 내부 lazy, 로드/추론 실패 NEUTRAL fail-open, CPU, config.id2label
+  robust 매핑) + `split_sentences`(보수적, 과분할 회피) + `build_premises`
+  (CONTRACT_PREMISES[I2/I3] + 런타임 self_narrative + 비-prescriptive
+  persona 사실, dedupe) + `c_score`(보수적 집계: contradict 지배, neutral
+  무가중; contradict_rate = I2 독립 날조 알람, ADR-039 정합; 절대 raise X).
+- `pyproject.toml`: `eval` extra(torch/transformers/sentencepiece) opt-in.
+  default deps·일반 pytest 와 분리 — heavy import 가 백엔드 내부 lazy 라
+  미설치 환경에서도 baseline 영향 0.
+- `tests/test_persona_eval_nli.py`: MockNLIBackend 만으로 plumbing 검증
+  (문장분할/premise 합성/C-score 수학/보수 집계/fail-open/top-level
+  heavy-import 부재 결정론 스캔). **+10 tests (992 → 1002 passed)**.
+
+### 명시적 비범위 + 다음 단계 (NLI 불신의 처리)
+
+slice 1 은 NLI *성능* 을 검증하지 **않는다**. 다음 즉시 단계 = **B2.3 를
+앞당긴 경험적 NLI 품질 게이트**: 소형 고정 gold set(한국어 persona 문장 ×
+CONTRACT_PREMISES, 손라벨 entail/neutral/contradict)에 대해 백엔드의
+정확도/κ 를 측정하는 하니스. 이것이 사용자 불신의 *올바른 응답* — 가정이
+아니라 측정. 게이트 결과별 분기:
+- 통과: B1 을 triangulation 3번째 leg 로 사용.
+- 미달: 백엔드 교체(KLUE-NLI/KorNLI-finetuned/대형/앙상블) 또는
+  ADR-039 `likely_factual_claim` 휴리스틱으로 pre-filter 후 NLI 적용
+  (precision↑·모델 부담↓), 그래도 미달 시 B1 을 *contradict-only 날조
+  알람* 으로 degrade + 한계 문서화. 어느 경로든 judge 검증은 human
+  anchor 를 1차로 진행(B1 은 가중 약화). pluggable 설계라 c_score 로직
+  불변으로 백엔드만 교체.
+
+### 회귀
+
+- `pytest tests/test_persona_eval_nli.py -q` 10 passed. 전체
+  `pytest tests/ -q --ignore=tests/persona_eval --ignore=tests/e2e_trends`
+  는 992 → **1002 passed**(신규 파일만 추가, 기존 무변경; full-run 은
+  머지 전 권장). torch 미설치 → TransformersNLIBackend fail-open.
+
+### Files
+
+- `tests/persona_eval/nli.py`(신규) · `tests/test_persona_eval_nli.py`(신규)
+  · `pyproject.toml`(`eval` extra) · `docs/decisions.md` /
+  `docs/state-of-the-project.md`.
+
+**Status**: accepted (slice 1 plumbing; NLI 품질은 설계상 *미검증* —
+B2.3 경험적 게이트가 선행조건. ADR-040/041 의 "측정 먼저" 일관).
+
+---
+
 ## Future ADRs (placeholder)
 
 다음과 같은 결정이 일어나면 ADR 를 append:

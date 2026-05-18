@@ -31,6 +31,16 @@ analyze = [
     "pandas>=2.0",
     "matplotlib>=3.8",
 ]
+eval = [
+    # persona_eval v2 B1 — judge-free 로컬 NLI (ADR-040/041/042).
+    # default deps·일반 pytest 와 분리. torch/transformers 가 무겁고
+    # API 비용은 0 이나 디스크/모델 다운로드가 큼 → `uv sync --extra eval`
+    # 로 opt-in. 미설치 시 TransformersNLIBackend 는 fail-open(NEUTRAL),
+    # 992+ baseline 은 영향 없음 (heavy import 는 백엔드 내부 lazy).
+    "torch>=2.1",
+    "transformers>=4.40",
+    "sentencepiece>=0.2",  # mDeBERTa-v3 SentencePiece tokenizer
+]
 
 [build-system]
 requires = ["setuptools>=68.0"]
