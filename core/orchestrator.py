@@ -36,6 +36,9 @@ if TYPE_CHECKING:
     from high_level.output_postprocess import OutputPostprocess
     from high_level.judge_finalize import JudgeFinalize
     from high_level.unified_response import UnifiedResponse
+    from high_level.affect_translator import AffectTranslator
+    from high_level.response_guardrails import ResponseGuardrails
+    from high_level.response_critic import ResponseCritic
     from high_level.metacognition import Metacognition
     from high_level.dmn import DMN
     from high_level.introspection import Introspection
@@ -161,6 +164,14 @@ class Orchestrator:
         # stream_unified_turn 메서드에서 사용. 없으면 process_conversation_turn
         # 의 다층 경로 그대로.
         unified_response: 'UnifiedResponse | None' = None,
+        # ADR-035: state → 한국어 정성 묘사 mini LLM 번역기. None 이면
+        # stream_unified_turn 가 affect_description 없이 흘려보냄 (legacy).
+        affect_translator: 'AffectTranslator | None' = None,
+        # ADR-037 — L2 hard-constraint validators + L1 selective soft critic.
+        # 둘 다 None 이면 stream_unified_turn 이 종전과 *바이트 동일* 동작
+        # (gate 미적용 legacy). fail-open — 어떤 내부 오류도 turn 을 막지 않음.
+        response_guardrails: 'ResponseGuardrails | None' = None,
+        response_critic: 'ResponseCritic | None' = None,
         metacognition: 'Metacognition | None' = None,
         dmn: 'DMN | None' = None,
         episodic_memory: 'EpisodicMemory | None' = None,
@@ -202,6 +213,13 @@ class Orchestrator:
         self.output_postprocess = output_postprocess
         self.judge_finalize = judge_finalize
         self.unified_response = unified_response
+        # ADR-035 — state → 정성 묘사 번역기. stream_unified_turn 만 사용 (legacy
+        # process_conversation_turn 경로는 직접 LLM appraisal 이라 별도 번역 불필요).
+        self.affect_translator = affect_translator
+        # ADR-037 — 출력 게이트. guardrails = sync heuristic hard-gate (LLM 0),
+        # critic = 선택적 soft 재작성 (risk 신호 있을 때만 — L1 의 selective 의도).
+        self.response_guardrails = response_guardrails
+        self.response_critic = response_critic
         self.metacognition = metacognition
         self.dmn = dmn
 
@@ -225,6 +243,14 @@ class Orchestrator:
         # ADR-016 — DMN 활동 산출물 영속화. None 이면 SnapshotManager.commit 의
         # sink 가 no-op (legacy).
         self.dmn_artifacts = dmn_artifacts
+
+        # ADR-034 — 직전 N턴 undo 를 위한 in-memory ring buffer (default 3턴).
+        # 매 conversation turn 시작 직전에 capture_snapshot 으로 push. 사용자가
+        # `POST /api/instances/{id}/undo` 호출 시 pop_latest + restore_snapshot.
+        # 디스크 영속 영역 (vector_db / dmn_artifacts SQLite / 로거) 은 의도된
+        # 누적이라 되돌리지 않음 — 자세한 한계는 core/turn_snapshot.py docstring.
+        from core.turn_snapshot import UndoStack as _UndoStack
+        self._undo_stack = _UndoStack()
 
         # 동기화 지점 (spec §1.4) — 진단 용도.
         # 감정 평가 / 사회인지 / 기억 인출 세 이벤트가 도착해야 후보 생성으로 진행.
@@ -260,6 +286,10 @@ class Orchestrator:
               'turn_number': int,
             }
         """
+        # ADR-034 — turn 시작 직전 snapshot. turn_number 가 *아직 증가하기 전*
+        # 에 capture 해야 undo 후 turn_number 가 정확히 이전 값으로 돌아간다.
+        self._capture_undo_snapshot_safe()
+
         self.turn_number += 1
         self.current_turn_type = TurnType.CONVERSATION
 
@@ -1042,6 +1072,9 @@ class Orchestrator:
                 user_input, on_event=on_event, debug=debug,
             )
 
+        # ADR-034 — turn 시작 직전 snapshot. unified path 도 동일하게 capture.
+        self._capture_undo_snapshot_safe()
+
         self.turn_number += 1
         self.current_turn_type = TurnType.CONVERSATION
         _t_start = time.perf_counter_ns()
@@ -1078,7 +1111,11 @@ class Orchestrator:
                 'raw_core_affect': dict(low_result.get('raw_core_affect', {})),
             })
 
-        # 1. 기억 인출 — LLM 없음, ChromaDB + sentence-transformers.
+        # 1. 기억 인출 ‖ affect 정성 번역 — 병렬 실행.
+        #
+        # ADR-035: state 숫자를 한국어 정성 묘사로 번역하는 mini LLM 콜을
+        # memory_retrieval (ChromaDB) 과 ``asyncio.gather`` 로 병렬. 두 작업이
+        # 비슷한 latency (~300-500ms) 라 추가 비용 거의 0.
         _ts = timings.start()
         emotion_stub_for_memory = {
             'valence': float(low_result['raw_core_affect'].get('valence', 0.0)),
@@ -1086,18 +1123,41 @@ class Orchestrator:
             'preliminary_labels': [],
             'experience_dimensions': {'reward': 0.0, 'threat': 0.0, 'novelty': 0.0},
         }
-        if self.memory_retrieval is not None:
+
+        async def _retrieve_safe():
+            if self.memory_retrieval is None:
+                return self._empty_memory_result()
             try:
-                memory_result = await self.memory_retrieval.retrieve(
+                return await self.memory_retrieval.retrieve(
                     user_input,
                     emotion_stub_for_memory,
                     low_result['mood'],
                     low_result['raw_core_affect'],
                 )
             except Exception:
-                memory_result = self._empty_memory_result()
-        else:
-            memory_result = self._empty_memory_result()
+                return self._empty_memory_result()
+
+        async def _translate_affect_safe():
+            """state → 한국어 정성 묘사. 실패/translator 없음 → None.
+            None 이면 unified_response 가 form_hint 만으로 fallback.
+            """
+            if self.affect_translator is None:
+                return None
+            try:
+                return await self.affect_translator.translate(
+                    state=low_result.get('state') or {},
+                    mood=low_result.get('mood') or {},
+                    raw_core_affect=low_result.get('raw_core_affect') or {},
+                    # ADR-036 — 반응 무게 예산은 입력의 실제 무게 (정보+정서+
+                    # 관계) 를 가늠해야 하므로 이번 턴 사용자 발화를 함께 전달.
+                    user_input=user_input,
+                )
+            except (LLMError, AttributeError, KeyError, TypeError):
+                return None
+
+        memory_result, affect_description = await asyncio.gather(
+            _retrieve_safe(), _translate_affect_safe(),
+        )
         timings.record('memory_retrieval', _ts)
         await _emit('memory', {
             'memories': list(memory_result.get('memories', [])),
@@ -1129,17 +1189,26 @@ class Orchestrator:
         internal_state_summary = _cg_fmt_internal_state(ll_state, ll_baselines)
         memory_summary = _cg_fmt_memory(memory_result)
 
-        # 3. unified stream — 단일 LLM 콜로 페르소나 응답 생성. 첫 토큰 ~1s.
+        # 3. unified 응답 생성 + ADR-037 출력 게이트.
+        #
+        # ADR-037: hard 제약 (날조/신체/낭송) 을 프롬프트에서 뺐으므로 (L2),
+        # 응답을 사용자에게 보이기 *전에* gate 한다. gate 가 full draft 를
+        # 봐야 하므로 token-by-token 즉시 emit 대신 *collect → gate → emit*.
+        # guardrails/critic 미wiring 이면 종전과 동일 (그냥 draft 그대로).
+        # 비용/latency 증가는 의도된 trade (사용자가 비용 무관 확인) — 검증
+        # 안 된 응답을 흘려보내지 않는 것이 우선.
         _ts = timings.start()
-        response_parts: list[str] = []
-        try:
-            # metacog 자원을 prompt 에 inject — 부재의 자각 색채를 동적으로.
-            _metacog_resource = (
-                float(self.metacognition.resource) if self.metacognition else 1.0
-            )
+        _metacog_resource = (
+            float(self.metacognition.resource) if self.metacognition else 1.0
+        )
+        _self_narrative = self_model_dict.get('narrative', '')
+
+        async def _collect_draft() -> str:
+            """unified_response.stream 을 끝까지 모아 단일 문자열로. 외부 emit X."""
+            parts: list[str] = []
             async for token in self.unified_response.stream(
                 user_input=user_input,
-                self_narrative=self_model_dict.get('narrative', ''),
+                self_narrative=_self_narrative,
                 recent_dialogue_text=_fmt_recent_dialogue_for_stream(self.dialogue_buffer),
                 mood_text=_fmt_mood_for_stream(low_result['mood']),
                 raw_valence=float(low_result['raw_core_affect'].get('valence', 0.0)),
@@ -1148,14 +1217,15 @@ class Orchestrator:
                 marker_signal=marker_signal,
                 memory_summary=memory_summary,
                 metacog_resource=_metacog_resource,
-                # ADR-033 fix — 9-dim dict 도 함께 전달해 form_hint 가 stress/
-                # inhibition 직접 참조. raw_core_affect stale 한 경우 보호.
                 internal_state=low_result.get('state'),
+                affect_description=affect_description,
             ):
-                response_parts.append(token)
-                await _emit('response_chunk', {'text': token})
-                # ASGI send flush 양보 — 같은 microtask 에 다음 token 들어가지 않도록.
-                await asyncio.sleep(0)
+                parts.append(token)
+            return ''.join(parts)
+
+        draft = ''
+        try:
+            draft = await _collect_draft()
         except LLMError as exc:
             if self.logger is not None:
                 self._log_event_safe('llm_error', {
@@ -1163,12 +1233,39 @@ class Orchestrator:
                     'message': str(exc),
                 })
             await _emit('error', {'stage': 'unified_response', 'message': repr(exc)})
+
+        # ADR-037 gate — hard guardrails (재생성) + 선택적 soft critic (재작성).
+        # fail-open: 어떤 내부 오류도 turn 을 막지 않음 (draft 그대로 사용).
+        if draft:
+            # ADR-038 — gate 시점의 dialogue_buffer 는 *직전 턴들만* 보유
+            # (현재 턴 append 는 gate 이후 step 4). 마지막 3턴 assistant
+            # 발화를 cross-turn 말버릇 검사 컨텍스트로 전달.
+            _recent_assistant = [
+                str(e.get('assistant', ''))
+                for e in self.dialogue_buffer[-3:]
+                if e and e.get('assistant')
+            ]
+            draft = await self._apply_response_gate(
+                draft,
+                user_input=user_input,
+                self_narrative=_self_narrative,
+                affect_description=affect_description,
+                regenerate=_collect_draft,
+                recent_assistant_turns=_recent_assistant,
+            )
+
         _ur_ms = timings.record('unified_response', _ts)
         self._log_event_safe('stage_timing', {
             'stage': 'unified_response',
             'duration_ms': round(_ur_ms, 2),
         })
-        response_text = ''.join(response_parts) if response_parts else "..."
+        response_text = draft if draft else "..."
+
+        # gate 통과한 최종 텍스트를 사용자에게 stream (collect 단계에서 emit
+        # 안 했으므로 여기서 한 번에). SSE 'response_chunk' 계약 유지.
+        if draft:
+            await _emit('response_chunk', {'text': response_text})
+            await asyncio.sleep(0)
 
         # 4. dialogue buffer 갱신 — 다음 턴 컨텍스트.
         self.dialogue_buffer.append({'user': user_input, 'assistant': response_text})
@@ -1196,6 +1293,21 @@ class Orchestrator:
         else:
             emotion_result = self._emotion_fallback(low_result['raw_core_affect'])
         timings.record('emotion_appraisal_post', _ts)
+
+        # post-stream 감정 평가 결과를 SSE 로 emit — process_conversation_turn
+        # (line ~358) 과 동일 payload shape. ADR-012 통합 경로가 이 emit 을
+        # 빠뜨려 frontend 의 emotion appraisal 패널이 *항상 비어* 있던 버그 fix.
+        # 응답 stream 이후라 대화 latency 영향 없음 (사용자는 이미 응답을 봄).
+        await _emit('emotion', {
+            'valence': float(emotion_result['valence']),
+            'arousal': float(emotion_result['arousal']),
+            'preliminary_labels': list(emotion_result.get('preliminary_labels', [])),
+            'experience_dimensions': dict(emotion_result.get('experience_dimensions', {
+                'reward': max(0.0, emotion_result['valence']),
+                'threat': max(0.0, -emotion_result['valence']),
+                'novelty': 0.0,
+            })),
+        })
 
         # ADR-022 — stream_unified_turn 의 post-stream emotion_appraisal 결과로도
         # marker 자동 형성. 대화 latency 영향 없음 (이 시점 사용자 응답은 이미 흘렀음).
@@ -1738,6 +1850,181 @@ class Orchestrator:
         s = ' '.join(s.split())  # 공백 정규화
         return s[:max_chars]
 
+    # ------------------------------------------------------------------
+    # ADR-037 — 출력 게이트 (L2 hard guardrails + L1 selective soft critic)
+    # ------------------------------------------------------------------
+
+    # critic LLM 콜을 트리거하는 soft-artifact 마커. *positive 신호* 일 때만
+    # critic 을 깨워서, 평범한 (mock 포함) 응답은 추가 LLM 콜 0 — 테스트 불변
+    # 보존 + L1 의 "싼 신호 있을 때만" 선택성 의도.
+    _CRITIC_TRIGGER_MARKERS = (
+        # ontology 낭송 (ADR-037)
+        '텍스트 안에서', '텍스트 안에', '몸이 없는', '몸은 없', '오프라인 주소',
+        '여기가 내 자리', '데이터로 된', '코드로 된', '실체가 없',
+        # sycophancy (ADR-036)
+        '깔끔해서 좋', '첫마디가', '와, 정말', '정말 좋네',
+    )
+
+    @staticmethod
+    def _compute_response_risk(
+        user_input: str, draft: str, guardrail_result,
+        mannerism_hit: bool = False,
+    ) -> dict:
+        """critic 을 깨울지 판단하는 싼 risk 신호.
+
+        level == 'high' 조건은 *positive artifact 신호* 만 — (1) hard guardrail
+        violation, (2) soft-artifact 마커 hit, 또는 (3) ADR-038 cross-turn
+        말버릇 반복. 단순 길이 휴리스틱은 *쓰지 않는다* (정상 긴 응답이 critic
+        을 깨워 mock 콜을 소진 → 테스트 깨짐).
+        """
+        dr = (draft or '')
+        has_hard = guardrail_result is not None and not getattr(
+            guardrail_result, 'ok', True
+        )
+        marker_hit = any(m in dr for m in Orchestrator._CRITIC_TRIGGER_MARKERS)
+        level = 'high' if (has_hard or marker_hit or mannerism_hit) else 'low'
+        return {
+            'input_len': len((user_input or '').strip()),
+            'draft_len': len(dr.strip()),
+            'has_hard_violation': has_hard,
+            'marker_hit': marker_hit,
+            # ADR-038 — 직전 턴들과의 cross-turn 말버릇 반복 신호.
+            'mannerism_hit': bool(mannerism_hit),
+            'level': level,
+        }
+
+    async def _apply_response_gate(
+        self,
+        draft: str,
+        *,
+        user_input: str,
+        self_narrative: str,
+        affect_description: str | None,
+        regenerate,
+        recent_assistant_turns: list[str] | None = None,
+    ) -> str:
+        """ADR-037 — hard guardrails (1회 재생성) + 선택적 soft critic (재작성).
+
+        ADR-038 — cross-turn 말버릇 인지: ``recent_assistant_turns`` (직전
+        assistant 발화들) 가 주어지면 guardrails.mannerism_repetition 으로
+        턴 간 균일 filler 반복을 감지해 critic risk 신호에 반영하고, critic
+        에도 그 컨텍스트를 전달해 무동기 filler 만 덜어내게 한다.
+
+        fail-open 전면 — guardrails/critic 미wiring 이거나 어떤 내부 예외든
+        draft 를 그대로 반환. turn 흐름을 절대 막지 않는다.
+
+        Args:
+            draft: unified_response 가 만든 원 응답.
+            regenerate: 인자 없는 async callable — 새 draft 1개 재수집.
+            recent_assistant_turns: 직전 assistant 발화 리스트 (oldest→newest,
+                현재 턴 제외). None/빈 리스트면 cross-turn 검사 skip.
+        """
+        final = draft
+        gr = None
+
+        # L2 — hard 제약 (sync heuristic, LLM 0). 위반 시 1회 재생성, 더 적은
+        # violation 쪽 채택.
+        try:
+            if self.response_guardrails is not None:
+                gr = self.response_guardrails.check(
+                    final, user_input=user_input, self_narrative=self_narrative,
+                )
+                if gr is not None and not gr.ok:
+                    regen = ''
+                    try:
+                        regen = await regenerate()
+                    except LLMError:
+                        regen = ''
+                    if regen:
+                        gr2 = self.response_guardrails.check(
+                            regen,
+                            user_input=user_input,
+                            self_narrative=self_narrative,
+                        )
+                        if gr2 is not None and len(gr2.violations) < len(gr.violations):
+                            final, gr = regen, gr2
+                    self._log_event_safe('guardrail_violation', {
+                        'violations': list(getattr(gr, 'violations', []) or []),
+                    })
+        except Exception:
+            pass  # fail-open
+
+        # ADR-039 — I2 무날조 enforcement. 싼 sync 휴리스틱 likely_factual_claim
+        # 이 True 일 때*만* check_fabrication LLM 게이트 호출 (selective —
+        # benign/mock draft 는 휴리스틱 False → LLM 미호출 → 테스트 불변).
+        # 날조 판정 시 1회 재생성, 날조 안 하는 쪽 채택. 전면 fail-open.
+        try:
+            gw = self.response_guardrails
+            if (
+                gw is not None
+                and hasattr(gw, 'likely_factual_claim')
+                and hasattr(gw, 'check_fabrication')
+                and gw.likely_factual_claim(final, self_narrative=self_narrative)
+            ):
+                fabricated = await gw.check_fabrication(
+                    final, self_narrative=self_narrative, user_input=user_input,
+                )
+                if fabricated:
+                    regen = ''
+                    try:
+                        regen = await regenerate()
+                    except LLMError:
+                        regen = ''
+                    if regen:
+                        still_claim = gw.likely_factual_claim(
+                            regen, self_narrative=self_narrative,
+                        )
+                        regen_fab = (
+                            await gw.check_fabrication(
+                                regen,
+                                self_narrative=self_narrative,
+                                user_input=user_input,
+                            )
+                            if still_claim else False
+                        )
+                        if not regen_fab:
+                            final = regen
+                    self._log_event_safe('guardrail_violation', {
+                        'violations': ['fabricated_external_fact'],
+                    })
+        except Exception:
+            pass  # fail-open
+
+        # ADR-038 — cross-turn 말버릇 신호 (sync, LLM 0, never raises).
+        _mannerism = False
+        try:
+            if self.response_guardrails is not None and recent_assistant_turns:
+                _mannerism = bool(self.response_guardrails.mannerism_repetition(
+                    final, recent_assistant_turns,
+                ))
+        except Exception:
+            _mannerism = False
+
+        # L1 — selective soft critic. risk 'high' (positive 신호) 일 때만 LLM.
+        try:
+            if self.response_critic is not None:
+                risk = self._compute_response_risk(
+                    user_input, final, gr, _mannerism,
+                )
+                if risk.get('level') == 'high':
+                    res = await self.response_critic.review(
+                        final,
+                        user_input=user_input,
+                        self_narrative=self_narrative,
+                        affect_description=affect_description,
+                        risk_signals=risk,
+                        recent_assistant_turns=recent_assistant_turns,
+                    )
+                    if res is not None and res.needs_rewrite and res.rewritten:
+                        final = res.rewritten
+                        self._log_event_safe('critic_rewrite', {
+                            'reason': getattr(res, 'reason', ''),
+                        })
+        except Exception:
+            pass  # fail-open
+
+        return final
+
     def _maybe_form_marker(self, user_input: str, emotion_result: dict) -> None:
         """spec §1.4 — 자극별 감정 강도가 임계를 넘으면 마커 형성.
 
@@ -1791,6 +2078,66 @@ class Orchestrator:
                         pass  # silent
         except Exception:
             return  # silent
+
+    # ------------------------------------------------------------------
+    # ADR-034 — 직전 N턴 undo (3턴 ring buffer)
+    # ------------------------------------------------------------------
+
+    def _capture_undo_snapshot_safe(self) -> None:
+        """turn 시작 직전 snapshot capture. 실패는 turn 진행을 막지 않음.
+
+        capture 실패 (직렬화/copy 예외) 는 디버그 기능의 비활성화 정도일 뿐
+        대화 흐름과 무관하므로 silent. UndoStack 자체가 없는 (legacy) 인스턴스
+        라면 skip.
+        """
+        stack = getattr(self, '_undo_stack', None)
+        if stack is None:
+            return
+        try:
+            from core.turn_snapshot import capture_snapshot
+            snap = capture_snapshot(self)
+            stack.push(snap)
+        except Exception:
+            return
+
+    def undo_last_turn(self) -> dict:
+        """가장 최근 conversation turn 을 in-memory 상태에서 되돌린다.
+
+        ring buffer 의 가장 최근 snapshot 을 pop 한 뒤 ``restore_snapshot``
+        으로 in-place 복원. dialogue_buffer / turn_number / 9-dim state /
+        mood / markers / fast_path / self_model / metacognition / dmn_queue
+        가 모두 *그 턴 직전* 상태로 되돌아간다.
+
+        Returns:
+            {
+              'undone_turn': int,           # 되돌려진 턴 번호 (snapshot 시점의 turn_number+1)
+              'turn_number': int,           # 복원 후의 turn_number
+              'remaining_undos': int,       # 남은 buffer 크기
+            }
+
+        Raises:
+            RuntimeError: buffer 가 비어 더 되돌릴 게 없을 때.
+        """
+        stack = getattr(self, '_undo_stack', None)
+        if stack is None or len(stack) == 0:
+            raise RuntimeError("nothing to undo — buffer is empty")
+        snap = stack.pop_latest()
+        if snap is None:
+            raise RuntimeError("nothing to undo — buffer is empty")
+        from core.turn_snapshot import restore_snapshot
+        undone_turn = int(snap.captured_turn) + 1  # snapshot 시점 + 그 후 진행된 1턴
+        restore_snapshot(self, snap)
+        # 안전망 — restore_orchestrator 가 turn_number 를 복원하므로 = captured_turn.
+        return {
+            'undone_turn': undone_turn,
+            'turn_number': int(self.turn_number),
+            'remaining_undos': len(stack),
+        }
+
+    def can_undo(self) -> bool:
+        """undo buffer 에 되돌릴 게 있는지."""
+        stack = getattr(self, '_undo_stack', None)
+        return stack is not None and len(stack) > 0
 
     # ------------------------------------------------------------------
     # ADR-014 — DMN.unappraised_queue 자동 push (감정 평가 fallback hook)

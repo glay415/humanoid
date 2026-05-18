@@ -574,6 +574,65 @@ async def debug_set_state(
     }
 
 
+@app.post("/api/instances/{instance_id}/undo", status_code=200)
+async def undo_last_turn(instance_id: str) -> dict:
+    """ADR-034 — 직전 conversation turn 을 in-memory 상태에서 되돌린다.
+
+    ring buffer 크기 3 — 최대 3턴까지 연속 undo 가능. buffer 비었으면 400.
+
+    범위:
+      - 9-dim internal_state / mood / raw_core_affect / drives / dialogue_buffer /
+        turn_number / markers / fast_path / self_model / metacognition / dmn
+        unappraised_queue → 직전 turn 시작 직전 값으로 복원.
+      - mood_history 의 마지막 항목 1개도 pop (UI mood timeline 정합 유지).
+
+    의도된 한계:
+      - vector_db 의 episodic auto_encode 는 되돌리지 않음 (드물게 발생, 임베딩
+        비용 회수 불가).
+      - dmn_artifacts SQLite append-only history 는 그대로 — 즉시 restart 시
+        해당 turn 의 marker 가 재출현할 수 있음.
+      - turns.jsonl 로거는 감사 로그라 보존.
+
+    반환: ``{instance_id, undone_turn, turn_number, remaining_undos}``.
+    """
+    if not MANAGER.exists(instance_id):
+        raise HTTPException(status_code=404, detail=f"instance not found: {instance_id}")
+    orch = MANAGER.get(instance_id)
+    try:
+        result = orch.undo_last_turn()
+    except RuntimeError as exc:
+        # buffer 가 비었을 때.
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    # mood_history 마지막 항목 pop — UI mood timeline 정합. 비었으면 no-op.
+    history = _instance_mood_history.get(instance_id)
+    if history:
+        history.pop()
+
+    # 디스크 메타 갱신 — 다음 health/list 응답에 새 turn_number 가 반영되도록.
+    try:
+        last_mood = (
+            history[-1] if history else {'valence': 0.0, 'arousal': 0.0}
+        )
+        MANAGER.update_metadata(
+            instance_id,
+            turn_number=int(orch.turn_number),
+            last_mood={
+                'valence': float(last_mood.get('valence', 0.0)),
+                'arousal': float(last_mood.get('arousal', 0.0)),
+            },
+        )
+        MANAGER.save_state(instance_id)
+    except Exception:
+        # 저장 실패는 undo 응답을 막지 않음.
+        pass
+
+    return {
+        'instance_id': instance_id,
+        **result,
+    }
+
+
 @app.post("/api/instances/{instance_id}/hard-reset", status_code=200)
 @limiter.limit("5/minute")
 async def hard_reset_instance(

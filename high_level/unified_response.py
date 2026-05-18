@@ -134,6 +134,7 @@ class UnifiedResponse:
         memory_summary: str,
         metacog_resource: float = 1.0,
         internal_state: dict | None = None,
+        affect_description: str | None = None,
     ):
         """async generator — plain text 토큰을 그대로 yield.
 
@@ -159,6 +160,12 @@ class UnifiedResponse:
             internal_state=internal_state,
         )
 
+        # ADR-035 — affect_translator 가 도출한 정성 묘사. None / 빈 문자열이면
+        # form_hint 만으로 충분하므로 prompt 의 해당 라인을 *가이드 없음* 으로.
+        affect_desc_text = (affect_description or '').strip() or (
+            '(정성 묘사 미확립 — 위 form_hint 만 참고)'
+        )
+
         rendered = self.template.render(
             user_input=user_input,
             self_narrative=self_narrative or "(자기 서사 미확립)",
@@ -172,6 +179,7 @@ class UnifiedResponse:
             metacog_resource=metacog_resource,
             metacog_resource_label=metacog_label,
             response_form_hint=form_hint,
+            affect_description=affect_desc_text,
         )
         messages = [
             {"role": "system", "content": _SYSTEM_MESSAGE},

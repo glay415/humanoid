@@ -190,6 +190,16 @@ def build_full_orchestrator(
     # LLM 콜로 단축 — ChatGPT-like UX. SSE 가 orch.stream_unified_turn 호출.
     from high_level.unified_response import UnifiedResponse
     unified_response = UnifiedResponse(llm_client=llm_client)
+    # ADR-035 — state → 한국어 정성 묘사 mini LLM 번역기. stream_unified_turn 가
+    # memory_retrieval 과 병렬 호출. 첫 spawn 비용 ≈ 0 (lazy template load).
+    from high_level.affect_translator import AffectTranslator
+    affect_translator = AffectTranslator(llm_client=llm_client)
+    # ADR-037 — L2 hard-constraint guardrails (sync heuristic, LLM 0) + L1
+    # selective soft critic (risk 신호 있을 때만 LLM). 둘 다 fail-open.
+    from high_level.response_guardrails import ResponseGuardrails
+    from high_level.response_critic import ResponseCritic
+    response_guardrails = ResponseGuardrails(llm_client=llm_client)
+    response_critic = ResponseCritic(llm_client=llm_client)
     metacognition = Metacognition(
         sensitivity=cfg.get('metacognition_sensitivity', 0.5),
         floor=cfg.get('metacognition_floor', 0.1),
@@ -247,6 +257,9 @@ def build_full_orchestrator(
         output_postprocess=output_postprocess,
         judge_finalize=judge_finalize,
         unified_response=unified_response,
+        affect_translator=affect_translator,
+        response_guardrails=response_guardrails,
+        response_critic=response_critic,
         metacognition=metacognition,
         dmn=dmn,
         episodic_memory=episodic,
