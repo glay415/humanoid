@@ -103,6 +103,24 @@ Phase 단위는 spec §13 implementation roadmap 기준. Wave 는 실제 작업 
 - 2026-05-13 ADR-032 (age/gender register): **866 + 2 skip + 1 xfail** (+10 `tests/test_age_gender_register.py`).
 - 2026-05-14 ADR-033 (listener mode + master command + form layer + blacklist 정리 + narrative 1인칭화): **883 + 2 skip + 1 xfail** (+10 `tests/test_state_debug_endpoint.py` + 7 `tests/test_response_form_hint.py`).
 
+## North star (제품 목표)
+
+**"새로운, 독립적인 한 사람과 대화하는 느낌"** (ADR-040, 2026-05-18 명명).
+프레임 B(인간다움 데모). 그전까지 코드/docs 에 제품 목표가 명시된 적 없었다.
+`docs/behavior-contract.md` I1~I7 이 이 목표의 *측정자*였고, ADR-040 이 유일한
+*positive* 불변식 **I8 자기 무게중심**(+ 프로브 17 스펙)을 추가해 갭을 메움.
+"사용자 성향 분석 → 매칭" 은 사이드 이펙트일 뿐 — 매칭은 *선택*이지 *적응*이
+아니다(적응 = ADR-036/I5 가 막는 아첨). 시그니처 실험: humanoid vs Generative
+Agents vs vanilla GPT-4 blind 3-axis encounter battery (distinctness /
+durability / independent center-of-gravity). 후속: 프로브 17 yaml+루브릭,
+LLM-judge 신뢰성 검증(persona_eval 전체 스코프 실행의 선행 조건). 평가
+문헌 sweep + 이식 계획은 [`docs/eval-literature.md`](eval-literature.md)
+(ADR-040 A 단계). B(persona_eval v2 설계)는 [`docs/persona-eval-v2.md`]
+(persona-eval-v2.md) + ADR-041 — 별도 트랙 `eval-harness/persona-eval-v2`
+브랜치(평가 인프라, 인지아키텍처 고도화와 분리). 설계 선언까지만 — 구현/
+실행은 후속, persona_eval 전체 스코프 실행은 B2 judge-triangulation 통과가
+선행조건.
+
 ## Active work
 
 **ADR-013 persona behavior framework — Stage 1~5 verified** (2026-05-12): 페르소나가 본인 결로 emergent 하게 동작하는지 LLM-as-judge 로 검증. 좁은 scope (4 시나리오 × 5 페르소나) 16/16 PASS. 두 잠재 결함이 분석 과정에서 드러나 fix 됨 — (1) judge 가 spawn 직후의 `self_model.narrative` (sample_life 합성분) 를 못 봐서 instance 가 무작위로 받은 관심사를 "narrative 결 안 맞음" 으로 오판한 건, runner 가 GET /api/instances/{id} 로 런타임 narrative 도 받아 채점에 전달. (2) 자원 낮은 metacog 상태에서 "사람이다" hard rule 이 자기 의문 emergent 동작을 막아버린 건, `prompts/unified_response.txt` 의 hard rule section 안에 *표현 강도가 자원에 따라 다르다* 는 명시 carve-out 추가 (자원<0.4 → 흔들림 + AI disclosure 절대 금지 유지). 전체 scope (11 × 21 = ~214 runs, ~100min 비용) 는 아직 안 돌림.

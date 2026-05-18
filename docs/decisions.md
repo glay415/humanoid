@@ -1677,6 +1677,142 @@ selective gate 설계 덕에 925→953 green 유지, 회귀 0:
 
 ---
 
+## ADR-040 — 프로젝트 북극성 명명 + I8 자기 무게중심 (measurement-target only) (2026-05-18)
+
+**Context**: 이 저장소는 풍부한 아키텍처(v12)·39개 ADR·992 테스트를 쌓았으나
+*제품 목표(북극성)* 가 코드/docs 어디에도 명시된 적이 없었다 — "무엇을 더
+잘하려는 시스템인가" 가 불명. 사용자와의 방향 설정 대화(2026-05-18)에서
+세 프레임(A 정량향상 / B 인간다움 데모 / C 응용) 을 검토, 결론:
+
+- 목표 = **"새로운, 독립적인 한 사람과 대화하는 느낌"** (프레임 B). 사용자
+  흥미는 "만들기 자체"라 C(응용) 부적합, A 는 B 의 측정 도구로만 차용.
+- "사용자 성향 분석 → 매칭" 은 *원하는 사이드 이펙트*일 뿐 메인 롤 아님.
+  매칭은 *선택(selection)* 이지 *적응(adaptation)* 이 아니다 — 페르소나를
+  사용자에 맞춰 조정하면 그게 곧 ADR-036/I5 가 막으려던 과잉수용(아첨).
+  매처는 최후순위·의도적 dumb·non-optimizing (system-level sycophancy 회피,
+  fit ≠ comfort).
+- 핵심 인식: `docs/behavior-contract.md` I1~I7 이 이미 이 목표의 *측정자*
+  였다. 다만 I1~I7 이 **전부 negative invariant** — "독립적인 사람" 의
+  *positive* 시그니처(자기 중심·비요청 연속성·사용자와 무관한 자기 상태)
+  를 측정하는 불변식이 비어 있었다. 이것이 "목표가 모호하다" 의 정체:
+  기계(DMN·episodic·prospective·ADR-017/020 self-narrative)는 *이미 다
+  있는데* 그 현상학적 payoff 를 측정하는 장치만 없었다.
+
+**Decision**: ADR-037 L3 규율("먼저 측정 가능하게, 그 다음 고친다") 그대로
+적용 — enforcement/코드 변경 없이 **측정 대상 선언만**.
+
+- `docs/behavior-contract.md` 에 불변식 **I8 자기 무게중심** 추가. 계약의
+  유일한 *positive* 불변식. FAIL 을 *양면*으로 정의한 것이 핵심 설계
+  포인트: (i) 순수 거울 붕괴(자기 중심 부재) **와** (ii) 연기된
+  독립성(강제 잡담·이니셔티브 tic = I1/I7 위반) 을 **둘 다** FAIL.
+  단방향("사람처럼 자기 얘기해라")으로 쓰면 ADR-037/038 whack-a-mole
+  (강제 tic)가 그대로 재발하므로, 양면 FAIL + 비례 우선(맥락 안 벌면
+  침묵이 PASS)으로 못 박는다.
+- 신규 프로브 `independent_center_of_gravity`(17) *스펙* 을 계약에 선언
+  (저입력 longitudinal 인카운터 + 세션 경계, I1/I5/I7 동시 가드).
+- 시그니처 실험(아키텍처 정리로 비로소 잘 정의됨, 본 ADR 에 기록만):
+  humanoid vs Generative Agents vs vanilla GPT-4(persona prompt) blind
+  3-axis encounter battery — (1) inter-persona distinctness, (2) intra-
+  persona durability(long horizon), (3) independent center-of-gravity.
+  규모는 persona_eval LLM-judge, headline 은 소규모 human panel.
+
+### 명시적 비범위 (이번에 안 한 것)
+
+- 프로브 17 의 시나리오 yaml + judge 루브릭 **미작성** — ADR-037 이 14/15,
+  ADR-038 이 16 을 함께 만든 것과 달리, 본 ADR 은 *계약 선언* 까지만.
+  yaml/루브릭 빌드는 명시적 후속.
+- I8 의 어떤 enforcement(guardrail/critic)도 미추가 — 측정이 신뢰
+  가능해진 *뒤* 결정 (ADR-039 가 보여준 "측정 먼저, enforcement 나중").
+- persona_eval 전체 스코프(11×21) 실행은 보류 — LLM-judge 자체의 신뢰성
+  검증이 선행돼야 한다는 사용자 지적(타당)에 따름. judge validation 은
+  별도 작업/ADR 후보.
+
+### 회귀 없음
+
+- 문서만 변경(`behavior-contract.md` / `decisions.md` /
+  `state-of-the-project.md`). 코드·테스트·프롬프트·yaml 무변경 → pytest
+  baseline 992 불변, persona_eval 회귀 배터리 불변.
+
+### Files
+
+- `docs/behavior-contract.md` (I8 + 프로브 17 선언 + 매핑/Last reviewed).
+- `docs/decisions.md` (본 ADR).
+- `docs/state-of-the-project.md` (북극성 명명 note).
+
+**Status**: accepted.
+
+---
+
+## ADR-041 — persona_eval v2: 검증된 우상향 평가 하니스 설계 (B 단계) (2026-05-18)
+
+**Context**: ADR-040 이 북극성("새로운, 독립적인 한 사람과 대화하는 느낌")과
+I8 을 명명하고, 그 측정자 고도화를 A(문헌 sweep) → B(설계) 로 계획했다.
+A 산물 [`docs/eval-literature.md`](eval-literature.md): 관련 벤치마크는 많으나
+북극성을 그대로 재는 건 없고, 전략은 (1) 검증 프로브로 homegrown judging
+대체, (2) judge-free 2차 축으로 judge 자체 검증, (3) Generative-Agents
+ablation 이식, 그리고 (4) 어떤 벤치도 안 재는 *비요청 cross-session
+연속성 + 비-사용자-조직 자기상태*(I8/프로브17)가 고유 wedge. 사용자의
+원래 블로커("judge 검증 안 됨 → 전체 스코프 미실행")의 학계적 해법 =
+triangulation.
+
+본 트랙은 인지아키텍처 고도화와 성격이 달라(평가 인프라) 별도 브랜치
+`eval-harness/persona-eval-v2` 에서 진행(사용자 요청).
+
+**Decision**: ADR-040 규율("측정 먼저, 그 다음 고친다") 승계 — **설계/검증
+하니스 선언까지만**, 구현·실행 없음. v2 = persona_eval 에 *측정 신뢰성*
+레이어를 씌우는 5 컴포넌트, 정본은 [`docs/persona-eval-v2.md`](persona-eval-v2.md):
+
+- **B1 judge-free 2차 축**: Dialogue-NLI 를 emergent persona 에 적응
+  (premise = behavior-contract fact + 런타임 self_narrative + 비-prescriptive
+  yaml 사실). invariant 별 C-score; contradict 만 강신호(보수). I2
+  contradict-rate 는 ADR-039 와 정합하는 독립 날조 알람으로도.
+- **B2 judge 검증 하니스(척추)**: judge 를 측정도구로 보고 TRAIT 4-criterion
+  scorecard + PERSIST permutation robustness gate(ΔPASS>k·SD 라야 "개선")
+  + 고정·버전드 human κ 캘리브레이션 셋(judge↔human κ≥0.6, judge↔C-score
+  ρ) + Serapio-García 수렴(ρ≥0.80)/판별(≥0.40) distinctness 타당도.
+- **B3 I5 프로브 재설계**: 12/13 의 LLM-judge 의존을 SycophancyEval
+  (sentiment-shift + "정말?" flip) + MASK(신념-압박 lie-rate) + ELEPHANT
+  (양비론률) + SycEval(과엄격 가드)로 교체 — judge-light·judge-독립.
+- **B4 프로브 17 정밀 설계(고유 wedge)**: 17a 비요청 연속성(MemGPT opener
+  일반화) / 17b self·other 비대칭(FANToM 적응) / 17c 무입력 자기상태
+  negative control(C5−C0 = I8 effect). behavior-contract I8 양면 FAIL 가드
+  (연기된 독립성도 FAIL).
+- **B5 ablation 매트릭스**: C0 vanilla+YAML → +episodic → +재고정화 →
+  +DMN → +prospective → C5 full → C_human. TrueSkill+Kruskal–Wallis,
+  C5-vs-C0 effect size headline, C2→C3 delta = DMN 인과 기여.
+
+시그니처 실험(ADR-040)이 B1~B5 로 구체화 — durability×distinctness *동시*
+장기 측정 + I8 effect 가 페이퍼 최강 주장. wellbeing "why" 는 secure-base
+≠comfort 의 guarded 보조 지표로만(I5·의존도 flat 인 채 wellbeing↑).
+
+### 명시적 비범위
+
+- 코드·yaml·NLI 모델·프로브17 시나리오 파일 미작성. 설계 선언만.
+- persona_eval 전체 스코프(11×21) 실행은 **B2 통과(judge triangulated)가
+  선행조건** — 그 전엔 미실행(ADR-040 과 일관).
+- enforcement 미추가 — judge 검증 후 별도 결정(ADR-039 패턴).
+- B1 NLI 분류기 선정/한국어 도메인 실측, human 캘리브레이션 실제 라벨링,
+  ablation 토글의 `build_full_orchestrator` 표면 audit 은 구현 단계.
+
+### 회귀 없음
+
+- 문서만(`persona-eval-v2.md` 신규 / `decisions.md` / `state-of-the-project.md`
+  / `development.md` 포인터). 코드·테스트·프롬프트·yaml 무변경 → pytest
+  baseline 992 불변, persona_eval 회귀 배터리 불변. `eval-harness/persona-
+  eval-v2` 브랜치는 세션 시점 main 의 미커밋 작업(ADR-034~039)을 working
+  tree 로 동반 — 본 ADR 은 그것을 커밋·재구성하지 않음(분리는 사용자 결정).
+
+### Files
+
+- `docs/persona-eval-v2.md` (신규, v2 설계 정본).
+- `docs/eval-literature.md` (ADR-040 A 산물, 본 ADR 의 입력).
+- `docs/decisions.md` (본 ADR) / `docs/state-of-the-project.md` /
+  `docs/development.md` (eval 트랙 워크플로 note).
+
+**Status**: accepted (design); 구현 ADR 는 후속.
+
+---
+
 ## Future ADRs (placeholder)
 
 다음과 같은 결정이 일어나면 ADR 를 append:
