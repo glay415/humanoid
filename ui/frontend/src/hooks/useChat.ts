@@ -4,6 +4,7 @@ import {
   getInstanceState,
   postReset,
   resetInstance,
+  undoLastTurn,
 } from '../api/client';
 import { streamTurn } from '../api/sse';
 import type {
@@ -15,7 +16,6 @@ import type {
   LowLevelEvent,
   MemoryEvent,
   ServerState,
-  ToneEvent,
   TurnEvent,
 } from '../api/types';
 
@@ -45,7 +45,6 @@ export type AppState = {
   pendingMemory: MemoryEvent | null;
   pendingCandidates: CandidatesEvent | null;
   pendingFinal: FinalEvent | null;
-  pendingTone: ToneEvent | null;
   errors: ErrorEvent[];
   // Wave14E: 가장 최근 low_level 의 debug 페이로드 (deep mode 용).
   lastLowLevelDebug: LowLevelDebugPayload | null;
@@ -61,13 +60,14 @@ type Action =
   | { type: 'EVENT_MEMORY'; data: MemoryEvent }
   | { type: 'EVENT_CANDIDATES'; data: CandidatesEvent }
   | { type: 'EVENT_FINAL'; data: FinalEvent }
-  | { type: 'EVENT_TONE'; data: ToneEvent }
   | { type: 'EVENT_RESPONSE_CHUNK'; data: { text: string } }
   | { type: 'EVENT_DONE'; data: { response: string; turn_number: number } }
   | { type: 'EVENT_ERROR'; data: ErrorEvent }
   | { type: 'TURN_ABORTED' }
   | { type: 'RESET' }
   | { type: 'INSTANCE_SWITCHED' }
+  | { type: 'UNDO_LAST_TURN' }
+  | { type: 'CLEAR_PENDING_PANELS' }
   | { type: 'MESSAGES_RESTORED'; messages: ChatMessage[] };
 
 const MESSAGES_KEY_PREFIX = 'humanoid-chat-messages:';
@@ -120,7 +120,6 @@ const INITIAL_STATE: AppState = {
   pendingMemory: null,
   pendingCandidates: null,
   pendingFinal: null,
-  pendingTone: null,
   errors: [],
   lastLowLevelDebug: null,
   driftDeltaTrail: [],
@@ -141,7 +140,6 @@ function reducer(state: AppState, action: Action): AppState {
         pendingMemory: null,
         pendingCandidates: null,
         pendingFinal: null,
-        pendingTone: null,
         errors: [],
         messages: [...state.messages, { role: 'user', text: action.userInput }],
       };
@@ -170,8 +168,6 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, currentStage: 'candidates', pendingCandidates: action.data };
     case 'EVENT_FINAL':
       return { ...state, currentStage: 'final', pendingFinal: action.data };
-    case 'EVENT_TONE':
-      return { ...state, currentStage: 'tone', pendingTone: action.data };
     case 'EVENT_RESPONSE_CHUNK': {
       // 백엔드가 시뮬레이션 스트리밍으로 흘려보내는 텍스트 청크. 첫 청크에 빈
       // assistant 메시지를 push, 이후 청크에서 마지막 메시지에 append.
@@ -232,6 +228,43 @@ function reducer(state: AppState, action: Action): AppState {
       // Switching instances clears the local message buffer (each instance
       // owns its own dialogue history server-side) and any in-flight UI.
       return { ...INITIAL_STATE };
+    case 'CLEAR_PENDING_PANELS':
+      // ADR-033 part B fix — force apply (debug/state) 직후 호출. pendingLowLevel.
+      // state 가 *이전 turn 값* 으로 남아있어 StatePanel 의 `live = pendingLowLevel
+      // ?.state ?? internalState` priority 가 force 갱신을 가리는 버그 fix.
+      // 모든 turn-결과 패널을 한 번에 비워 다음 GET 의 internalState 가 권위적 값.
+      return {
+        ...state,
+        pendingLowLevel: null,
+        pendingEmotion: null,
+        pendingMemory: null,
+        pendingCandidates: null,
+        pendingFinal: null,
+      };
+    case 'UNDO_LAST_TURN': {
+      // ADR-034 — 직전 1턴 분의 user/assistant 쌍을 messages 끝에서 제거.
+      // 서버는 dialogue_buffer 와 turn_number 를 이미 되돌렸으므로 UI 도 정합.
+      // 마지막이 assistant 면 그 한 쌍 (user 직전 + assistant) 을, 마지막이 user
+      // 만 있는 incomplete state 면 그 1개만 pop.
+      const msgs = state.messages;
+      if (msgs.length === 0) return state;
+      const last = msgs[msgs.length - 1];
+      const cut =
+        last.role === 'assistant' && msgs.length >= 2 && msgs[msgs.length - 2].role === 'user'
+          ? msgs.slice(0, -2)
+          : msgs.slice(0, -1);
+      return {
+        ...state,
+        messages: cut,
+        // pending* 패널은 직전 턴 결과 — 되돌렸으므로 초기화.
+        pendingLowLevel: null,
+        pendingEmotion: null,
+        pendingMemory: null,
+        pendingCandidates: null,
+        pendingFinal: null,
+        currentStage: 'idle',
+      };
+    }
     case 'MESSAGES_RESTORED':
       return { ...state, messages: action.messages };
     default:
@@ -246,6 +279,11 @@ export function useChat(instanceId: string | null, deep: boolean = false) {
   // toggling deep mid-turn doesn't change the request payload retroactively.
   const deepRef = useRef(deep);
   deepRef.current = deep;
+  // 영속 effect 가 *인스턴스가 막 바뀐 렌더* 에서 쓰는 걸 막는 가드.
+  // 그 렌더에서는 state.messages 가 아직 *이전 인스턴스* 의 내용 (reducer 의
+  // INSTANCE_SWITCHED/MESSAGES_RESTORED 가 다음 렌더에 적용됨). 이걸 새
+  // instanceId 키로 저장하면 대상 인스턴스의 기록이 오염된다.
+  const persistOwnerRef = useRef<string | null>(null);
 
   const refreshState = useCallback(async () => {
     try {
@@ -286,7 +324,18 @@ export function useChat(instanceId: string | null, deep: boolean = false) {
 
   // Persist messages to localStorage on every change, keyed by instance.
   useEffect(() => {
-    if (!instanceId) return;
+    if (!instanceId) {
+      // 인스턴스 없음 — 다음 전환에서 반드시 skip 사이클을 타도록 owner 리셋.
+      persistOwnerRef.current = null;
+      return;
+    }
+    if (persistOwnerRef.current !== instanceId) {
+      // 인스턴스가 막 바뀐 렌더. state.messages 는 아직 이전 인스턴스 것이라
+      // (또는 복원 전) 새 키로 저장하면 안 됨. owner 만 갱신하고 한 사이클
+      // skip — 다음 렌더 (messages 가 새 인스턴스로 reconcile 된 뒤) 부터 저장.
+      persistOwnerRef.current = instanceId;
+      return;
+    }
     if (state.messages.length === 0) return;   // don't clobber when freshly switching
     saveMessagesToStorage(instanceId, state.messages);
   }, [instanceId, state.messages]);
@@ -321,9 +370,6 @@ export function useChat(instanceId: string | null, deep: boolean = false) {
             break;
           case 'final':
             dispatch({ type: 'EVENT_FINAL', data: event.data });
-            break;
-          case 'tone':
-            dispatch({ type: 'EVENT_TONE', data: event.data });
             break;
           case 'response_chunk': {
             // streaming 진단 — DevTools 콘솔에서 청크 도착 timing 확인.
@@ -393,10 +439,31 @@ export function useChat(instanceId: string | null, deep: boolean = false) {
     await refreshState();
   }, [refreshState, instanceId]);
 
+  const undo = useCallback(async (): Promise<{ ok: boolean; reason?: string }> => {
+    if (!instanceId) return { ok: false, reason: 'no instance' };
+    if (abortRef.current) return { ok: false, reason: 'turn in flight' };
+    try {
+      await undoLastTurn(instanceId);
+    } catch (err) {
+      // 400 (buffer empty) 도 여기로. 호출자가 reason 으로 분기 가능.
+      const msg = String(err);
+      return { ok: false, reason: msg };
+    }
+    dispatch({ type: 'UNDO_LAST_TURN' });
+    await refreshState();
+    return { ok: true };
+  }, [instanceId, refreshState]);
+
+  const clearPendingPanels = useCallback(() => {
+    dispatch({ type: 'CLEAR_PENDING_PANELS' });
+  }, []);
+
   return {
     state,
     sendMessage,
     reset,
     refreshState,
+    undo,
+    clearPendingPanels,
   };
 }

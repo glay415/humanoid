@@ -9,7 +9,6 @@ import { MoodTimeline } from './components/MoodTimeline';
 import { DrivesPanel } from './components/DrivesPanel';
 import { MarkersPanel } from './components/MarkersPanel';
 import { EmotionPanel } from './components/EmotionPanel';
-import { ActionBadge } from './components/ActionBadge';
 import { ThemeToggle } from './components/ThemeToggle';
 import { DeepModeToggle } from './components/DeepModeToggle';
 import { MatrixDecompositionPanel } from './components/MatrixDecompositionPanel';
@@ -74,6 +73,13 @@ export default function App() {
               pendingFinal={chat.state.pendingFinal}
               onSend={chat.sendMessage}
               onReset={chat.reset}
+              onUndo={chat.undo}
+              canUndo={
+                !isInFlight &&
+                !noInstance &&
+                (server?.turn_number ?? 0) > 0 &&
+                chat.state.messages.length > 0
+              }
               disabled={isInFlight}
               noInstance={noInstance}
               subtitle={subtitle}
@@ -126,7 +132,21 @@ export default function App() {
                 baselines={server?.baselines ?? null}
                 pendingLowLevel={chat.state.pendingLowLevel}
                 instanceId={inst.selectedId}
+                rawCoreAffect={
+                  chat.state.pendingLowLevel?.raw_core_affect ??
+                  server?.raw_core_affect ??
+                  null
+                }
+                mood={
+                  chat.state.pendingLowLevel?.mood ??
+                  (server?.mood_history && server.mood_history.length > 0
+                    ? server.mood_history[server.mood_history.length - 1]
+                    : null)
+                }
                 onApplied={() => {
+                  // ADR-033 part B fix — force apply 가 *이전 turn 의 pending* 패널
+                  // 값에 가려지지 않도록 clear 후 권위적 server state 로 refresh.
+                  chat.clearPendingPanels();
                   void chat.refreshState();
                 }}
               />
@@ -145,8 +165,6 @@ export default function App() {
               <MarkersPanel markers={server?.markers ?? []} />
 
               <EmotionPanel emotion={chat.state.pendingEmotion} />
-
-              <ActionBadge tone={chat.state.pendingTone} />
 
               {server?.self_model && (
                 <section className="rounded-lg bg-white border border-ink-200 dark:bg-zinc-900 dark:border-zinc-800 p-4">

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
-import { RotateCcw, Send } from 'lucide-react';
+import { RotateCcw, Send, Undo2 } from 'lucide-react';
 import { cn } from '../lib/cn';
 import type { Stage, ChatMessage } from '../hooks/useChat';
 import type { ErrorEvent, FinalEvent } from '../api/types';
@@ -32,6 +32,12 @@ type ChatProps = {
   pendingFinal: FinalEvent | null;
   onSend: (text: string) => void | Promise<void>;
   onReset: () => void | Promise<void>;
+  // ADR-034 — 직전 1턴 undo. 결과는 ok=false (예: buffer 비었음) 일 수 있어
+  // 호출자가 사용자 피드백 (toast 등) 으로 활용 가능. Chat 컴포넌트 자체는
+  // 단순히 disabled 처리만.
+  onUndo?: () => Promise<{ ok: boolean; reason?: string }> | void;
+  // undo 가능한지 (서버 buffer 상태 + 클라이언트 메시지 있음). false 면 버튼 비활성.
+  canUndo?: boolean;
   disabled?: boolean;
   // True when there is no selected instance — disables composer + reset and
   // shows the empty placeholder in the message list.
@@ -49,6 +55,8 @@ export function Chat({
   pendingFinal,
   onSend,
   onReset,
+  onUndo,
+  canUndo,
   disabled,
   noInstance,
   placeholder,
@@ -105,6 +113,19 @@ export function Chat({
         </div>
         <div className="flex items-center gap-1">
           {headerExtra}
+          {onUndo && (
+            <button
+              type="button"
+              onClick={() => void onUndo()}
+              disabled={noInstance || disabled || !canUndo}
+              className="inline-flex items-center gap-1.5 text-xs font-mono text-ink-500 hover:text-ink-900 dark:text-zinc-400 dark:hover:text-zinc-100 px-2.5 py-1.5 rounded-md hover:bg-ink-100 dark:hover:bg-zinc-800 transition-colors disabled:opacity-40 disabled:hover:bg-transparent disabled:cursor-not-allowed"
+              aria-label="직전 턴 되돌리기"
+              title="직전 턴 되돌리기 (최대 3턴)"
+            >
+              <Undo2 size={14} />
+              undo
+            </button>
+          )}
           <button
             type="button"
             onClick={() => void onReset()}

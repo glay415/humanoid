@@ -208,6 +208,28 @@ export async function forceDebugState(
   return (await res.json()) as DebugStateResponse;
 }
 
+// ADR-034 — 직전 N턴 undo (ring buffer 3). buffer 비었으면 400.
+export type UndoTurnResponse = {
+  instance_id: string;
+  undone_turn: number;        // 되돌려진 턴 번호
+  turn_number: number;        // 복원 후 turn_number
+  remaining_undos: number;    // 남은 buffer 크기
+};
+
+export async function undoLastTurn(instanceId: string): Promise<UndoTurnResponse> {
+  const res = await fetch(
+    `/api/instances/${encodeURIComponent(instanceId)}/undo`,
+    { method: 'POST' },
+  );
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new Error(
+      `POST /api/instances/${instanceId}/undo ${res.status} ${detail}`.trim(),
+    );
+  }
+  return (await res.json()) as UndoTurnResponse;
+}
+
 // Global wipe: deletes ALL instances. Server requires `confirm === "WIPE"`.
 export async function wipeAll(confirm: string): Promise<WipeResponse> {
   const res = await fetch('/api/admin/wipe', {

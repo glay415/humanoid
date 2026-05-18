@@ -1,7 +1,12 @@
 import { useState } from 'react';
 import { cn } from '../lib/cn';
 import { forceDebugState, type DebugStateRequest } from '../api/client';
-import type { InternalState, InternalStateKey, LowLevelEvent } from '../api/types';
+import type {
+  CoreAffect,
+  InternalState,
+  InternalStateKey,
+  LowLevelEvent,
+} from '../api/types';
 
 const PARAM_ORDER: InternalStateKey[] = [
   'reward',
@@ -33,6 +38,10 @@ type StatePanelProps = {
   pendingLowLevel: LowLevelEvent | null;
   instanceId?: string | null;
   onApplied?: () => void;
+  // 현재 권위적 mood / raw_core_affect — force 섹션의 readout 용. 9-dim 바와
+  // 달리 mood/affect 는 화면에 안 보여서 Apply 효과가 안 보이던 갭 보완.
+  rawCoreAffect?: CoreAffect | null;
+  mood?: { valence: number; arousal: number } | null;
 };
 
 // State preset 정의 — 의도된 정서 상태 패턴. force 모드의 슬라이더 시작점.
@@ -143,6 +152,8 @@ export function StatePanel({
   pendingLowLevel,
   instanceId,
   onApplied,
+  rawCoreAffect,
+  mood,
 }: StatePanelProps) {
   // Prefer the live in-flight state if available so bars react during a turn.
   const live = pendingLowLevel?.state ?? internalState;
@@ -315,6 +326,43 @@ export function StatePanel({
           <h4 className="text-[10px] uppercase font-mono text-ink-500 dark:text-zinc-400 tracking-widest">
             mood / core_affect (-1.0 ~ 1.0)
           </h4>
+
+          {/* 현재 권위적 값 readout — 9-dim 바와 달리 mood/affect 는 화면에
+              안 보여서 Apply 효과가 invisible 하던 갭 보완. */}
+          <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[10px] font-mono tabular-nums text-ink-500 dark:text-zinc-400">
+            <span>
+              mood v{' '}
+              <span className="text-ink-700 dark:text-zinc-300">
+                {(mood?.valence ?? 0).toFixed(2)}
+              </span>
+            </span>
+            <span>
+              mood a{' '}
+              <span className="text-ink-700 dark:text-zinc-300">
+                {(mood?.arousal ?? 0).toFixed(2)}
+              </span>
+            </span>
+            <span>
+              raw v{' '}
+              <span className="text-ink-700 dark:text-zinc-300">
+                {(rawCoreAffect?.valence ?? 0).toFixed(2)}
+              </span>
+            </span>
+            <span>
+              raw a{' '}
+              <span className="text-ink-700 dark:text-zinc-300">
+                {(rawCoreAffect?.arousal ?? 0).toFixed(2)}
+              </span>
+            </span>
+          </div>
+
+          <p className="text-[10px] font-mono text-amber-600 dark:text-amber-400 leading-relaxed">
+            보조 입력 — mood/affect 만 단독 force 하면 다음 턴 low_level
+            파이프라인이 9-dim 으로부터 재계산해 덮어쓴다 (raw 는 즉시, mood 는
+            서서히). 지속하려면 preset 을 쓰거나 9-dim 슬라이더를 같이 조정해
+            *원인이 되는 매질* 을 박을 것.
+          </p>
+
           {(
             ['mood_valence', 'mood_arousal', 'raw_valence', 'raw_arousal'] as const
           ).map((k) => (
