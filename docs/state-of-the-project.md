@@ -253,7 +253,7 @@ scripts/        sensitivity report helper
 ## Known limitations / quirks
 
 - ~~[추적 대상] 상태 포화~~ **→ ADR-046 으로 해결(2026-05-19)**: 근본 = `InternalState.update` 의 A 입력 게인(bonding←social_reward 0.3) ≫ D 회복(0.1) → 지속 동방향 입력 시 [0,1] 천장 clamp. 수정 = A 입력항 압축(soft ceiling, 양+→×(1−state)/음−→×state); W·D·안정성 증명 불변. 검증: 15턴 지속입력 후 bonding 1.0→**0.82**(점근), dynamic range·[0,1]·W−D 안정성 보존, 전체 회귀 불변식 위반 0. felt 재평가(C1 파이프라인 재실행)는 사람 몫의 별도 후속.
-- **[추적 대상, 동일] episodic 계측 + 연속성 confound**: `_snap` 이 episodic 카운트를 못 읽어(n/a), 멀티세션 연속성이 episodic 서브시스템 덕인지 같은 orch 의 LLM dialogue 컨텍스트 덕인지 *분리 불가*(B5 slice-2 와 동형 confound). 해소엔 (a) episodic 계측 수정 + (b) slice-2b 엄밀 격리(상태/기억 동결 토글, orchestrator 수술) 필요. ADR-045 참조.
+- **[추적 대상] episodic 계측 + 연속성 confound + auto-encode 미발화(T2)**: (a) 계측은 P1 으로 수정(vector_db.collection.count()). (b) **P2(C1 재실행)에서 episodic=0 전 23턴 — 확정**: 멀티세션 연속성은 episodic 아닌 LLM dialogue 컨텍스트(추측 아닌 0 입증). (c) **신규/시급 — ADR-046 잠재 부작용**: auto-encode 는 감정강도 > `auto_encoding_threshold`(1.2) 시만 발화. ADR-046 이 affect 크기를 낮춰 임계 미달 → episodic 영구 미인코딩 가능성(포화 수정이 기억 인코딩을 죽였을 수 있음). **T2b 진단 필요**: 이 run 에서 감정강도가 임계를 *한 번이라도* 넘는가 / ADR-046 전후 비교. 미발화 확정 시 episodic·재고정화 pillar 가 실대화에서 死(북극성/B5 치명). slice-2b(엄밀 격리)는 그 다음. ADR-045/046 참조.
 - 5 worktree directories may persist on disk after `git worktree remove` (Windows file locks). Cleanup manually or skip — git records say cleaned.
 - spec §12 시나리오 26 (non-dual awareness): xfail strict — "표현 시 이원성 복원" 은 텍스트 기반 존재의 ontological 한계.
 - spec §12 시나리오 27 (collective transcendence): skip — 시뮬레이션 환경이 1-person.
