@@ -130,11 +130,14 @@ ADR-043 = B2 slice 1: triangulation core(순수 Python κ/ρ + `validated`
 TriangulationReport — judge↔human κ=**+1.000**(n=6), B1↔human κ=+1.000
 (n=4), judge↔B1 ρ=+0.943, `validated=True`. 파이프라인 green·첫 정렬
 확보(블로커 질적 해소). 단 n 작아 *방향성*이지 통계 확정 아님. slice 3:
-`calibration/seed_v2.yaml` 14 경계 케이스(I1~I7, 위반처럼 보이나 PASS /
-괜찮아 보이나 FAIL 대비쌍) 작성 — **human 라벨 대기**(+1 test→1020).
-다음: 사람 14 라벨 → `calibrate_judge seed_v2.yaml` → 경계 κ 실측(κ 가
-1.0 에서 떨어지는 per-invariant 지점 = rubric 진단). 진짜 게이트는
-B2.3 full. 그 후 B1-polish(2a 휴리스틱 확장은 별도 product ADR).
+`calibration/seed_v2.yaml` 14 경계 케이스 사람 라벨 완료 →
+`calibrate_judge seed_v2.yaml` 실측: judge↔human κ=**+1.000**(n=14,
+per-inv I1~I7 전부 +1.0), `validated=True`. 경계에서도 judge 가 독립
+사람 라벨 추종 — judge *방향상* 신뢰 가능(블로커 실질 완화). **단 과신
+금지**: designer-authored·평정자 1명·B1↔human κ=**0.000**(judge-free
+다리 미작동, 현재 사실상 judge↔human 단일 다리). 진짜 게이트 B2.3 full
+= 저자 아닌 splitting 케이스 + 평정자 2+ + B1 다리 보강. 그 후
+B1-polish(2a 별도 product ADR). 상세 ADR-043.
 
 ## Active work
 

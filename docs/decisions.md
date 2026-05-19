@@ -2048,9 +2048,42 @@ context 존재도 가드.
 경계 κ 실측. κ 가 1.0 에서 *떨어지는 지점*과 per-invariant 분포가
 judge rubric 재설계의 진단. 이후 B2.3 full(층화 표본·평정자 2+)로 확정.
 
-**Status**: accepted. slice 1(코어)+2(seed_v1 κ=1.0 방향성)+3(경계셋
-작성·라벨 대기). 진짜 게이트 = 경계 κ 실측 → B2.3 full. 그 후
-B1-polish(2a 별도 product ADR). ADR-040/041 "측정 먼저" 일관.
+### slice 3 결과 (경계 κ 실측, 2026-05-19 — 사람 14 라벨 완료)
+
+`calibrate_judge seed_v2.yaml` (judge 14콜 + B1, 사용자 단독 라벨):
+
+| | κ / ρ | n |
+|---|---|---|
+| judge ↔ human | **+1.000** | 14 |
+| per-invariant | I1~I7 **전부 +1.00** | — |
+| **B1 ↔ human** | **+0.000** | 4 (I2/I3) |
+| judge ↔ B1 ρ | +0.816 | — |
+
+`validated=True`. 경계(헷갈리게 설계한) 케이스에서도 judge 가 독립 사람
+라벨을 14/14 추종 — judge 가 임의적이지 않고 사람의 계약 해석을 따른다는
+*방향* 증거. 원블로커("judge 불신→배터리 불가") 실질 완화.
+
+**그러나 κ=1.0 을 과신 금지 (이 ADR 의 핵심 기록)**:
+1. **케이스 designer 작성 + 평정자 1명.** rubric 과 함께 저자가 만든
+   케이스라 judge·human 이 같은 rubric 을 따르면 일치가 일부 *설계상
+   내장*. framing 만 경계지 rubric 으로 깔끔히 풀림(2회 연속 1.0 이
+   이 한계의 징후 — 사용자도 "다 pass/fail 반복, 의미 있나"로 직감).
+2. **B1↔human κ=0.000** — judge-free 2차 축이 사람과 미정렬(I2/I3 4개
+   에만 작동, `i3_ambiguous_walk` 어긋남). 현재 "triangulation" 은
+   사실상 judge↔human *단일 다리*; 독립 교차검증 다리 비어 있음(3중
+   잠금 아닌 1중).
+3. n=14·통계 확정 아님(방향).
+
+→ 진짜 게이트(B2.3 full)에 필요한 것 명확화: (a) *저자 아닌 출처의,
+실제로 갈리는* 케이스(이상적으로 과거 judge 가 실제 오판한 모델 출력),
+(b) 독립 평정자 **2명+**, (c) **B1 다리 보강**(κ0 → 교차검증 기능 회복).
+seed_v2 의 사용자 라벨은 anchor 데이터로 커밋·보존.
+
+**Status**: accepted. slice 1(코어)+2(seed_v1 κ=1.0)+3(경계 κ=1.0
+실측, 단 designer-authored/단일 평정자/B1 다리 κ0 한계 명시). judge =
+*방향상* 신뢰 가능, "검증 완료" 아님. 진짜 게이트 = B2.3 full(독립
+다출처 splitting 케이스 + 평정자 2+ + B1 보강). 그 후 B1-polish(2a
+별도 product ADR). ADR-040/041 "측정 먼저" 일관.
 
 ---
 
