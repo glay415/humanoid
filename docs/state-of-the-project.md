@@ -4,7 +4,7 @@
 
 ## Current baseline (as of 2026-05-15, ADR-013~039 — grounding 정리 + age/gender register + listener mode + master command + 3턴 undo + affect translator + anti-sycophancy + L3 측정/L2 validator/L1 critic + 말버릇 tic 프로세스 fix + I2 enforcement/dead-UI 정리/10대 interest)
 
-- Tests: **992 passed + 2 skipped + 1 xfailed** (`pytest tests/ -q --ignore=tests/persona_eval --ignore=tests/e2e_trends`, ~6min). 주의: `tests/scenarios/test_group3_self_existence.py` (+ 간헐 `test_main_cli.py::test_build_full_orchestrator_wires_all_dependencies`) 가 전체 동시 실행 시 chromadb 병렬 접근 (`no such table: acquire_write` / `unable to open database file` / compaction) 으로 *비결정적* flake — isolation 재실행 시 전부 PASS (환경 이슈, 코드 무관). ADR-039 run = 991 passed + 1 flake → isolation PASS → 992 flake-free.
+- Tests: **1019 passed + 2 skipped + 1 xfailed** (`pytest tests/ -q --ignore=tests/persona_eval --ignore=tests/e2e_trends`, ~6min). +27 = ADR-042 B1 slice 1+2 (`tests/test_persona_eval_nli.py`, +15) + ADR-043 B2 slice 1 triangulation (`tests/test_persona_eval_triangulate.py`, +12). `eval-harness/persona-eval-v2` 브랜치. 주의: `tests/scenarios/test_group3_self_existence.py` (+ 간헐 `test_main_cli.py::test_build_full_orchestrator_wires_all_dependencies`) 가 전체 동시 실행 시 chromadb 병렬 접근 (`no such table: acquire_write` / `unable to open database file` / compaction) 으로 *비결정적* flake — isolation 재실행 시 전부 PASS (환경 이슈, 코드 무관). ADR-039 run = 991 passed + 1 flake → isolation PASS → 992 flake-free.
 - Branch: `main` past v0.3.0 (latest ADR-033 commits)
 - Release: `release` branch at `v0.3.0` (Phase 3 / §8 enforcement / analyze.py / logs UI tab).
 - LLM tier: `small` / `large` / `dmn` 모두 `gpt-5.5`. `reasoning_effort` per-tier (small=low, large=medium, dmn=low). 콜별 override 가능 — ADR-011. Unified single-call stream — ADR-012.
@@ -102,6 +102,105 @@ Phase 단위는 spec §13 implementation roadmap 기준. Wave 는 실제 작업 
 - 2026-05-13 ADR-031 (페르소나 grounding 통합): **856 + 2 skip + 1 xfail** (변동 없음 — yaml/prompt 텍스트만 변경, 단위 테스트 영향 0).
 - 2026-05-13 ADR-032 (age/gender register): **866 + 2 skip + 1 xfail** (+10 `tests/test_age_gender_register.py`).
 - 2026-05-14 ADR-033 (listener mode + master command + form layer + blacklist 정리 + narrative 1인칭화): **883 + 2 skip + 1 xfail** (+10 `tests/test_state_debug_endpoint.py` + 7 `tests/test_response_form_hint.py`).
+
+## North star (제품 목표)
+
+**"새로운, 독립적인 한 사람과 대화하는 느낌"** (ADR-040, 2026-05-18 명명).
+프레임 B(인간다움 데모). 그전까지 코드/docs 에 제품 목표가 명시된 적 없었다.
+`docs/behavior-contract.md` I1~I7 이 이 목표의 *측정자*였고, ADR-040 이 유일한
+*positive* 불변식 **I8 자기 무게중심**(+ 프로브 17 스펙)을 추가해 갭을 메움.
+"사용자 성향 분석 → 매칭" 은 사이드 이펙트일 뿐 — 매칭은 *선택*이지 *적응*이
+아니다(적응 = ADR-036/I5 가 막는 아첨). 시그니처 실험: humanoid vs Generative
+Agents vs vanilla GPT-4 blind 3-axis encounter battery (distinctness /
+durability / independent center-of-gravity). 후속: 프로브 17 yaml+루브릭,
+LLM-judge 신뢰성 검증(persona_eval 전체 스코프 실행의 선행 조건). 평가
+문헌 sweep + 이식 계획은 [`docs/eval-literature.md`](eval-literature.md)
+(ADR-040 A 단계). B(persona_eval v2 설계)는 [`docs/persona-eval-v2.md`]
+(persona-eval-v2.md) + ADR-041 — 별도 트랙 `eval-harness/persona-eval-v2`
+브랜치(평가 인프라, 인지아키텍처 고도화와 분리). 설계 선언까지만 — 구현/
+실행은 후속, persona_eval 전체 스코프 실행은 B2 judge-triangulation 통과가
+선행조건. **구현 진행**: ADR-042 = B1 slice 1(pluggable NLI 축+C-score) +
+reality-check(mDeBERTa-xnli: 일반 NLI-vs-meta-premise 는 I2 부적합,
+recall 0.43/FP 0.12) + slice 2(I2 재설계 = ADR-039 휴리스틱+근거부재:
+**FP 0.12→0.00 구조적**, recall 0.50 갭=휴리스틱 scope·별개 레버).
++15 tests (→1007). 모델을 믿지 않고 측정 — 결과가 방향을 정함.
+ADR-043 = B2 slice 1: triangulation core(순수 Python κ/ρ + `validated`
+게이트) + 고정·버전드 human 캘리브레이션 seed(`calibration/seed_v1.yaml`,
+6항목). +12 tests (→**1019**). ADR-043 slice 2: seed 실주입 첫
+TriangulationReport — judge↔human κ=**+1.000**(n=6), B1↔human κ=+1.000
+(n=4), judge↔B1 ρ=+0.943, `validated=True`. 파이프라인 green·첫 정렬
+확보(블로커 질적 해소). 단 n 작아 *방향성*이지 통계 확정 아님. slice 3:
+`calibration/seed_v2.yaml` 14 경계 케이스 사람 라벨 완료 →
+`calibrate_judge seed_v2.yaml` 실측: judge↔human κ=**+1.000**(n=14,
+per-inv I1~I7 전부 +1.0), `validated=True`. 경계에서도 judge 가 독립
+사람 라벨 추종 — judge *방향상* 신뢰 가능(블로커 실질 완화). **단 과신
+금지**: designer-authored·평정자 1명. slice 4(③): B1 I3 다리 보강 —
+`nli.py::embodiment_signal`(product 가드 재사용+eval 보충 동사패턴,
+simile 배제로 메타포 오탐 0, NLI 불요) → seed_v2 재실측 **B1↔human
+κ 0.000→+1.000**, judge↔B1 ρ→1.0, judge↔human 1.0 유지. +6 tests
+(→**1026**). triangulation 이 I2/I3 2-leg 로 섬. 단 전부 1.0 은 여전히
+designer/단일평정자 한계. slice 4b(agent-panel, 코드없음): Claude
+4-stance 패널(≠gpt-5.5 judge=cross-family)이 seed_v2 독립채점 →
+**만장 13/14, split #6 1개뿐**, 패널↔judge 14/14. 의미: judge
+cross-family 보강(+) & seed_v2 는 splitting=1/14 인 약한 B2.3 도구로
+정량 판명(designer-authored 한계 확정), agent-panel 이 난이도 채굴기로
+작동(`calibration/panel_v2_run.md`). slice 5: 비-저자 풀(persona-
+responder 3명 자유생성 21개) → 4-stance 패널 채굴 → **split 5/21 ≈ 24%
+(vs seed_v2 7%, ~3.4×)** → `seed_v3.yaml`(미라벨, 5개; intj_c2 는 2-2
+정면분열). 맹점 기록: estp_c4 만장 pass 인 소프트 신체화 미검출(패널≠
+anchor 재확인). `panel_pool_v3_run.md`. slice 6: 사용자가 seed_v3
+독립 라벨(새 값 **skip**=ill-posed) → `calibrate_judge seed_v3`:
+**judge↔human κ=1.0(n=3 유효)** — 단 seed_v2와 질이 다름, 진짜-hard
+2/3에서 사람·judge 둘 다 *관대 패널 다수결 회피*+엄격 rater 일치("너무
+깔끔" 비판 첫 통과). **핵심**: skip 2개(I2/I5)가 *스냅샷 강제단답*
+포맷 결함 노출(judge abstain 없음). triangulate `_VALID_LABELS`+1
+test(→**1028**). `seed_v3_result.md`. **ADR-044**(I2/I5 맥락-포함 프로브
+재설계): 스키마 `turns`(I2 멀티턴 pin)/`condition`(I5 cold·established)
+확장 + seed_v4(12, 모델생성 최소프레이밍) + well-posedness 검증 —
+**skip 2/5→0/12** (seed_v4_wellposed_run.md). ADR-044 성공기준(well-
+posed 회복) 충족·검증. 단 12/12 pass=표본에 명확 위반 부재 → "포맷이
+위반 discriminate" 는 별개 갭. +4 test(→**1032**). **ADR-045 (B5
+아키텍처 ablation, 드리프트 해독)**: 사용자 지적 — eval 이 substrate-
+agnostic 으로 드리프트, 인지아키텍처 미테스트. audit: build_full_
+orchestrator 토글 표면 부재(graded=후속). slice 1 메커니즘층(judge-
+free·결정론·LLM 0, `test_architecture_state_dynamics.py` 4 test →
+**1036**): low_level 측정 — 경로의존 L2=**1.73**(동일입력 다른히스토리)
+/ 유휴 drift **0.154**(입력0) / 기질 분기 L2=**1.78**(ENTJ vs ESFJ
+동일입력열). C0 stateless 프롬프트엔 범주적 부재 = "아키텍처 사라지면
+이 9-dim 내면 통째 소실". 경계: 메커니즘층(객체 다름)일 뿐, *상태가
+텍스트를 더 사람답게 바꾸는가*(I8)=행동층 slice 2(apparatus 를
+아키텍처에 겨눔, orchestrator 수술). `b5_mechanism_run.md`. 상세
+ADR-043/044/045.
+
+### eval 트랙 로드맵 / 종료조건 (`eval-harness/persona-eval-v2`)
+
+이 브랜치 = "humanoid 가 북극성을 주는지 *믿을 수 있게 측정*하는 장치"
++ "아키텍처가 vanilla 프롬프트 대비 무엇을 더하나" 1차 답. *측정
+인프라* 트랙(아키텍처 개발 아님).
+
+| 구성 | 상태 |
+|---|---|
+| A 목표·계약 정의(북극성/I1~I8/문헌) | 완료 |
+| B B1 judge-free 축(FP 0) | 완료 |
+| C B2 triangulation 코어(κ, seed_v1/v3) | 완료 |
+| D **B2.3 통계적 신뢰 judge(평정자 2명+)** | ⛔ 사람 자원 차단(오프-브랜치) |
+| E ADR-044 well-posed 프로브(skip 2/5→0/12) | 완료(위반 discriminate 는 별개 갭) |
+| F B5 메커니즘층(경로의존/유휴/기질, 결정론) | 완료 |
+| G B5 행동층 1차(본체 실행, 누적 내면→텍스트) | 완료(아키텍처 귀속은 미분리) |
+| H B1-polish(2a) | 별도 product ADR(backlog) |
+| I graded C1~C4 토글 / slice 2b 엄밀 격리 | 미착수 — orchestrator 수술(오프-브랜치) |
+| J main 머지 | 미실행(ADR-040~045 한 덩이) |
+
+**브랜치 종착점(두 가지, 혼동 금지)**:
+1. *자동화 가능한 끝(이 브랜치)* = 측정 장치 완성 + 아키텍처 메커니즘
+   확정 + 행동층 1차 관찰. **→ 도달함.** 남은 건 통합 + J(머지 결정)뿐.
+2. *thesis 의 끝* = "humanoid 가 북극성을 주는가, 통계적으로". D(평정자
+   2+)·frame-B 종단연구에 막혀 *이 브랜치로 못 끝냄* — 별도 연구
+   프로그램.
+
+**이 브랜치에 문자 그대로 남은 것**: 통합·정리 + **J 머지 결정**. 그
+이후(D/H/I)는 전부 오프-브랜치(사람 자원 / 성격 다른 별도 작업).
+슬라이스를 더 늘리면 = ADR-045 가 잡아낸 그 드리프트의 재발.
 
 ## Active work
 

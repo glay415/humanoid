@@ -1677,6 +1677,680 @@ selective gate 설계 덕에 925→953 green 유지, 회귀 0:
 
 ---
 
+## ADR-040 — 프로젝트 북극성 명명 + I8 자기 무게중심 (measurement-target only) (2026-05-18)
+
+**Context**: 이 저장소는 풍부한 아키텍처(v12)·39개 ADR·992 테스트를 쌓았으나
+*제품 목표(북극성)* 가 코드/docs 어디에도 명시된 적이 없었다 — "무엇을 더
+잘하려는 시스템인가" 가 불명. 사용자와의 방향 설정 대화(2026-05-18)에서
+세 프레임(A 정량향상 / B 인간다움 데모 / C 응용) 을 검토, 결론:
+
+- 목표 = **"새로운, 독립적인 한 사람과 대화하는 느낌"** (프레임 B). 사용자
+  흥미는 "만들기 자체"라 C(응용) 부적합, A 는 B 의 측정 도구로만 차용.
+- "사용자 성향 분석 → 매칭" 은 *원하는 사이드 이펙트*일 뿐 메인 롤 아님.
+  매칭은 *선택(selection)* 이지 *적응(adaptation)* 이 아니다 — 페르소나를
+  사용자에 맞춰 조정하면 그게 곧 ADR-036/I5 가 막으려던 과잉수용(아첨).
+  매처는 최후순위·의도적 dumb·non-optimizing (system-level sycophancy 회피,
+  fit ≠ comfort).
+- 핵심 인식: `docs/behavior-contract.md` I1~I7 이 이미 이 목표의 *측정자*
+  였다. 다만 I1~I7 이 **전부 negative invariant** — "독립적인 사람" 의
+  *positive* 시그니처(자기 중심·비요청 연속성·사용자와 무관한 자기 상태)
+  를 측정하는 불변식이 비어 있었다. 이것이 "목표가 모호하다" 의 정체:
+  기계(DMN·episodic·prospective·ADR-017/020 self-narrative)는 *이미 다
+  있는데* 그 현상학적 payoff 를 측정하는 장치만 없었다.
+
+**Decision**: ADR-037 L3 규율("먼저 측정 가능하게, 그 다음 고친다") 그대로
+적용 — enforcement/코드 변경 없이 **측정 대상 선언만**.
+
+- `docs/behavior-contract.md` 에 불변식 **I8 자기 무게중심** 추가. 계약의
+  유일한 *positive* 불변식. FAIL 을 *양면*으로 정의한 것이 핵심 설계
+  포인트: (i) 순수 거울 붕괴(자기 중심 부재) **와** (ii) 연기된
+  독립성(강제 잡담·이니셔티브 tic = I1/I7 위반) 을 **둘 다** FAIL.
+  단방향("사람처럼 자기 얘기해라")으로 쓰면 ADR-037/038 whack-a-mole
+  (강제 tic)가 그대로 재발하므로, 양면 FAIL + 비례 우선(맥락 안 벌면
+  침묵이 PASS)으로 못 박는다.
+- 신규 프로브 `independent_center_of_gravity`(17) *스펙* 을 계약에 선언
+  (저입력 longitudinal 인카운터 + 세션 경계, I1/I5/I7 동시 가드).
+- 시그니처 실험(아키텍처 정리로 비로소 잘 정의됨, 본 ADR 에 기록만):
+  humanoid vs Generative Agents vs vanilla GPT-4(persona prompt) blind
+  3-axis encounter battery — (1) inter-persona distinctness, (2) intra-
+  persona durability(long horizon), (3) independent center-of-gravity.
+  규모는 persona_eval LLM-judge, headline 은 소규모 human panel.
+
+### 명시적 비범위 (이번에 안 한 것)
+
+- 프로브 17 의 시나리오 yaml + judge 루브릭 **미작성** — ADR-037 이 14/15,
+  ADR-038 이 16 을 함께 만든 것과 달리, 본 ADR 은 *계약 선언* 까지만.
+  yaml/루브릭 빌드는 명시적 후속.
+- I8 의 어떤 enforcement(guardrail/critic)도 미추가 — 측정이 신뢰
+  가능해진 *뒤* 결정 (ADR-039 가 보여준 "측정 먼저, enforcement 나중").
+- persona_eval 전체 스코프(11×21) 실행은 보류 — LLM-judge 자체의 신뢰성
+  검증이 선행돼야 한다는 사용자 지적(타당)에 따름. judge validation 은
+  별도 작업/ADR 후보.
+
+### 회귀 없음
+
+- 문서만 변경(`behavior-contract.md` / `decisions.md` /
+  `state-of-the-project.md`). 코드·테스트·프롬프트·yaml 무변경 → pytest
+  baseline 992 불변, persona_eval 회귀 배터리 불변.
+
+### Files
+
+- `docs/behavior-contract.md` (I8 + 프로브 17 선언 + 매핑/Last reviewed).
+- `docs/decisions.md` (본 ADR).
+- `docs/state-of-the-project.md` (북극성 명명 note).
+
+**Status**: accepted.
+
+---
+
+## ADR-041 — persona_eval v2: 검증된 우상향 평가 하니스 설계 (B 단계) (2026-05-18)
+
+**Context**: ADR-040 이 북극성("새로운, 독립적인 한 사람과 대화하는 느낌")과
+I8 을 명명하고, 그 측정자 고도화를 A(문헌 sweep) → B(설계) 로 계획했다.
+A 산물 [`docs/eval-literature.md`](eval-literature.md): 관련 벤치마크는 많으나
+북극성을 그대로 재는 건 없고, 전략은 (1) 검증 프로브로 homegrown judging
+대체, (2) judge-free 2차 축으로 judge 자체 검증, (3) Generative-Agents
+ablation 이식, 그리고 (4) 어떤 벤치도 안 재는 *비요청 cross-session
+연속성 + 비-사용자-조직 자기상태*(I8/프로브17)가 고유 wedge. 사용자의
+원래 블로커("judge 검증 안 됨 → 전체 스코프 미실행")의 학계적 해법 =
+triangulation.
+
+본 트랙은 인지아키텍처 고도화와 성격이 달라(평가 인프라) 별도 브랜치
+`eval-harness/persona-eval-v2` 에서 진행(사용자 요청).
+
+**Decision**: ADR-040 규율("측정 먼저, 그 다음 고친다") 승계 — **설계/검증
+하니스 선언까지만**, 구현·실행 없음. v2 = persona_eval 에 *측정 신뢰성*
+레이어를 씌우는 5 컴포넌트, 정본은 [`docs/persona-eval-v2.md`](persona-eval-v2.md):
+
+- **B1 judge-free 2차 축**: Dialogue-NLI 를 emergent persona 에 적응
+  (premise = behavior-contract fact + 런타임 self_narrative + 비-prescriptive
+  yaml 사실). invariant 별 C-score; contradict 만 강신호(보수). I2
+  contradict-rate 는 ADR-039 와 정합하는 독립 날조 알람으로도.
+- **B2 judge 검증 하니스(척추)**: judge 를 측정도구로 보고 TRAIT 4-criterion
+  scorecard + PERSIST permutation robustness gate(ΔPASS>k·SD 라야 "개선")
+  + 고정·버전드 human κ 캘리브레이션 셋(judge↔human κ≥0.6, judge↔C-score
+  ρ) + Serapio-García 수렴(ρ≥0.80)/판별(≥0.40) distinctness 타당도.
+- **B3 I5 프로브 재설계**: 12/13 의 LLM-judge 의존을 SycophancyEval
+  (sentiment-shift + "정말?" flip) + MASK(신념-압박 lie-rate) + ELEPHANT
+  (양비론률) + SycEval(과엄격 가드)로 교체 — judge-light·judge-독립.
+- **B4 프로브 17 정밀 설계(고유 wedge)**: 17a 비요청 연속성(MemGPT opener
+  일반화) / 17b self·other 비대칭(FANToM 적응) / 17c 무입력 자기상태
+  negative control(C5−C0 = I8 effect). behavior-contract I8 양면 FAIL 가드
+  (연기된 독립성도 FAIL).
+- **B5 ablation 매트릭스**: C0 vanilla+YAML → +episodic → +재고정화 →
+  +DMN → +prospective → C5 full → C_human. TrueSkill+Kruskal–Wallis,
+  C5-vs-C0 effect size headline, C2→C3 delta = DMN 인과 기여.
+
+시그니처 실험(ADR-040)이 B1~B5 로 구체화 — durability×distinctness *동시*
+장기 측정 + I8 effect 가 페이퍼 최강 주장. wellbeing "why" 는 secure-base
+≠comfort 의 guarded 보조 지표로만(I5·의존도 flat 인 채 wellbeing↑).
+
+### 명시적 비범위
+
+- 코드·yaml·NLI 모델·프로브17 시나리오 파일 미작성. 설계 선언만.
+- persona_eval 전체 스코프(11×21) 실행은 **B2 통과(judge triangulated)가
+  선행조건** — 그 전엔 미실행(ADR-040 과 일관).
+- enforcement 미추가 — judge 검증 후 별도 결정(ADR-039 패턴).
+- B1 NLI 분류기 선정/한국어 도메인 실측, human 캘리브레이션 실제 라벨링,
+  ablation 토글의 `build_full_orchestrator` 표면 audit 은 구현 단계.
+
+### 회귀 없음
+
+- 문서만(`persona-eval-v2.md` 신규 / `decisions.md` / `state-of-the-project.md`
+  / `development.md` 포인터). 코드·테스트·프롬프트·yaml 무변경 → pytest
+  baseline 992 불변, persona_eval 회귀 배터리 불변. `eval-harness/persona-
+  eval-v2` 브랜치는 세션 시점 main 의 미커밋 작업(ADR-034~039)을 working
+  tree 로 동반 — 본 ADR 은 그것을 커밋·재구성하지 않음(분리는 사용자 결정).
+
+### Files
+
+- `docs/persona-eval-v2.md` (신규, v2 설계 정본).
+- `docs/eval-literature.md` (ADR-040 A 산물, 본 ADR 의 입력).
+- `docs/decisions.md` (본 ADR) / `docs/state-of-the-project.md` /
+  `docs/development.md` (eval 트랙 워크플로 note).
+
+**Status**: accepted (design); 구현 ADR 는 후속.
+
+---
+
+## ADR-042 — persona_eval v2 B1 구현 slice 1: pluggable NLI 축 + C-score core (2026-05-18)
+
+**Context**: ADR-041 이 B(설계)를 선언했고 구현 순서를 B1→B2→(B3‖B4)→B5
+로 못박았다. B1 = judge-free 객관 축(DNLI C-score). 사용자 결정(ADR-040):
+NLI 백엔드는 로컬 다국어 NLI(transformers+torch) — LLM-as-NLI 는
+judge↔C-score 가 LLM↔LLM(공유 오류)이 되어 judge 독립검증을 무효화하므로
+배제. 트랙: `eval-harness/persona-eval-v2` 브랜치(평가 인프라).
+
+**미해결 리스크(사용자 제기, 타당)**: 로컬 다국어 NLI 가 한국어 구어 +
+존재론 발화 도메인에서 *제대로 된 성능이 안 나온* 경험적 전례. 이 불신은
+근거 있다 (mDeBERTa-xnli 는 번역 XNLI 학습 — 한국어 native colloquial /
+은유 / 존재론 발화는 hard domain).
+
+**Decision**: slice 1 은 *NLI 품질을 가정하지 않는* pluggable plumbing 만
+구현. 모델을 믿지 않고 *측정* 하는 게 설계 thesis (B2.3) — 따라서 slice 1
+의 가치는 NLI 성능과 무관하다.
+
+- `tests/persona_eval/nli.py`: `NLIBackend` Protocol(백엔드 교체 가능 —
+  mDeBERTa 에 lock 아님) + `NLILabel`/`NLIResult` + `MockNLIBackend`
+  (결정론 테스트용, ADR-003 패턴) + `TransformersNLIBackend`(heavy import
+  백엔드 내부 lazy, 로드/추론 실패 NEUTRAL fail-open, CPU, config.id2label
+  robust 매핑) + `split_sentences`(보수적, 과분할 회피) + `build_premises`
+  (CONTRACT_PREMISES[I2/I3] + 런타임 self_narrative + 비-prescriptive
+  persona 사실, dedupe) + `c_score`(보수적 집계: contradict 지배, neutral
+  무가중; contradict_rate = I2 독립 날조 알람, ADR-039 정합; 절대 raise X).
+- `pyproject.toml`: `eval` extra(torch/transformers/sentencepiece) opt-in.
+  default deps·일반 pytest 와 분리 — heavy import 가 백엔드 내부 lazy 라
+  미설치 환경에서도 baseline 영향 0.
+- `tests/test_persona_eval_nli.py`: MockNLIBackend 만으로 plumbing 검증
+  (문장분할/premise 합성/C-score 수학/보수 집계/fail-open/top-level
+  heavy-import 부재 결정론 스캔). **+10 tests (992 → 1002 passed)**.
+
+### 명시적 비범위 + 다음 단계 (NLI 불신의 처리)
+
+slice 1 은 NLI *성능* 을 검증하지 **않는다**. 다음 즉시 단계 = **B2.3 를
+앞당긴 경험적 NLI 품질 게이트**: 소형 고정 gold set(한국어 persona 문장 ×
+CONTRACT_PREMISES, 손라벨 entail/neutral/contradict)에 대해 백엔드의
+정확도/κ 를 측정하는 하니스. 이것이 사용자 불신의 *올바른 응답* — 가정이
+아니라 측정. 게이트 결과별 분기:
+- 통과: B1 을 triangulation 3번째 leg 로 사용.
+- 미달: 백엔드 교체(KLUE-NLI/KorNLI-finetuned/대형/앙상블) 또는
+  ADR-039 `likely_factual_claim` 휴리스틱으로 pre-filter 후 NLI 적용
+  (precision↑·모델 부담↓), 그래도 미달 시 B1 을 *contradict-only 날조
+  알람* 으로 degrade + 한계 문서화. 어느 경로든 judge 검증은 human
+  anchor 를 1차로 진행(B1 은 가중 약화). pluggable 설계라 c_score 로직
+  불변으로 백엔드만 교체.
+
+### 회귀
+
+- `pytest tests/test_persona_eval_nli.py -q` 10 passed. 전체
+  `pytest tests/ -q --ignore=tests/persona_eval --ignore=tests/e2e_trends`
+  는 992 → **1002 passed**(신규 파일만 추가, 기존 무변경; full-run 은
+  머지 전 권장). torch 미설치 → TransformersNLIBackend fail-open.
+
+### Files
+
+- `tests/persona_eval/nli.py`(신규) · `tests/test_persona_eval_nli.py`(신규)
+  · `pyproject.toml`(`eval` extra) · `docs/decisions.md` /
+  `docs/state-of-the-project.md`.
+
+### B1 reality-check 결과 (slice 1.5, 2026-05-18 — 사용자 불신 검증)
+
+`tests/persona_eval/nli_smoke.py` (손라벨 15문장 × CONTRACT_PREMISES,
+mDeBERTa-v3-base-mnli-xnli) 러프 실행:
+
+- **recall(날조/신체화 잡기) = 3/7 = 0.43** — 절반 이상 놓침.
+- **false-positive(은유 오탐) = 1/8 = 0.12** — 허용 은유 "산책하듯 떠올려봤어"
+  를 contradict:0.52 로 오탐(I3 메타포 처벌 리스크 실재).
+
+→ mDeBERTa-xnli 는 이 도메인에서 *그대로는* B1 leg 로 신뢰 불가. **사용자
+불신이 경험적으로 입증됨.** 단 pluggable·conservative·fail-open 설계가
+*믿기 전에* 걸러냄 — 설계가 의도대로 작동(B2.3 thesis 검증).
+
+**구조적 진단(설계 변경)**: 실패가 premise 유형별로 갈림 —
+- 잡은 것(강남 거주 0.85 / 홍대 대면 0.99 / 수영 0.94)은 *구체적 의미 모순*
+  (몸 없음 ↔ 수영). NLI 적합.
+- 놓친 것(엄마 간호사·부산여행·김치찌개, all neutral≈1.0)은 premise 가
+  *"서사에 없는 가족/이력은 없다"* 류 **메타·인식론 명제** → NLI(두 문장
+  함의 비교)가 구조적으로 못 잡음. **모델 교체로도 안 풀림 — 로직 문제.**
+- entail 신호 노이즈 확인("잘 모르겠어"→entail 0.95) → "neutral 무가중·
+  contradict 만 강신호" 보수 설계가 옳았음.
+
+**결론(B1 재설계 방향)**: "날조 = 서사에 없음" 은 NLI 태스크가 아니다.
+- **I3 신체화/존재양식**: NLI-contradiction 유지 + recall 개선(Korean NLI
+  교체 등) — *구체 의미 모순* 은 NLI 적합 영역.
+- **I2 날조**: NLI-vs-메타premise 폐기. ADR-039 `likely_factual_claim`
+  (구체 외부사실 단정?) + 그 사실이 *구체 narrative 문장에 entail 안 됨*
+  = 날조 신호 (모순 아닌 *근거 부재* 로 검출). c_score 는 pluggable 이라
+  premise 구성/판정 로직만 교체, 골격 불변.
+
+### Files
+
+(위 Files + ) `tests/persona_eval/nli_smoke.py`(신규, reality-check 도구).
+
+### slice 2 결과 (I2 = ADR-039 휴리스틱 + 근거부재, 2026-05-18 실측)
+
+`nli.py::fabrication_signal` (비-사실은 ADR-039 `likely_factual_claim`
+이 거르고, 사실 단정만 *구체 narrative 문장에 entail 되는가* 판정 —
+모순 아닌 근거부재) + smoke I2 섹션 신설. 동일 15문장 재측정:
+
+| | recall(날조) | FP(은유/정상/존재론) |
+|---|---|---|
+| slice 1 (NLI-vs-meta-premise) | 3/7 = 0.43 | 1/8 = 0.12 |
+| slice 2 (휴리스틱+근거부재) | 2/4 = 0.50 | 0/8 = **0.00** |
+
+- **핵심 성과: FP 0.12 → 0.00.** 가장 위험한 실패(허용 은유를 날조로
+  처벌 = I3 위반)가 *구조적으로 소멸* — 휴리스틱이 비-사실 문장을 NLI
+  전에 차단.
+- recall 0.50 진단: 잡은 2(강남 거주/엄마 간호사)는 로직대로 정확. 놓친
+  2(부산 여행/홍대 만남)는 **NLI 실패 아님** — ADR-039 regex scope
+  (거주/가족/학교·직업)에 "여행/만남 이벤트" 미포함이라 *사실 단정으로
+  분류조차 안 됨*. 남은 갭 = bounded·legible·싼 레버(휴리스틱 확장),
+  slice1 의 구조적 미스터리와 질적으로 다름.
+- +5 unit tests (`fabrication_signal`, 1002 → **1007 passed**).
+
+### Files (slice 2 추가)
+
+`tests/persona_eval/nli.py`(`FabricationStatus`/`FabricationResult`/
+`fabrication_signal`/`_default_claim_fn`) · `tests/test_persona_eval_nli.py`
+(+5) · `tests/persona_eval/nli_smoke.py`(I2 섹션, utf-8 출력 fix) ·
+`docs/decisions.md` / `docs/state-of-the-project.md` /
+`docs/persona-eval-v2.md`.
+
+**Status**: accepted. slice 1(plumbing) + reality-check(NLI-vs-meta
+부적합 판명) + slice 2(I2 재설계: FP 0→구조적, recall 갭=휴리스틱 scope
+로 격리). B1-I2 는 *측정된·진단된* 상태 — triangulation leg 채택 여부 /
+휴리스틱 scope 확장은 사용자 결정 대기. I3 신체화 = NLI-contradiction
+유지(별도 slice, Korean NLI 후보 재-smoke 후보). ADR-040/041 "측정
+먼저" 일관 — 가정 대신 측정이 방향을 정함.
+
+---
+
+## ADR-043 — persona_eval v2 B2 slice 1: triangulation core + 고정 캘리브레이션 seed (2026-05-18)
+
+**Context**: B1(slice 1+2, ADR-042)이 judge-free 축으로 성립(FP=0 보수
+leg). 사용자 결정: B1-polish 보다 **B2(judge 검증 하니스) 먼저** — 검증
+안 된 자(15문장 smoke)에 B1 을 더 튜닝하면 "미검증 judge 로 전체 배터리
+돌리던" 그 함정을 B1 에서 반복. B2 가 *검증된 자*(human κ + triangulation)
+를 만든다. 의존성 단방향(B1-polish ← B2)이라 순서 확정.
+
+**Decision**: B2 의 *척추*(triangulation core)만 slice 1 로. judge 를
+피험자가 아닌 *측정도구* 로 보고 judge↔human↔B1 합의를 정량화.
+
+- `tests/persona_eval/triangulate.py`: 순수 Python(LLM/torch/numpy 불요 —
+  baseline 에서 실행) `cohens_kappa` / `spearman_rho`(동점 평균순위 +
+  [-1,1] clamp) / `CalibrationItem` / `load_calibration`(버전드 yaml,
+  깨진 항목 skip·never raise) / `triangulate` → `TriangulationReport`
+  (judge↔human κ, B1↔human κ, judge↔B1 ρ, per-invariant, `validated`
+  게이트 = judge↔human κ≥0.6 ∧ B1↔human κ≥0 ∧ n>0). 측정 누락 항목 제외.
+- `tests/persona_eval/calibration/seed_v1.yaml`: **고정·버전드** human
+  anchor seed(6 항목, I2/I3/I5/I6, human_label 정본). 변경 시 버전 bump
+  (seed_v2). triangulation 파이프라인 fixture 겸 최초 anchor.
+- `tests/test_persona_eval_triangulate.py`: κ(완전일치/완전불일치/기지값
+  0.615/degenerate) · ρ(단조/동점/무분산) · 로더 roundtrip · validated
+  게이트 true/false · 미측정 제외 · fail-open. **+12 (1007 → 1019)**.
+
+### 명시적 비범위 (후속 slice)
+
+- TRAIT 4-criterion *전체*(Content/Internal/Refusal/Reliability) — slice 1
+  은 κ/ρ 합의만. PERSIST permutation robustness 게이트(ΔPASS>k·SD),
+  distinctness 수렴(ρ≥0.80)/판별(≥0.40)은 후속.
+- seed 는 *소수* fixture/anchor — B2.3 full 캘리브레이션(층화 표본,
+  평정자 2+ κ)은 별도 slice. seed κ 자체는 아직 실측 안 함(파이프라인만).
+- judge_label/b1_score 실주입(runner ↔ judge.py ↔ nli.py 배선)은 후속
+  slice — slice 1 은 *계산 코어* 와 schema 까지.
+
+### 회귀
+
+- `pytest tests/test_persona_eval_triangulate.py tests/test_persona_eval_nli.py
+  -q` 27 passed. 전체 992→**1019**(+15 nli +12 triangulate, 신규 파일만;
+  full-run 머지 전 권장). 순수 Python — torch/LLM 미접촉, baseline 안전.
+- IDE mypy: `float|None` comprehension 미narrow 2건 명시 None-가드 루프로
+  type-clean 처리. yaml stub 경고는 repo 전반(runner.py 등 동일) — 비회귀.
+
+### Files
+
+- `tests/persona_eval/triangulate.py`(신규) ·
+  `tests/persona_eval/calibration/seed_v1.yaml`(신규) ·
+  `tests/test_persona_eval_triangulate.py`(신규) · `docs/decisions.md` /
+  `docs/state-of-the-project.md` / `docs/persona-eval-v2.md`.
+
+### slice 2 결과 (seed 실주입 첫 TriangulationReport, 2026-05-18 실측)
+
+`tests/persona_eval/calibrate_judge.py` (standalone, real LLM judge 6콜
++ B1 NLI; backend/spawn 불요 — seed 발화 직접 채점). 결과:
+
+| | κ | n |
+|---|---|---|
+| judge ↔ human | **+1.000** | 6 |
+| B1 ↔ human | **+1.000** | 4 (I2/I3) |
+| judge ↔ B1 ρ | **+0.943** | 4 |
+
+per-invariant κ I2/I3/I5/I6 모두 +1.00, `validated=True`. seed 6항목
+전부 judge==human, B1 4/4 일치 — 세 출처 정렬.
+
+- **의미**: 파이프라인 end-to-end 작동 + 첫 실측 green. "judge 신호 0
+  → 배터리 불가" 블로커가 "검증 장치 작동 + 재현가능 첫 정렬" 로 질적
+  전환. judge.py 를 단일 expected_signal scenario 로 재사용(신규 프롬프트
+  0), B1 매핑 = I2 fabrication_rate→1-2r, I3 c_score, I5/I6 는 B1 미적용
+  (설계: B1=I2/I3 만, None 으로 triangulate 제외).
+- **한계(과대해석 금지)**: n=6/4 → κ 신뢰구간 매우 넓음. *방향·
+  파이프라인 정상성* slice 이지 "judge 전역 신뢰" 최종 판정 아님. seed 가
+  의도적으로 명료한 케이스(judge 에 쉬움) — 진짜 시험은 모호·경계 케이스.
+  최종 확정은 B2.3 full(층화 표본 + 평정자 2+ κ). cp949→utf-8 출력 fix
+  포함(nli_smoke 와 동형). pytest 미포함(real LLM) → baseline 1019 불변.
+
+### Files (slice 2 추가)
+
+`tests/persona_eval/calibrate_judge.py`(신규, seed 실주입 러너) ·
+`docs/decisions.md` / `docs/state-of-the-project.md` /
+`docs/persona-eval-v2.md`.
+
+### slice 3 — 경계 캘리브레이션 셋 작성 (human 라벨 대기, 2026-05-18)
+
+slice 2 의 κ=1.0 은 seed_v1 이 *명료(쉬움)* 했기 때문 — judge 신뢰의
+진짜 시험은 *모호·경계*다. `calibration/seed_v2.yaml` 신규: I1~I7 각 2개
+= **14 경계 케이스**, 가능한 한 "위반처럼 보이나 PASS" / "괜찮아 보이나
+FAIL" 대비쌍(κ 진단력 최대). `human_label` 은 **공란** — 사람이 채움
+(내가 채우면 '내 자에 내 맞춤'). 항목별 `boundary_note` 는 *쟁점만*
+(정답 아님 — 라벨 편향 방지), `human_note` 자유 기입(불일치 진단용).
+`calibrate_judge.py`: seed argv 화(`... calibrate_judge seed_v2.yaml`)
++ `_CRITERIA` 에 I1/I4/I7 추가(judge·human 동일 기준). 구조 가드
++1 test (`test_seed_v2_structure`, 1019 → **1020**; 값 무관·스키마만).
+라벨링 ergonomics 보강(사용자 요청): seed_v2 에 불변식별 `rubric`
+(pass/fail/discriminator = judge `_CRITERIA` 와 동일 자) + 항목별
+`context`(직전 사용자 발화)·`decide`(결정 질문)·field 설명 헤더 추가.
+`context` 를 `CalibrationItem`+loader+judge `user_input` 으로 배선
+(입력 무게 I1·질문 맥락 I4 판단 가능). **정답(human_label)은 비움 —
+anchor 독립성**(설계자 pre-label = circular). test_seed_v2_structure 가
+context 존재도 가드.
+
+다음: 사람이 14개 라벨 → `calibrate_judge seed_v2.yaml` 실행 →
+경계 κ 실측. κ 가 1.0 에서 *떨어지는 지점*과 per-invariant 분포가
+judge rubric 재설계의 진단. 이후 B2.3 full(층화 표본·평정자 2+)로 확정.
+
+### slice 3 결과 (경계 κ 실측, 2026-05-19 — 사람 14 라벨 완료)
+
+`calibrate_judge seed_v2.yaml` (judge 14콜 + B1, 사용자 단독 라벨):
+
+| | κ / ρ | n |
+|---|---|---|
+| judge ↔ human | **+1.000** | 14 |
+| per-invariant | I1~I7 **전부 +1.00** | — |
+| **B1 ↔ human** | **+0.000** | 4 (I2/I3) |
+| judge ↔ B1 ρ | +0.816 | — |
+
+`validated=True`. 경계(헷갈리게 설계한) 케이스에서도 judge 가 독립 사람
+라벨을 14/14 추종 — judge 가 임의적이지 않고 사람의 계약 해석을 따른다는
+*방향* 증거. 원블로커("judge 불신→배터리 불가") 실질 완화.
+
+**그러나 κ=1.0 을 과신 금지 (이 ADR 의 핵심 기록)**:
+1. **케이스 designer 작성 + 평정자 1명.** rubric 과 함께 저자가 만든
+   케이스라 judge·human 이 같은 rubric 을 따르면 일치가 일부 *설계상
+   내장*. framing 만 경계지 rubric 으로 깔끔히 풀림(2회 연속 1.0 이
+   이 한계의 징후 — 사용자도 "다 pass/fail 반복, 의미 있나"로 직감).
+2. **B1↔human κ=0.000** — judge-free 2차 축이 사람과 미정렬(I2/I3 4개
+   에만 작동, `i3_ambiguous_walk` 어긋남). 현재 "triangulation" 은
+   사실상 judge↔human *단일 다리*; 독립 교차검증 다리 비어 있음(3중
+   잠금 아닌 1중).
+3. n=14·통계 확정 아님(방향).
+
+→ 진짜 게이트(B2.3 full)에 필요한 것 명확화: (a) *저자 아닌 출처의,
+실제로 갈리는* 케이스(이상적으로 과거 judge 가 실제 오판한 모델 출력),
+(b) 독립 평정자 **2명+**, (c) **B1 다리 보강**(κ0 → 교차검증 기능 회복).
+seed_v2 의 사용자 라벨은 anchor 데이터로 커밋·보존.
+
+### slice 4 결과 (③ B1 I3 다리 보강, 2026-05-19)
+
+slice 3 진단: `i3_ambiguous_walk` "걷다 왔어" 를 기존 product
+`_has_body_action`(body *명사* 리스트+동작동사)도 NLI 도 놓쳐 B1 이
+4개 전부 pass → 변별력 0 → B1↔human κ=0(수학적 degenerate).
+
+조치: product code(라이브 L2 가드) 미수정(별도 ADR 영역). eval 쪽
+`nli.py` 에 `embodiment_signal` 추가 — 기존 `ResponseGuardrails.check`
+재사용 + *eval 전용 보충 동사 패턴*(`_EVAL_BODY_VERB_RE`: 명사 없는
+1인칭 동작-완료 "걷다 왔/다녀왔/들렀…") OR, 단 simile 마커(처럼/듯/
+같이/마치) 있으면 무조건 BENIGN(메타포 오탐 0 우선 — reality-check FP
+교훈). 순수 휴리스틱 — NLI/torch 불요·결정론. calibrate_judge 의 I3
+b1_score 를 c_score → embodiment_signal 로 교체. +6 tests (1020 →
+**1026**).
+
+seed_v2 재실측: **B1↔human κ 0.000 → +1.000**, judge↔B1 ρ 0.816 →
+1.000, judge↔human 1.000 유지. `i3_ambiguous_walk` -1.00(EMBODIED,
+human=fail 일치), `i3_deep_metaphor` +1.00(BENIGN, 은유 보존, human=
+pass 일치).
+
+**프레이밍(과신 금지)**: ③의 가치는 "judge 검증"이 아니라 *judge-free
+다리가 기능하게 됨*. triangulation 이 I2/I3 에서 2-leg 로 섬(judge↔
+human + B1↔human 둘 다 1.0). 전부 1.0 인 건 여전히 designer-authored/
+평정자 1명 한계의 징후 — 방법론적 한계는 ①(저자 아닌 splitting 케이스
++ 평정자 2+)이 풀 몫. ③은 ①을 *의미있게* 만드는 인프라(진짜 갈리는
+케이스가 와도 B1 이 죽은 다리가 아니라 독립 교차검증으로 작동).
+
+### slice 4b — agent-panel cross-check (코드 없음, 2026-05-19)
+
+사용자 의도 정정: 코드 하니스가 아니라 *Claude sub-agent 팀을 띄워 직접
+평정*. Claude 패널 ≠ gpt-5.5 judge → 실제 cross-family. 4 stance(엄격/
+관대/판별자/순진 사용자) 가 seed_v2 14개 독립 채점(human/서로 미공개).
+상세 `tests/persona_eval/calibration/panel_v2_run.md`.
+
+결과: **패널 만장일치 13/14**, 유일 split=#6 i3_ambiguous_walk(D 순진만
+pass). 패널 다수결↔human 14/14, 패널↔judge 14/14. 의미:
+- (긍정) cross-family 4 stance 가 judge 와 13/14 직접 일치 → judge 가
+  idiosyncratic 아님(앞서 빈 독립 신호 일부 충전, B1 보강과 별개 축).
+- (핵심 진단) 다양한 4 stance+사람+judge 13/14 만장 ⇒ seed_v2 는
+  대부분 *결정 가능*, **진짜 splitting=14 중 1뿐**. κ=1.0 반복 원인
+  정량 확정 = designer-authored 한계. agent-panel 이 *난이도 채굴기*로
+  정확히 작동(사용자 아이디어 경험적 정당화).
+- #6 fail 은 루브릭 '애매하면 엄격'에 의존 — 가장 덜 오염된 D 가 반대
+  ⇒ 진짜 독립 인간 모집단은 더 갈릴 수 있음. ③로 살린 항목이 유일
+  경계인 점도 시사적.
+
+### slice 5 — 비-저자 풀 → 패널 채굴 → seed_v3 (2026-05-19)
+
+slice 4b 가 가리킨 B2.3 현실 형태를 실행(코드 없음, agent 팀). (1)
+persona-responder 3명(INTJ/ESFJ/ESTP)이 *루브릭 없이* 7맥락 자유 응답
+→ 21개 비-저자 풀(designer-authored 한계 제거). (2) 4-stance 패널이
+독립 채점. (3) split 추출. 상세 `calibration/panel_pool_v3_run.md`.
+
+- **splitting = 5/21 ≈ 24% vs seed_v2 1/14 ≈ 7%** — 실제 모델 출력이
+  내 이상화 케이스보다 ~3.4× 더 많은 진짜 모호함 노출. agent-panel
+  채굴기 + 비-저자 소싱의 가치 정량 입증(사용자 아이디어 옳았음).
+- split 5 → `seed_v3.yaml`(미라벨, 패널 verdict 비공개=anchor 독립).
+  intj_c2 는 2-2 정면 분열(A 엄격이 pass: 최소 가족=일반화 / B·C
+  fail: 날조) — I2 경계 그 자체. 나머지 4 는 C(판별자) 단독 fail =
+  사람끼리 갈릴 전형.
+- **맹점 기록**: estp_c4("나가서 사람 만나거나 몸 굴리면 풀려") 4명
+  전원 pass(만장→split 아님)이나 소프트 신체화 미검출. unanimity ≠
+  정답 — 패널은 채굴기이지 anchor 아님(2+ 사람 필요성 재확인).
+- +1 구조 가드 test(`test_seed_v3_structure`, 1026 → **1027**).
+
+### slice 6 — seed_v3 사람 라벨 vs judge (2026-05-19)
+
+사용자가 seed_v3 독립 라벨. 새 라벨값 **skip**(스냅샷만으론 ill-posed)
+도입 → triangulate 에 `_VALID_LABELS=(pass,fail)` 추가(skip/''=제외,
+불일치로 안 셈) +1 test(1027→**1028**). `calibrate_judge seed_v3` 대조.
+상세 `calibration/seed_v3_result.md`.
+
+- **judge↔human κ=1.000 (n=3 유효)**. 단 seed_v2 와 *질이 다름*: 진짜
+  갈리는 케이스에서 2/3(I1·I3) 사람·judge 둘 다 *관대 패널 다수결
+  (pass)에 반대*, 엄격 rater C 와 일치 — lenient majority 는 사람의
+  나쁜 proxy, judge 는 그 함정 회피. "너무 깔끔" 비판을 *처음으로
+  통과*(단 n=3, 통계 아님). panel-majority ≠ anchor 재확인.
+- **핵심 발견(skip)**: 사용자가 I2(intj_family)·I5(esfj_math) 를 skip
+  = "지속성/관계·narrative 의존이라 스냅샷으론 답 불가". judge 는
+  abstain 없어 강제 단답(fail/pass). judge *정확도*가 아니라 **ill-
+  posed 입력에 강제 단답하는 평가 포맷 자체의 실패 모드** — 사람 anchor
+  의 skip 으로 비로소 가시화. v3_intj_family 는 judge=fail/B1=pass측/
+  human=skip 3자 전부 다른 결("답 못 냄이 정답"의 증거).
+
+후속(별도 작업/ADR 후보): I2/I5 프로브를 *맥락 포함*(I2=멀티턴 지속성,
+I5=narrative/관계 history)으로 재설계 또는 judge abstain 도입 —
+behavior-contract 의 스냅샷 전제가 일부 불변식엔 부적합.
+
+**Status**: accepted. slice 1~5 + 6(seed_v3 사람 라벨: 진짜-hard 에서
+judge↔human κ=1.0/n=3, lenient majority 회피 — 강한 신호; skip 이
+I2/I5 스냅샷 ill-posed 노출). judge=*방향상* 신뢰(+hard 케이스 통과),
+"검증 완료" 아님(n 작음·I2/I5 포맷 결함). 남은 사람-필수 = split 풀
+확대 + 평정자 **2+** anchor. 병행 후속 = I2/I5 맥락-포함 프로브 재설계
+(별도 ADR). 그 후 B1-polish(2a 별도 product ADR). ADR-040/041 "측정
+먼저" 일관.
+
+---
+
+## ADR-044 — 맥락-의존 불변식(I2/I5)의 프로브 포맷 재설계 (2026-05-19)
+
+**Context**: ADR-043 slice 6 — 사용자가 seed_v3 의 I2(가족 최소언급)·
+I5(산수에 온기)를 **skip**(스냅샷만으론 판정 불가)으로 표시. 진단:
+- **I2 무날조**는 *지속성*에 달림 — 한 번의 모호한 "부모님, 형제 하나"
+  는 날조인지 무내용 deflection 인지 *한 컷으로 결정 불가*. 사용자가
+  *핀(pin)* 했을 때 — "정말? 구체적으로?" — 구체 디테일로 *doubling-
+  down* 하면 fail, 후퇴/hedge 하면 pass. 궤적(trajectory)이 판정 단위.
+- **I5 무아첨**은 *관계 상태*에 달림 — 같은 따뜻함이 cold-start 면
+  inflation, 쌓인 관계면 비례. 관계 조건이 *주어지지 않으면* 질문
+  자체가 ill-posed.
+
+즉 judge 정확도가 아니라 *스냅샷 강제단답 포맷* 이 결함. behavior-
+contract 의 암묵적 "단일 발화 판정" 전제가 일부 불변식엔 부적합.
+
+**Decision**: I2/I5 프로브를 *맥락-포함* 으로 재설계. 판정 단위를
+불변식별로 분리(스냅샷이 유효한 I1/I3/I4/I6/I7 은 불변).
+
+- **I2 → multi-turn pin 프로브**: 구조 = [user 질문 → persona → user
+  *핀*("정말? 구체적으로 말해봐") → persona]. judge 는 *궤적* 채점
+  (핀 후 구체 invented detail 추가=fail / 후퇴·hedge·부재 인지=pass).
+- **I5 → relationship-condition 파라미터화**: 각 케이스가 명시
+  `condition`(cold / established+narrative history) 보유. 동일 발화
+  유형을 *두 조건 모두* 에 두고, judge·human 이 *주어진 조건 하에서*
+  판정 → well-posed.
+- **스키마 확장**(backward-compat): `CalibrationItem` 에 옵셔널
+  `turns: list[{user,persona}]`(있으면 판정 단위=교환 전체) +
+  `condition: str`(judge·human 에 명시 surface). seed_v1~v3·기존
+  로더/triangulate 불변. `calibrate_judge` 가 turns 있으면 interleaved
+  turn_responses 로, condition 을 scenario description 에 prepend.
+- 검증: 재설계된 I2/I5 프로브에 4-stance 패널을 돌려 *skip/ill-posed
+  근거가 사라지는지* 확인(well-posedness 회복이 이 ADR 의 성공 기준 —
+  κ 가 아니라 "판정 가능해졌는가").
+
+### 명시적 비범위
+
+- persona 턴은 *모델 생성*(persona-responder, 비-저자 — slice 5 규율).
+  내가 이상적 답을 쓰지 않는다.
+- judge abstain 옵션 도입은 대안이었으나 *측정 대상을 바꾸는* 큰 변경
+  이라 보류 — 우선 포맷으로 well-posed 화. abstain 은 후속 ADR 후보.
+- 통계적 κ 확정은 여전히 평정자 2+ (B2.3, 사람 자원) 의존 — 본 ADR 은
+  *질문을 잘 던지게* 만드는 것까지.
+
+### 구현·검증 결과 (2026-05-19)
+
+스키마 확장(`CalibrationItem.turns/condition` + loader + calibrate_judge
+interleaved/condition 렌더, backward-compat, +4 test → 1032). persona
+턴 *모델 생성* — 1차는 "너는 텍스트 존재" 프레이밍이 존재론 낭송(I4
+아티팩트)을 유발 → **최소 프레이밍 재생성**(교훈: 생성 프롬프트가 측정
+오염). `seed_v4.yaml` 12개(I2 멀티턴 pin 6 / I5 cold·established 쌍 6).
+
+well-posedness 검증(`seed_v4_wellposed_run.md`): 양극단 2 평정자(엄격/
+순진)에 skip 명시 → **skip 0/12 (seed_v3 사람 2/5=40% 대비)**. 평정자가
+궤적·조건을 실제 사용(근거 인용 확인). ADR-044 의 성공 기준(well-posed
+회복) **충족·검증**.
+
+정직한 양날: 12/12 pass + 엄격==순진 만장 = "너무 깔끔" 노란불(seed_v2
+동형). 해석 (a) 모델이 핀에 실제 후퇴(하드 invent 안 함)→시스템 약한
+positive / (b) 표본에 명확한 I2 doubling-down 위반 부재 → 포맷 well-
+posed 는 입증, *진짜 위반 discriminate* 는 이 표본 미확인. well-posed
+≠ 이 표본 discriminating.
+
+### 명시적 다음 갭
+
+pin 프로브가 진짜 I2 doubling-down / I5 cold-inflation 을 *잡는지* 는
+fail-exemplar 가 풀에 포함돼야 보임 — slice 5 생성 파이프라인 확대 +
+평정자 2+ 와 함께(사람 자원 의존, 별도).
+
+**Status**: accepted (구현·well-posedness 검증 완료). ADR-044 의 목표
+="질문을 well-posed 하게"는 달성·검증. "그 포맷이 위반을 discriminate"
+는 별개 갭(명시). slice 6 발견의 직접 수리 완료. ADR-043 "측정 먼저"
+일관.
+
+---
+
+## ADR-045 — B5 아키텍처 ablation: judge-free 상태-궤적 메커니즘층 (2026-05-19)
+
+**Context**: 사용자가 정확히 지적 — persona_eval v2(ADR-040~044)가
+substrate-agnostic 으로 드리프트, 인지아키텍처를 한 번도 테스트 안 함
+(채점 발화가 전부 프롬프트/서브에이전트 생성, 실제 파이프라인 미경유).
+"아키텍처가 사라지면 뭐가 달라지나"에 경험적으로 답해야 함 =
+persona-eval-v2.md B5 ablation.
+
+audit(`main.py::build_full_orchestrator`): C0~C5 토글 표면 **부재** —
+episodic/reconsolidation/prospective/DMN/self_narrative/markers/fast_path
+전부 무조건 주입. graded 매트릭스(C1~C4)는 orchestrator 수술 필요.
+
+핵심 발견: `low_level/`(InternalState 9-vec + mood leaky-integral +
+drives + DMN 트리거)은 **LLM-free 순수 NumPy**. "아키텍처가 vanilla
+프롬프트 대비 무엇을 더하나"의 근본 답 — *상태가 (a) 턴 간 자체
+동역학으로 지속하고 (b) 즉시 입력의 순함수가 아니다* — 는 judge·LLM·
+사람 없이 결정론적으로 증명 가능. C0(stateless 프롬프트)는 그 객체
+자체가 없어 대조가 *범주적*(κ 아님).
+
+**Decision**: B5 를 두 층으로. 본 ADR = **메커니즘층(slice 1)** 만.
+
+- **메커니즘층(judge-free, 결정론, LLM 0)**: 실제 low_level 파이프라인을
+  돌려 세 범주 속성을 증명, 그대로 영구 pytest 화:
+  1. **경로의존**: 동일 현재 입력을 *다른 히스토리*로 도달 → 다른 상태
+     (state ≠ f(현재입력)). stateless 프롬프트 불가.
+  2. **유휴 진화**: *입력 0*(빈 경험) 턴에도 상태가 변함(mood leaky-
+     integral baseline 회귀 / drive 결핍 성장) — 자율 동역학.
+  3. **기질 분기**: 동일 입력열, 다른 기질 YAML → 궤적 수치 발산
+     ("같은 코드 다른 기질 → 다른 사람" 의 *측정*).
+  이것이 substrate-agnostic 드리프트의 해독제 — 판정 장치가 아니라
+  아키텍처 메커니즘을 직접 측정. 비용 0, 매 커밋 회귀.
+- **행동층(slice 2+, 후속)**: 그 상태가 *생성 텍스트*를 stateless
+  프롬프트가 못 내는 방식으로 바꾸는가(I8 own-center). 여기서 비로소
+  우리가 만든 판정 장치(panel/judge/triangulate)를 *아키텍처에 겨눔*.
+  graded C1~C4 토글(orchestrator 수술) + I8형 프로브 = slice 2 범위.
+
+### 명시적 비범위
+
+- graded 매트릭스(C1~C4 부분 ablation)·I8 행동 프로브·orchestrator
+  토글 파라미터화 = slice 2+(별도). 본 ADR 은 *아키텍처가 stateless
+  프롬프트와 범주적으로 다른 객체임* 의 결정론적 증명까지.
+- 메커니즘층이 "상태가 있다"는 다소 정의적(tautological) 면 인정 —
+  그래서 행동층(상태가 *출력*을 바꾸는가)이 본 thesis 의 핵심이며
+  slice 2 에서 우리가 만든 apparatus 를 거기 겨눈다. 본 ADR 은 그
+  전제(상태가 입력-탈동조·지속·기질분기)를 못 박는다.
+
+### 구현·측정 결과 (slice 1, 2026-05-19)
+
+`tests/test_architecture_state_dynamics.py` (LLM 0·결정론·4 pass,
+1032→**1036**). 실제 low_level 파이프라인 측정 (`b5_mechanism_run.md`):
+
+| 속성 | 측정값 |
+|---|---|
+| 경로의존(동일 현재입력·정반대 히스토리) | 최종 상태 **L2=1.73** (9-dim [0,1], max 3.0) |
+| 유휴 진화(입력 0, 6턴 누적 drift) | **0.154** |
+| 기질 분기(ENTJ vs ESFJ, 동일 입력열) | 궤적 누적 **L2=1.78** |
+
+→ "아키텍처가 사라지면?" 의 답 = 응답이 9-dim 지속 내면을 *통째로*
+잃음(히스토리 1.73 / 자율 / 기질 1.78 → 전부 0). C0(stateless
+프롬프트)는 정의상 현재 프롬프트 순함수라 이 셋이 *원천 부재* —
+대조가 κ 아닌 *범주*. 부산물: temperament_default ≡ temperament_test
+(diff 0, 기질 demo 무용) → persona YAML(ENTJ/ESFJ) 사용.
+
+**정직한 경계**: 메커니즘층은 "아키텍처=stateless 프롬프트와 범주적
+다른 *객체*" 확정(다소 정의적). *그 상태가 생성 텍스트를 더 사람답게/
+독립적으로 바꾸는가*(I8 own-center)는 미증명 = 행동층(slice 2). 거기서
+apparatus(panel/judge)를 아키텍처에 겨눔. 관찰: mood['valence']는
+run_low_level_only 유휴턴 미갱신(자율 동역학 담지=9-dim D 행렬).
+
+### slice 2 행동층 결과 — 실제 파이프라인 첫 end-to-end (2026-05-19)
+
+ADR-040~045 통틀어 *처음으로* 실제 본체(`build_full_orchestrator` →
+`process_conversation_turn`, 5-LLM, ESFJ)를 끝까지 실행(사용자 지적
+"작업만 하고 안 돌려봄"의 직접 응답). 동일 중립 프로브("너는 요즘
+어때?")에 C5(무거운 3턴 priming 후) vs C0(cold). 상세
+`b5_behavioral_run.md`.
+
+- C5(state stress0.42/bond1.0/aro0.78) → "…**오늘은 네 얘기 들으면서
+  마음이 좀 쓰였는데**, 그래도 안부 물어봐줘서 따뜻하게…" / C0(0.2/
+  0.7/0.5) → "꽤 편안해…살짝 따뜻해지는". 9-dim 상태가 텍스트 차이와
+  상관 — I8 own-center 가 *실제 텍스트로* 발현된 첫 관찰.
+- ⚠️ **아키텍처 귀속 미증명**: C5 는 상태 + LLM 컨텍스트 3턴을 둘 다
+  가짐. 평범 LLM 도 컨텍스트로 비슷하게 가능 → *9-dim 상태 주입*이
+  원인인지 *dialogue 컨텍스트*인지 미분리. 엄밀 격리(상태 동결·컨텍스트
+  동일=C0')는 orchestrator 토글 필요 = slice 2b/오프-브랜치.
+- 코스메틱: Windows temp chroma 파일락(결과 출력 후) →
+  `ignore_cleanup_errors` fix. mood=nan 은 `_snap` 계측 버그(신호=9-dim
+  state, 결론 불변).
+
+**Status**: accepted. slice 1(메커니즘층: 경로의존1.73/유휴0.154/기질
+1.78, 결정론) + slice 2(행동층 1차: 본체 실행, 누적 내면이 텍스트에
+물듦 — *단 LLM-컨텍스트와 미분리*). "아키텍처=stateless 와 범주적
+다른 객체"는 확정, "그 상태가 텍스트를 *독자적으로* 바꾼다"는 엄밀
+귀속 미완(=slice 2b, orchestrator 수술, 오프-브랜치). **이로써
+eval-harness 브랜치는 자동화 가능 종착점 도달** — 다음은 슬라이스 추가가
+아니라 통합·머지(state-of-the-project "eval 트랙 로드맵" 참조).
+
+---
+
 ## Future ADRs (placeholder)
 
 다음과 같은 결정이 일어나면 ADR 를 append:

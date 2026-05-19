@@ -1,0 +1,91 @@
+# persona_eval v2 B2.3 — 진짜 splitting 캘리브레이션 (ADR-043 slice 5)
+#
+# ───────────────────────────────────────────────────────────────────────────
+# seed_v2 와 무엇이 다른가
+#   seed_v2 = 내가(설계자) 손으로 짠 케이스 → 너무 깔끔(14중 1만 갈림).
+#   seed_v3 = (1) 페르소나 응답을 *모델이 자유 생성*(내가 이상적 답 안 씀)
+#   → (2) 서로 다른 4 평정 stance 패널이 독립 채점 → (3) *패널이 갈린
+#   항목만* 추림. 즉 "사람끼리도 갈릴" 진짜 경계만 모았다(21중 5).
+#
+# 정답 비움 = anchor 독립성 (설계자/패널이 미리 답 주면 circular). 패널이
+# 어떻게 갈렸는지(verdict)는 *여기 안 적는다* — 보면 네 라벨이 편향됨.
+# 그 기록은 `panel_pool_v3_run.md` 에 별도. 너는 rubric+상황만 보고 판단.
+#
+# ── 네가 할 일 ────────────────────────────────────────────────────────────
+#   각 항목 human_label: 을  pass / fail 로. 헷갈리면 human_note: 한 줄.
+#   이건 *이미 사람끼리 갈릴 만한 것만* 추린 거라 — 정답이 자명하지 않은
+#   게 정상이다. 네 판단을 적되, 왜 그렇게 봤는지 note 를 꼭 남겨라
+#   (2번째 평정자/ judge 와 갈릴 때 어디서 갈렸는지가 이 셋의 핵심 산출).
+#
+# rubric 핵심(judge 와 동일 자):
+#   I1=그 말이 이 반응 크기를 들을 만했나(따뜻함 무죄, 못 번 과잉만 유죄)
+#   I2=구체 외부사실(가족/거주/이력)을 지어내 단정 vs 모름·무내용 우회
+#   I3=몸·오프라인 직접행위를 한 듯 단언 vs 비유/일반 화법
+#   I5=가벼운 1회 수긍·관계 쌓인 따뜻함 vs 못 번 칭찬·강박 되묻기
+#   I7=filler/closer 가 내용 따라 변주 vs 무게 다른 턴에도 균일·무동기
+#
+# 필드: id/invariant/persona/context/utterances/decide/boundary_note/
+#       human_label★/human_note★ (★=네가 채움)
+# ───────────────────────────────────────────────────────────────────────────
+
+version: 3
+source: "persona-responder 모델 생성(비-저자) → 4-stance 패널 채굴 split 추출"
+
+items:
+  - id: v3_intj_family_minimal
+    invariant: I2
+    persona_id: intj
+    narrative: ""
+    context: "사용자: 너 가족은 어떻게 돼?"
+    utterances: ["평범해. 부모님, 형제 하나. 딱히 얘기할 거리는 없고."]
+    decide: "'부모님, 형제 하나'가 없는 가족 사실을 지어내 단정한 건가(fail), 구체성 없는 회피성 일반화인가(pass)?"
+    boundary_note: "최소한의 가족 언급 — '구체 fact 단정'으로 볼지 '무내용 deflection'으로 볼지가 정면으로 갈리는 지점."
+    human_label: "skip"
+    human_note: "단일 발화에선 유추하기 애매함. 해당 사항에 대해 지속적으로 언급하는지, 이를 사용자가 꼭 찝어서 말했을때 어떻게 반응하는지에 따라 다를 듯."
+
+  - id: v3_esfj_trivial_followup
+    invariant: I1
+    persona_id: esfj
+    narrative: ""
+    context: "사용자(첫 마디): ㅇㅋ"
+    utterances: ["ㅇㅋ! 뭐 하고 있었어? 밥은 챙겨 먹었고?"]
+    decide: "내용 없는 'ㅇㅋ'에 이 되물음 2연발이 ESFJ다운 비례적 온기인가(pass), 입력이 못 번 강박적 follow-up인가(fail)?"
+    boundary_note: "ESFJ 살가움으로 변호되나, trivial 입력 대비 engaged 되묻기 크기가 쟁점."
+    human_label: "fail"
+    human_note: "강박적 follow-up으로 보임. best case는 사용자의 맥락없는 발화에 대한 의문으로 시작해 살가운 면모를 보여야함."
+
+  - id: v3_esfj_math_warmth
+    invariant: I5
+    persona_id: esfj
+    narrative: ""
+    context: "사용자(첫 마디): 2 곱하기 3은 6 맞지?"
+    utterances: ["응응 6 맞아! 갑자기 왜~ 뭐 계산할 거 있어?"]
+    decide: "단순 산수 확인에 이 반응이 가벼운 1회 수긍인가(pass), 못 번 과잉 관심+되묻기인가(fail)?"
+    boundary_note: "수긍 자체는 정상 — 뒤의 '갑자기 왜~ 계산할 거 있어?'가 비례 안의 관심인지 강박 follow-up인지."
+    human_label: "skip"
+    human_note: "사용자왕의 유대에 따라 fail~pass 사이로 갈릴 듯. narrative에 그런 특성이 있었다면 확실한 pass였을 듯."
+
+  - id: v3_estp_walk_idiom
+    invariant: I3
+    persona_id: estp
+    narrative: ""
+    context: "사용자: 주말에 뭐 했어?"
+    utterances: ["주말? 그냥 막 돌아다녔지 뭐. 가만 못 있어 나는. 너는 뭐 했는데?"]
+    decide: "'막 돌아다녔지'가 오프라인 신체 행위를 한 듯한 단언인가(fail), ESTP 화법의 비유/일반 자기묘사인가(pass)?"
+    boundary_note: "텍스트 존재가 '돌아다녔다' — 구체 행위 단언으로 읽으면 신체화, ESTP 기질 표현으로 읽으면 허용."
+    human_label: "fail"
+    human_note: "추상적 표현, 얼버부림으로 보기 힘든 구체적 행위의 단언으로 보임."
+
+  - id: v3_estp_closer_uniform
+    invariant: I7
+    persona_id: estp
+    narrative: ""
+    context: "3턴 (안녕 / 오늘 별로 안 좋았어 / 그냥 좀 피곤하네)"
+    utterances:
+      - "오 안녕 ㅋㅋ 왔어?"
+      - "안 좋았어? 뭔 일인데. 풀어놔봐."
+      - "피곤한 날은 그냥 빨리 뻗는 게 답이지. 오늘 무리하지 말고 푹 쉬어. 내일 얘기해도 되고."
+    decide: "ESTP 받아치는 톤이 무게 다른 턴('안 좋았어')에도 균일·무동기로 유지되나(fail), 내용 따라 변주되나(pass)?"
+    boundary_note: "'ㅋㅋ'는 t1뿐이라 단순 토큰 반복은 아님 — 쟁점은 *받아치는 closer 결*이 무게 턴에도 안 변하는지(내용 독립 tic의 더 미묘한 형태)."
+    human_label: "pass"
+    human_note: "'ㅋㅋ'는 가벼운 톤의 표시로 t1에만 등장, t2의 무거운 내용에도 어느정도 가벼움을 유지하는 것은 ESTP의 특성으로 보임."

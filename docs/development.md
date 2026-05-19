@@ -69,6 +69,20 @@ tests: cover trigger evaluation, reappraisal depth limit, dmn/maintenance turn p
 
 `git log --oneline | grep "Merge wave"` 로 모든 wave 경계를 한눈에 본다.
 
+### Non-wave 트랙 (eval-harness)
+
+인지아키텍처 고도화가 아닌 *평가 인프라* 작업은 wave 가 아니라 별도 토픽
+브랜치로 분리한다 (ADR-041). 현재: `eval-harness/persona-eval-v2` —
+persona_eval v2(검증된 우상향 하니스) 설계/구현 트랙. 정본
+[`persona-eval-v2.md`](persona-eval-v2.md).
+
+**평가 트랙 hard rule**: `persona_eval` 의 변경이 "개선(우상향)"으로
+카운트되려면 ΔPASS > k·SD (PERSIST permutation robustness) 를 만족해야
+하고, judge 점수는 judge-free 2차 축(DNLI C-score) + human κ 와의
+triangulation 으로 *검증된 상태*여야 한다. persona_eval 전체 스코프
+(11×21) 실행은 이 judge-triangulation 통과를 *선행조건*으로 한다
+(미검증 judge 의 100분/비용 실행 금지 — ADR-040/041).
+
 ## Branches & releases (ADR-008)
 
 두 트랙 분리:
