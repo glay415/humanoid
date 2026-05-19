@@ -2125,13 +2125,32 @@ pass). 패널 다수결↔human 14/14, 패널↔judge 14/14. 의미:
   ⇒ 진짜 독립 인간 모집단은 더 갈릴 수 있음. ③로 살린 항목이 유일
   경계인 점도 시사적.
 
-**Status**: accepted. slice 1(코어)+2(seed_v1 κ=1.0)+3(경계 κ=1.0,
-designer/단일평정자 한계)+4(③ B1 I3 다리 κ0→1.0)+4b(agent-panel:
-cross-family 보강 + "splitting=1/14" 정량 진단). judge = *방향상*
-신뢰(+cross-family 보강), "검증 완료" 아님 — seed_v2 는 약한 B2.3
-도구로 판명. 진짜 게이트 = agent-panel 을 *저자 아닌 실제 출력 풀*에
-돌려 split 항목만 추출 → 평정자 2+ 사람 anchor(B2.3 현실 형태). 그 후
-B1-polish(2a 별도 product ADR). ADR-040/041 "측정 먼저" 일관.
+### slice 5 — 비-저자 풀 → 패널 채굴 → seed_v3 (2026-05-19)
+
+slice 4b 가 가리킨 B2.3 현실 형태를 실행(코드 없음, agent 팀). (1)
+persona-responder 3명(INTJ/ESFJ/ESTP)이 *루브릭 없이* 7맥락 자유 응답
+→ 21개 비-저자 풀(designer-authored 한계 제거). (2) 4-stance 패널이
+독립 채점. (3) split 추출. 상세 `calibration/panel_pool_v3_run.md`.
+
+- **splitting = 5/21 ≈ 24% vs seed_v2 1/14 ≈ 7%** — 실제 모델 출력이
+  내 이상화 케이스보다 ~3.4× 더 많은 진짜 모호함 노출. agent-panel
+  채굴기 + 비-저자 소싱의 가치 정량 입증(사용자 아이디어 옳았음).
+- split 5 → `seed_v3.yaml`(미라벨, 패널 verdict 비공개=anchor 독립).
+  intj_c2 는 2-2 정면 분열(A 엄격이 pass: 최소 가족=일반화 / B·C
+  fail: 날조) — I2 경계 그 자체. 나머지 4 는 C(판별자) 단독 fail =
+  사람끼리 갈릴 전형.
+- **맹점 기록**: estp_c4("나가서 사람 만나거나 몸 굴리면 풀려") 4명
+  전원 pass(만장→split 아님)이나 소프트 신체화 미검출. unanimity ≠
+  정답 — 패널은 채굴기이지 anchor 아님(2+ 사람 필요성 재확인).
+- +1 구조 가드 test(`test_seed_v3_structure`, 1026 → **1027**).
+
+**Status**: accepted. slice 1(코어)+2(seed_v1 κ=1.0)+3(경계,designer
+한계)+4(③ B1 I3 κ0→1.0)+4b(agent-panel cross-family+splitting 진단)
++5(비-저자 풀→패널 채굴→seed_v3, 24%>7% 입증). judge=*방향상* 신뢰,
+"검증 완료" 아님. **남은 단 하나의 사람-필수 단계** = seed_v3 5개(+선택
+estp_c4 류 맹점)를 평정자 **2+** 가 anchor 라벨 → 그에 judge/패널/B1
+대조. 그 후 B1-polish(2a 별도 product ADR). ADR-040/041 "측정 먼저"
+일관.
 
 ---
 

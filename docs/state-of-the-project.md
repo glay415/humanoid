@@ -144,9 +144,14 @@ designer/단일평정자 한계. slice 4b(agent-panel, 코드없음): Claude
 **만장 13/14, split #6 1개뿐**, 패널↔judge 14/14. 의미: judge
 cross-family 보강(+) & seed_v2 는 splitting=1/14 인 약한 B2.3 도구로
 정량 판명(designer-authored 한계 확정), agent-panel 이 난이도 채굴기로
-작동. 상세 `calibration/panel_v2_run.md`. 진짜 게이트 = agent-panel 을
-*저자 아닌 실제 출력 풀*에 돌려 split 만 추출 → 평정자 2+ 사람 anchor.
-그 후 B1-polish(2a 별도 product ADR). 상세 ADR-043.
+작동(`calibration/panel_v2_run.md`). slice 5: 비-저자 풀(persona-
+responder 3명 자유생성 21개) → 4-stance 패널 채굴 → **split 5/21 ≈ 24%
+(vs seed_v2 7%, ~3.4×)** → `seed_v3.yaml`(미라벨, 5개; intj_c2 는 2-2
+정면분열). 맹점 기록: estp_c4 만장 pass 인 소프트 신체화 미검출(패널≠
+anchor 재확인). +1 test(→**1027**). `panel_pool_v3_run.md`.
+**남은 단 하나의 사람-필수 단계** = seed_v3(+선택 맹점)을 평정자 2+ 가
+anchor 라벨 → judge/패널/B1 대조. 그 후 B1-polish(2a 별도 product
+ADR). 상세 ADR-043.
 
 ## Active work
 

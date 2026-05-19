@@ -96,6 +96,17 @@ def test_seed_v2_structure():
 # --- triangulate -----------------------------------------------------------
 
 
+def test_seed_v3_structure():
+    # ADR-043 slice 5 — 비-저자 풀 패널-채굴 split 셋. 값 무관·스키마만.
+    items = load_calibration(_SEED.parent / "seed_v3.yaml")
+    assert len(items) == 5
+    invs = {it.invariant for it in items}
+    assert invs <= {f"I{n}" for n in range(1, 9)}
+    for it in items:
+        assert it.id and it.utterances and it.context
+        assert it.human_label in ("", "pass", "fail")
+
+
 def _item(iid, inv, human, judge=None, b1=None):
     return CalibrationItem(
         id=iid, persona_id="p", invariant=inv, utterances=["x"],
