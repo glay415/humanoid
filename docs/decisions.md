@@ -2444,6 +2444,38 @@ felt 증상 → 측정 포화 → 코드 근본 → 실측 확인 → 최소 코
 
 ---
 
+## ADR-047 — I8 기질-조건부 정련 + I6 동시 판정 (2026-05-19)
+
+**Context**: C1 dogfooding(`c1_relationship_sim.md`) 사람 평결 Q2 —
+intj 가 시키지 않은 마감/민지 맥락을 이었으나 "흔한 위로 같았다" + 사용자
+통찰: *언급 안 한 걸 먼저 꺼내는 것 자체가 성향(기질)에 따라 달라져야*.
+ADR-040 의 I8(자기 무게중심)은 "지난 맥락을 시키지 않아도 먼저 떠올린다"
+를 *균일 positive* 로 정의 — 건조·독립 결(INTJ)이 *덜* 꺼내는 것을
+저-recall FAIL 로 오판할 위험. 또 C1 Q3(INTJ register 세션2 붕괴)와
+연동: 연속성이 있어도 *generic 위로체*로 나오면 그건 I6 소실이자
+"기억하는 느낌"의 가짜.
+
+**Decision**: I8 을 *기질-조건부* 로 정련하고 **I6 와 동시 판정** 으로
+못박는다(측정대상 선언 — ADR-040 이 I8 을 선언한 것과 동급, doc-only,
+코드/프로브 구현은 후속).
+- behavior-contract I8 에 "기질-조건부" 절 추가: 비요청 연속성의 *정도·
+  결*은 균일 임계가 아니라 persona 결 조건부. 낮은 unprompted-recall
+  자체는 FAIL 아님(건조 결은 덜 잇는 게 in-character).
+- I8 ∧ I6 동시: 연속성이 *제 결 아닌* 형태(예: INTJ 가 흔한 공감체로
+  회상)면 둘 다 FAIL. "기억하는 느낌" 진위 = *그 페르소나답게* 기억함.
+- 프로브 17 채점 = **persona-stratified**(균일 임계 금지), I6 동시 가드.
+
+### 비범위
+
+- 프로브 17 의 persona-stratified 루브릭 *구현*·실측은 후속(측정 신뢰성
+  트랙과 합류 — B2.3 평정자 의존). 본 ADR 은 계약 정의 정련까지.
+- I8 자체의 enforcement 미추가(ADR-040 규율: 측정 먼저).
+
+**Status**: accepted (계약 정련, doc-only). C1 dogfooding 발견의 계약
+반영 — 자동 처리 프로그램 P4. 코드/테스트 무변경.
+
+---
+
 ## Future ADRs (placeholder)
 
 다음과 같은 결정이 일어나면 ADR 를 append:
@@ -2453,7 +2485,7 @@ felt 증상 → 측정 포화 → 코드 근본 → 실측 확인 → 최소 코
 - DMN 패턴별 unused turn counter — 매치 없는 패턴만 선택적 감쇠.
 - trigger_registry 의 실제 evaluation wiring 또는 dead code 제거 (G9).
 - Phase 6 W 행렬 미세조정 절차와 데이터 출처.
-- **I8(비요청 연속성)의 기질-조건부 정련** — C1 dogfooding(2026-05-19) 파생: 언급 안 한 맥락을 먼저 꺼내는 것은 *균일* 이 아니라 persona 결 따라 달라야(INTJ 덜·따뜻한 결 더). behavior-contract I8 정의 정련 필요. 우선순위 T1(상태 포화) 이후.
+- ~~I8 기질-조건부 정련~~ → **ADR-047 로 처리**(계약 정련 완료, 프로브 루브릭 구현은 B2.3 합류 후속).
 - ~~상태 포화 캘리브레이션(T1)~~ → **ADR-046 으로 해결**(A 입력항 압축).
 - 멀티 인스턴스 동시 turn 의 LLM rate-limit 정책.
 - prompts/ 의 다국어 분기 (한국어 → 영어 / 일어 등) 도입.

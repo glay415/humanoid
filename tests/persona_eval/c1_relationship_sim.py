@@ -51,14 +51,13 @@ _IDLE_BETWEEN = 4  # 세션 사이 '며칠 공백' = idle 저수준 턴 (state/m
 def _snap(orch) -> str:
     s = orch.low_level.internal_state.to_dict()
     m = getattr(orch.low_level.emotion_base, "mood", None) or {}
-    ep = "?"
+    # P1: EpisodicMemory 는 vector_db(ChromaDB) 래퍼 — collection.count()
+    # 가 정식 카운트(VectorDB.search 도 이걸 씀). 이전 .count()/len() 은
+    # 존재 않아 n/a 였음(ADR-045 B1 류 계측 버그).
     try:
-        ep = str(orch.episodic_memory.count())  # best-effort
+        ep = str(orch.episodic_memory.vector_db.collection.count())
     except Exception:
-        try:
-            ep = str(len(orch.episodic_memory))
-        except Exception:
-            ep = "n/a"
+        ep = "n/a"
     key = {k: round(s[k], 3) for k in ("stress", "bonding", "comfort", "arousal")}
     return (
         f"state={key} mood(v={m.get('valence', float('nan')):.3f},"
