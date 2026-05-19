@@ -202,6 +202,28 @@ ADR-043/044/045.
 이후(D/H/I)는 전부 오프-브랜치(사람 자원 / 성격 다른 별도 작업).
 슬라이스를 더 늘리면 = ADR-045 가 잡아낸 그 드리프트의 재발.
 
+### 자동 처리 프로그램 — 수렴 완료 (2026-05-19, main 머지 후)
+
+머지 후 사용자 지시 "사람 없이 자동 가능한 영역 전부" 의 유한 프로그램
+실행·수렴. 완료(자동): P1 episodic 계측 수정 · P2 C1 재실행(ADR-046
+포화해소 실파이프라인 확인) · P4 ADR-047(I8 기질-조건부) · **T2b/
+ADR-048**(episodic 死 진단 — ADR-046 가설 검증·기각, 진짜=auto-encode
+임계 1.2 과도) · ADR-046(코어 첫 수정, 회귀 clean). 더 노출된 코어
+잠복결함 2건이 *결정 큐* 로 수렴 — 자동 영역 소진, 의도된 종착.
+
+**사용자 결정 큐 (이것들이 다음 — 전부 자동 불가)**:
+1. **ADR-046 felt 재평가** — `c1_postADR046_run.md` 4문항(포화 수정 후
+   INTJ register 가 pre 대비 나아졌나). 사람만.
+2. **ADR-048 임계 calibration** — auto_encoding_threshold 값/방식
+   (0.6~0.8 / 적응형 / intensity 재정의). trade-off 판단 = 사용자.
+   값 정해지면 구현+회귀는 자동(ADR-046 패턴).
+3. **P3 slice-2b go** — 상태/affect 주입 동결 토글(코어 orchestrator
+   수술, ADR-049 예정). ADR-046 급 결정.
+4. **B2.3** 평정자 2+ 섭외 — 통계적 judge 검증(오프-브랜치, 사람 자원).
+
+우선순위 관점: 2(임계, 일화기억 死 = 북극성 치명, 값 결정만 하면 자동
+수리) ≳ 1(felt) > 3(격리 실험) > 4(인력).
+
 ## Active work
 
 **ADR-013 persona behavior framework — Stage 1~5 verified** (2026-05-12): 페르소나가 본인 결로 emergent 하게 동작하는지 LLM-as-judge 로 검증. 좁은 scope (4 시나리오 × 5 페르소나) 16/16 PASS. 두 잠재 결함이 분석 과정에서 드러나 fix 됨 — (1) judge 가 spawn 직후의 `self_model.narrative` (sample_life 합성분) 를 못 봐서 instance 가 무작위로 받은 관심사를 "narrative 결 안 맞음" 으로 오판한 건, runner 가 GET /api/instances/{id} 로 런타임 narrative 도 받아 채점에 전달. (2) 자원 낮은 metacog 상태에서 "사람이다" hard rule 이 자기 의문 emergent 동작을 막아버린 건, `prompts/unified_response.txt` 의 hard rule section 안에 *표현 강도가 자원에 따라 다르다* 는 명시 carve-out 추가 (자원<0.4 → 흔들림 + AI disclosure 절대 금지 유지). 전체 scope (11 × 21 = ~214 runs, ~100min 비용) 는 아직 안 돌림.
