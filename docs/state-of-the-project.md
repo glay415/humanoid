@@ -172,6 +172,36 @@ free·결정론·LLM 0, `test_architecture_state_dynamics.py` 4 test →
 아키텍처에 겨눔, orchestrator 수술). `b5_mechanism_run.md`. 상세
 ADR-043/044/045.
 
+### eval 트랙 로드맵 / 종료조건 (`eval-harness/persona-eval-v2`)
+
+이 브랜치 = "humanoid 가 북극성을 주는지 *믿을 수 있게 측정*하는 장치"
++ "아키텍처가 vanilla 프롬프트 대비 무엇을 더하나" 1차 답. *측정
+인프라* 트랙(아키텍처 개발 아님).
+
+| 구성 | 상태 |
+|---|---|
+| A 목표·계약 정의(북극성/I1~I8/문헌) | 완료 |
+| B B1 judge-free 축(FP 0) | 완료 |
+| C B2 triangulation 코어(κ, seed_v1/v3) | 완료 |
+| D **B2.3 통계적 신뢰 judge(평정자 2명+)** | ⛔ 사람 자원 차단(오프-브랜치) |
+| E ADR-044 well-posed 프로브(skip 2/5→0/12) | 완료(위반 discriminate 는 별개 갭) |
+| F B5 메커니즘층(경로의존/유휴/기질, 결정론) | 완료 |
+| G B5 행동층 1차(본체 실행, 누적 내면→텍스트) | 완료(아키텍처 귀속은 미분리) |
+| H B1-polish(2a) | 별도 product ADR(backlog) |
+| I graded C1~C4 토글 / slice 2b 엄밀 격리 | 미착수 — orchestrator 수술(오프-브랜치) |
+| J main 머지 | 미실행(ADR-040~045 한 덩이) |
+
+**브랜치 종착점(두 가지, 혼동 금지)**:
+1. *자동화 가능한 끝(이 브랜치)* = 측정 장치 완성 + 아키텍처 메커니즘
+   확정 + 행동층 1차 관찰. **→ 도달함.** 남은 건 통합 + J(머지 결정)뿐.
+2. *thesis 의 끝* = "humanoid 가 북극성을 주는가, 통계적으로". D(평정자
+   2+)·frame-B 종단연구에 막혀 *이 브랜치로 못 끝냄* — 별도 연구
+   프로그램.
+
+**이 브랜치에 문자 그대로 남은 것**: 통합·정리 + **J 머지 결정**. 그
+이후(D/H/I)는 전부 오프-브랜치(사람 자원 / 성격 다른 별도 작업).
+슬라이스를 더 늘리면 = ADR-045 가 잡아낸 그 드리프트의 재발.
+
 ## Active work
 
 **ADR-013 persona behavior framework — Stage 1~5 verified** (2026-05-12): 페르소나가 본인 결로 emergent 하게 동작하는지 LLM-as-judge 로 검증. 좁은 scope (4 시나리오 × 5 페르소나) 16/16 PASS. 두 잠재 결함이 분석 과정에서 드러나 fix 됨 — (1) judge 가 spawn 직후의 `self_model.narrative` (sample_life 합성분) 를 못 봐서 instance 가 무작위로 받은 관심사를 "narrative 결 안 맞음" 으로 오판한 건, runner 가 GET /api/instances/{id} 로 런타임 narrative 도 받아 채점에 전달. (2) 자원 낮은 metacog 상태에서 "사람이다" hard rule 이 자기 의문 emergent 동작을 막아버린 건, `prompts/unified_response.txt` 의 hard rule section 안에 *표현 강도가 자원에 따라 다르다* 는 명시 carve-out 추가 (자원<0.4 → 흔들림 + AI disclosure 절대 금지 유지). 전체 scope (11 × 21 = ~214 runs, ~100min 비용) 는 아직 안 돌림.

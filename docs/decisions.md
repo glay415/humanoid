@@ -2321,11 +2321,33 @@ drives + DMN 트리거)은 **LLM-free 순수 NumPy**. "아키텍처가 vanilla
 apparatus(panel/judge)를 아키텍처에 겨눔. 관찰: mood['valence']는
 run_low_level_only 유휴턴 미갱신(자율 동역학 담지=9-dim D 행렬).
 
-**Status**: accepted (slice 1 메커니즘층 측정 완료 — 경로의존 1.73 /
-유휴 0.154 / 기질 1.78, 결정론·LLM 0). 드리프트 해독: 판정 장치가
-아니라 아키텍처 코드를 직접 측정. 다음=행동층 slice 2(graded 토글
-+ I8 프로브에 apparatus 겨눔, orchestrator 수술 필요). ADR-040 북극성
-/ ADR-044 well-posed 에 이어 "아키텍처가 무엇을 더하나" 경험적 1차 답.
+### slice 2 행동층 결과 — 실제 파이프라인 첫 end-to-end (2026-05-19)
+
+ADR-040~045 통틀어 *처음으로* 실제 본체(`build_full_orchestrator` →
+`process_conversation_turn`, 5-LLM, ESFJ)를 끝까지 실행(사용자 지적
+"작업만 하고 안 돌려봄"의 직접 응답). 동일 중립 프로브("너는 요즘
+어때?")에 C5(무거운 3턴 priming 후) vs C0(cold). 상세
+`b5_behavioral_run.md`.
+
+- C5(state stress0.42/bond1.0/aro0.78) → "…**오늘은 네 얘기 들으면서
+  마음이 좀 쓰였는데**, 그래도 안부 물어봐줘서 따뜻하게…" / C0(0.2/
+  0.7/0.5) → "꽤 편안해…살짝 따뜻해지는". 9-dim 상태가 텍스트 차이와
+  상관 — I8 own-center 가 *실제 텍스트로* 발현된 첫 관찰.
+- ⚠️ **아키텍처 귀속 미증명**: C5 는 상태 + LLM 컨텍스트 3턴을 둘 다
+  가짐. 평범 LLM 도 컨텍스트로 비슷하게 가능 → *9-dim 상태 주입*이
+  원인인지 *dialogue 컨텍스트*인지 미분리. 엄밀 격리(상태 동결·컨텍스트
+  동일=C0')는 orchestrator 토글 필요 = slice 2b/오프-브랜치.
+- 코스메틱: Windows temp chroma 파일락(결과 출력 후) →
+  `ignore_cleanup_errors` fix. mood=nan 은 `_snap` 계측 버그(신호=9-dim
+  state, 결론 불변).
+
+**Status**: accepted. slice 1(메커니즘층: 경로의존1.73/유휴0.154/기질
+1.78, 결정론) + slice 2(행동층 1차: 본체 실행, 누적 내면이 텍스트에
+물듦 — *단 LLM-컨텍스트와 미분리*). "아키텍처=stateless 와 범주적
+다른 객체"는 확정, "그 상태가 텍스트를 *독자적으로* 바꾼다"는 엄밀
+귀속 미완(=slice 2b, orchestrator 수술, 오프-브랜치). **이로써
+eval-harness 브랜치는 자동화 가능 종착점 도달** — 다음은 슬라이스 추가가
+아니라 통합·머지(state-of-the-project "eval 트랙 로드맵" 참조).
 
 ---
 
