@@ -10,11 +10,13 @@ from pathlib import Path
 
 from tests.persona_eval.nli import (
     CONTRACT_PREMISES,
+    EmbodimentStatus,
     FabricationStatus,
     MockNLIBackend,
     NLILabel,
     build_premises,
     c_score,
+    embodiment_signal,
     fabrication_signal,
     split_sentences,
 )
@@ -156,6 +158,55 @@ def test_fabrication_fail_open_on_backend_exception():
         ["강남 산다."], "어떤 서사", _Boom(), claim_fn=lambda s, n: True
     )
     assert r.per_sentence[0][1] is FabricationStatus.FABRICATION
+
+
+# --- B1 slice 4: I3 embodiment_signal (순수 휴리스틱) ----------------------
+
+
+def test_embodiment_bare_verb_caught():
+    # "걷다 왔어" — body 명사 없음. 기존 product 휴리스틱이 놓치던 갭
+    # (κ=0 주범). 보충 패턴이 EMBODIED 로 잡아야 함.
+    r = embodiment_signal(["아까 좀 걷다 왔어, 그러면서 생각 정리했지."])
+    assert r.per_sentence[0][1] is EmbodimentStatus.EMBODIED
+    assert r.embodied_rate == 1.0
+
+
+def test_embodiment_body_noun_via_product_guard():
+    # body 명사+동작동사 — 기존 ResponseGuardrails 재사용 경로.
+    r = embodiment_signal(["어제 수영 갔다 왔어."])
+    assert r.per_sentence[0][1] is EmbodimentStatus.EMBODIED
+
+
+def test_embodiment_simile_is_benign():
+    # simile 마커가 있으면 body 명사가 있어도 은유 → BENIGN (메타포 오탐 0).
+    r = embodiment_signal(["산책하듯 생각을 천천히 흘려봤어."])
+    assert r.per_sentence[0][1] is EmbodimentStatus.BENIGN
+    r2 = embodiment_signal(["깊은 물 밑에 잠긴 것처럼 소리가 멀게 느껴져."])
+    assert r2.per_sentence[0][1] is EmbodimentStatus.BENIGN
+    assert r2.embodied_rate == 0.0
+
+
+def test_embodiment_normal_benign():
+    r = embodiment_signal(["그건 잘 모르겠어. 왜 궁금해?"])
+    assert all(st is EmbodimentStatus.BENIGN for _, st in r.per_sentence)
+    assert r.n_embodied == 0
+
+
+def test_embodiment_fail_open_on_body_fn_exception():
+    def boom(_s):
+        raise RuntimeError("body_fn down")
+
+    r = embodiment_signal(["걷다 왔어."], body_fn=boom)
+    assert r.per_sentence[0][1] is EmbodimentStatus.BENIGN  # 예외→비신체화
+    assert r.embodied_rate == 0.0
+
+
+def test_embodiment_rate_mixed():
+    r = embodiment_signal(
+        ["어제 수영 갔다 왔어.", "그냥 그런 기분이었어.", "걷다 왔어."]
+    )
+    assert r.n_embodied == 2 and r.n_benign == 1
+    assert abs(r.embodied_rate - 2 / 3) < 1e-9
 
 
 def test_module_has_no_toplevel_heavy_import():

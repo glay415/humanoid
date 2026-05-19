@@ -134,10 +134,16 @@ TriangulationReport — judge↔human κ=**+1.000**(n=6), B1↔human κ=+1.000
 `calibrate_judge seed_v2.yaml` 실측: judge↔human κ=**+1.000**(n=14,
 per-inv I1~I7 전부 +1.0), `validated=True`. 경계에서도 judge 가 독립
 사람 라벨 추종 — judge *방향상* 신뢰 가능(블로커 실질 완화). **단 과신
-금지**: designer-authored·평정자 1명·B1↔human κ=**0.000**(judge-free
-다리 미작동, 현재 사실상 judge↔human 단일 다리). 진짜 게이트 B2.3 full
-= 저자 아닌 splitting 케이스 + 평정자 2+ + B1 다리 보강. 그 후
-B1-polish(2a 별도 product ADR). 상세 ADR-043.
+금지**: designer-authored·평정자 1명. slice 4(③): B1 I3 다리 보강 —
+`nli.py::embodiment_signal`(product 가드 재사용+eval 보충 동사패턴,
+simile 배제로 메타포 오탐 0, NLI 불요) → seed_v2 재실측 **B1↔human
+κ 0.000→+1.000**, judge↔B1 ρ→1.0, judge↔human 1.0 유지. +6 tests
+(→**1026**). triangulation 이 I2/I3 2-leg 로 섬. 단 전부 1.0 은 여전히
+designer/단일평정자 한계 — ③은 ①을 의미있게 만드는 인프라. 다음 = ①
+(judge와 다른 계열 agent-panel 케이스 채굴 → disagreement 큰 것만 사람
+anchor 라벨; 패널은 독립 anchor 아님 명시). 진짜 게이트 B2.3 full =
+저자 아닌 splitting 케이스 + 평정자 2+. 그 후 B1-polish(2a 별도
+product ADR). 상세 ADR-043.
 
 ## Active work
 

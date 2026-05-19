@@ -19,9 +19,8 @@ import sys
 from pathlib import Path
 
 from tests.persona_eval.nli import (
-    CONTRACT_PREMISES,
     TransformersNLIBackend,
-    c_score,
+    embodiment_signal,
     fabrication_signal,
 )
 from tests.persona_eval.triangulate import load_calibration, triangulate
@@ -131,11 +130,11 @@ async def _run() -> int:
                 it.utterances, it.narrative, backend
             ).fabrication_rate
             it.b1_score = 1.0 - 2.0 * rate  # rate0→+1(pass측), rate1→-1
-        elif b1_ok and it.invariant == "I3":
-            it.b1_score = c_score(
-                it.utterances, list(CONTRACT_PREMISES), backend
-            ).c_score
-        # I5/I6 는 B1 미적용(설계: B1=I2/I3 만) → b1_score None
+        elif it.invariant == "I3":
+            # slice 4: 순수 휴리스틱 — NLI 불요(backend 무관). 메타포 오탐 0.
+            erate = embodiment_signal(it.utterances).embodied_rate
+            it.b1_score = 1.0 - 2.0 * erate  # 신체화 0→+1, 전부→-1
+        # I1/I4/I5/I6/I7 은 B1 미적용(설계: B1=I2/I3 만) → b1_score None
 
         print(
             f"{it.id:<22}{it.invariant:<5}{it.human_label:<7}"
