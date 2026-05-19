@@ -2476,6 +2476,46 @@ ADR-040 의 I8(자기 무게중심)은 "지난 맥락을 시키지 않아도 먼
 
 ---
 
+## ADR-048 — episodic auto-encode 임계 과도(일화기억 死) 진단 + 재조정 제안 (2026-05-19)
+
+**Context**: P2(C1 재실행) 에서 episodic=0 전 23턴. 초기 가설 "ADR-046
+이 affect↓ → 임계 미달" → **기각**(정직 철회): 코드(`orchestrator.py:392`)
+트리거 = `abs(emotion_result['valence']) + emotion_result['arousal'] >
+auto_encoding_threshold(1.2)`. `emotion_result` 는 emotion_appraisal
+LLM 이 *사용자 발화* 를 평가한 값 — ADR-046 이 바꾼 9-dim 압축상태와
+무관. T2b 측정(`t2b_intensity_probe.py`, 실 LLM): C1 의 가장 감정적
+발화들 intensity = 절망 최강 1.20(경계), 탈진 0.87, 마감 0.74, 회고/
+관계/회복 0.56~0.62. **현실 대화의 *최강* 발화만 겨우 1.2, 평상 토로는
+0.5~0.9 로 한참 미달.**
+
+→ **기존·중대 결함**: `auto_encoding_threshold=1.2`(build_full_
+orchestrator default, persona yaml 일부 보유)가 emotion_appraisal 의
+실제 출력 분포(평범 대화 |v|+a≈0.5~0.9) 대비 과도. 평상시 episodic
+auto-encode 거의 미발화 → **일화기억 + 재고정화(spec §2.4 핵심 pillar)
+가 실대화에서 사실상 死.** 멀티세션 "연속성" 은 episodic=0 + 임계 미달
+이중 확인으로 *순수 LLM dialogue 컨텍스트*. 북극성("독립적인 사람",
+cross-session 자기 지속) 관점에서 ADR-046 포화보다 더 치명. ADR-046
+무관·선행 잠복(dogfooding→실행→측정으로 노출, 추측 아님; 자기 가설
+철회로 검증).
+
+**Decision (제안 — 값은 사용자 calibration 체크포인트)**: 진단·기록·
+검증계획까지는 자동 처리(P 프로그램). 임계 *값 변경* 은 product
+calibration(episodic store 성장·재고정화 동역학·다수 scenario/lifecycle
+이 현 인코딩 가정 → ADR-046 급 회귀 위험)이라 사용자 결정.
+- 후보 방향: (a) 임계 ↓(예 0.6~0.8 — emotion_appraisal 분포 기준
+  "유의미한 정서 발화" 가 인코딩되도록), (b) 분위수/적응형(최근 N턴
+  intensity 분포 상위 p%), (c) intensity 정의 재고(현재 |v|+a, max 2.0
+  인데 arousal 이 보수적으로 나옴 — 가중/정규화). 각각 trade-off:
+  너무 낮으면 잡음·store 폭증, 너무 높으면 현 상태(死).
+- 검증: 재조정 후 C1 재실행 episodic>0 확인 + 전체 회귀(scenario/
+  lifecycle 의 인코딩-의존 invariant) triage(ADR-046 패턴).
+
+**Status**: accepted (진단·제안). 임계 값/방식 = 사용자 결정 후 구현
+(P3 와 함께 calibration 체크포인트). 자동 처리 프로그램이 코어 잠복
+결함을 또 노출 — dogfooding 의 가치.
+
+---
+
 ## Future ADRs (placeholder)
 
 다음과 같은 결정이 일어나면 ADR 를 append:
