@@ -2318,8 +2318,9 @@ drives + DMN 트리거)은 **LLM-free 순수 NumPy**. "아키텍처가 vanilla
 **정직한 경계**: 메커니즘층은 "아키텍처=stateless 프롬프트와 범주적
 다른 *객체*" 확정(다소 정의적). *그 상태가 생성 텍스트를 더 사람답게/
 독립적으로 바꾸는가*(I8 own-center)는 미증명 = 행동층(slice 2). 거기서
-apparatus(panel/judge)를 아키텍처에 겨눔. 관찰: mood['valence']는
-run_low_level_only 유휴턴 미갱신(자율 동역학 담지=9-dim D 행렬).
+apparatus(panel/judge)를 아키텍처에 겨눔. (※ slice-1 의 "mood 유휴
+미갱신" 주석은 후술 B1 정정 참조 — 우리 측정 버그였고 mood 는 정상
+적분됨.)
 
 ### slice 2 행동층 결과 — 실제 파이프라인 첫 end-to-end (2026-05-19)
 
@@ -2338,8 +2339,30 @@ ADR-040~045 통틀어 *처음으로* 실제 본체(`build_full_orchestrator` →
   원인인지 *dialogue 컨텍스트*인지 미분리. 엄밀 격리(상태 동결·컨텍스트
   동일=C0')는 orchestrator 토글 필요 = slice 2b/오프-브랜치.
 - 코스메틱: Windows temp chroma 파일락(결과 출력 후) →
-  `ignore_cleanup_errors` fix. mood=nan 은 `_snap` 계측 버그(신호=9-dim
-  state, 결론 불변).
+  `ignore_cleanup_errors` fix. mood=nan 은 `_snap` 계측 버그 → B1 정정.
+
+### B1 정정 — "mood 유휴 동결/nan" 은 우리 측정 버그였음 (2026-05-19)
+
+slice-1·2 의 mood 관련 주석을 추적(사용자 "작업만 하고 안 돌려봄"
+지적의 연장 — B1)한 결과: **아키텍처 버그 아님. 우리 eval/계측 코드의
+버그였고 거짓 주석이 4 산출물에 전파됐다.**
+- 원인: `low_level/emotion_base.py` 의 `mood`/`raw_core_affect` 는
+  in-place mutate 되는 *단일 dict*. slice-1 테스트가 턴마다 `r['mood']`
+  *참조*를 모아 traj[0]==traj[-1] 이 항상 성립(전부 최종값) → "유휴
+  동결"로 *오독*. `_snap` 은 `mood.valence`(속성) 접근 → AttributeError
+  → nan.
+- 사실: `pipeline.run` 은 idle 여부 무관 *매 턴* `update_mood()` 호출
+  (leaky-integral). deepcopy 캡처 검증: 자극 후 유휴 6턴 mood v
+  0.023→0.129 단조 수렴. **mood 는 idle 포함 정상 자율 적분** — 오히려
+  자율-내면 주장을 *강화*(이전 주석이 아키텍처를 과소평가).
+- 조치: `test_architecture_state_dynamics.py` 거짓 주석 제거 +
+  `test_mood_autonomously_integrates_on_idle`(deepcopy 캡처) 신규로
+  영구 회귀화(메커니즘층 4번째 속성). `b5_behavioral_run.py::_snap`
+  `mood['valence']` 수정. b5_mechanism_run.md / b5_behavioral_run.md /
+  본 ADR 주석 정정. **+1 test (1036→1037)**, product 코드 무변경.
+- 메타: 드리프트-비판 antidote(B5) 가 *스스로* 측정 버그를 냈다 —
+  "측정 코드도 거짓말한다, 실제 코드에 대조하라"의 직접 사례. B1 의
+  진짜 산출은 아키텍처 수정이 아니라 *우리 계측 신뢰성 정정*.
 
 **Status**: accepted. slice 1(메커니즘층: 경로의존1.73/유휴0.154/기질
 1.78, 결정론) + slice 2(행동층 1차: 본체 실행, 누적 내면이 텍스트에

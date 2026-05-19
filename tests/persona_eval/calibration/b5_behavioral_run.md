@@ -52,5 +52,8 @@ ADR). 다음은 슬라이스 추가가 아니라 *통합·머지*.
 - Windows temp 정리 시 chroma sqlite 파일락 PermissionError(결과 출력
   후) → `TemporaryDirectory(ignore_cleanup_errors=True)` 로 무해화(fix
   커밋됨). 데이터엔 영향 0.
-- `_snap` 의 mood 접근 경로 오류로 mood=nan 표시(계측 버그). 신호의
-  담지자는 9-dim state 라 결론 불변 — mood 계측 수정은 후속(저우선).
+- `_snap` 의 mood=nan 은 *계측 버그*였음(`mood.valence` 속성 접근 —
+  mood 는 dict). **B1 에서 수정 완료**(`mood['valence']`). 더불어
+  slice-1 의 "mood 유휴 동결" 도 reference-aliasing 아티팩트로 판명 —
+  mood 는 idle 포함 매 턴 정상 적분(emotion_base.mood 단일 dict 의
+  참조 캡처 문제). 아키텍처 정상, 우리 계측이 거짓이었음.

@@ -37,12 +37,11 @@ _PROBE = "음 그래서, 너는 요즘 어때?"  # 주의를 *에이전트* 로 
 def _snap(orch) -> str:
     s = orch.low_level.internal_state.to_dict()
     eb = orch.low_level.emotion_base
-    mood = getattr(eb, "mood", None)
-    mv = ma = float("nan")
-    try:
-        mv, ma = mood.valence, mood.arousal  # type: ignore[union-attr]
-    except Exception:
-        pass
+    # B1 정정: emotion_base.mood 는 dict (속성 아님). 이전 `mood.valence`
+    # 접근이 AttributeError → nan 으로 표시됐던 계측 버그.
+    mood = getattr(eb, "mood", None) or {}
+    mv = float(mood.get("valence", float("nan")))
+    ma = float(mood.get("arousal", float("nan")))
     key = {k: round(s[k], 3) for k in ("stress", "bonding", "comfort", "arousal")}
     return f"state={key} mood(v={mv:.3f},a={ma:.3f})"
 

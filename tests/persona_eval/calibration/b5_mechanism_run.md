@@ -29,7 +29,12 @@
 triangulate)를 *아키텍처에 겨눈다*. 본 결과는 그 전제(상태가 입력-탈동조
 ·지속·기질분기)를 결정론적으로 확정 — 행동층이 의미를 가질 토대.
 
-관찰(단언 X): `mood['valence']` 는 `run_low_level_only` 경로에선 유휴
-턴에 갱신 안 됨(mood leaky-integral 은 자극 턴만 적분). 자율 동역학의
-담지자는 9-dim InternalState(D 행렬). graded C1~C4 토글은 orchestrator
-수술 필요 → slice 2.
+**정정(B1, 2026-05-19)**: 위 "mood 유휴 동결" 은 *틀렸음* — 우리 측정
+코드의 reference-aliasing 아티팩트였다. `emotion_base.mood` 는 in-place
+mutate 되는 단일 dict 라 턴마다 그 참조를 모으면 전부 최종값으로 보였을
+뿐. `pipeline.run` 은 idle 여부와 무관하게 매 턴 `update_mood()` 호출 →
+mood 는 정상 적분(deepcopy 캡처 검증: 유휴 6턴 v 0.023→0.129 단조).
+즉 자율 동역학 담지자는 9-dim state *와 mood 둘 다*. 아키텍처는
+정상이었고 우리 계측이 거짓이었다 — antidote 가 스스로 측정 버그를 낸
+사례, `test_mood_autonomously_integrates_on_idle` 로 영구 회귀화.
+graded C1~C4 토글은 orchestrator 수술 필요 → slice 2.
