@@ -4,7 +4,7 @@
 
 ## Current baseline (as of 2026-05-15, ADR-013~039 — grounding 정리 + age/gender register + listener mode + master command + 3턴 undo + affect translator + anti-sycophancy + L3 측정/L2 validator/L1 critic + 말버릇 tic 프로세스 fix + I2 enforcement/dead-UI 정리/10대 interest)
 
-- Tests: **1037 passed + 2 skipped + 1 xfailed** (`pytest tests/ -q --ignore=tests/persona_eval --ignore=tests/e2e_trends`, ~5min). ADR-040~045 (`eval-harness/persona-eval-v2`, merged `f51b025`) 가 992→1036; +1 = ADR-045 B1 정정(`test_architecture_state_dynamics.py` 5: mood 자율적분 회귀 — "mood 유휴 동결" 은 우리 측정 reference-aliasing 버그였고 아키텍처는 정상이었음, ADR-045 B1 정정 절). product 코드 무변경. 주의: `tests/scenarios/test_group3_self_existence.py` (+ 간헐 `test_main_cli.py::test_build_full_orchestrator_wires_all_dependencies`) 가 전체 동시 실행 시 chromadb 병렬 접근 (`no such table: acquire_write` / `unable to open database file` / compaction) 으로 *비결정적* flake — isolation 재실행 시 전부 PASS (환경 이슈, 코드 무관). ADR-039 run = 991 passed + 1 flake → isolation PASS → 992 flake-free.
+- Tests: **1040 passed + 2 skipped + 1 xfailed** (flake-free; `pytest tests/ -q --ignore=tests/persona_eval --ignore=tests/e2e_trends`, ~6min). ADR-040~045 (`eval-harness/persona-eval-v2`, merged `f51b025`) 가 992→1036; +1 ADR-045 B1 정정; **+3 ADR-046 상태 포화 수정(`test_state_saturation.py`, 코어 엔진 `InternalState` A 입력항 압축)**. ADR-046 회귀: 1033 passed + 7 = 알려진 chromadb flake(아래) → isolation 재실행 전부 PASS, 불변식(W−D 안정성/[0,1]/시나리오 emergent) 위반 0. **이 arc 의 첫 product 코드 변경.** 주의: `tests/scenarios/test_group3_self_existence.py` (+ 간헐 `test_main_cli.py::test_build_full_orchestrator_wires_all_dependencies`) 가 전체 동시 실행 시 chromadb 병렬 접근 (`no such table: acquire_write` / `unable to open database file` / compaction) 으로 *비결정적* flake — isolation 재실행 시 전부 PASS (환경 이슈, 코드 무관). ADR-039 run = 991 passed + 1 flake → isolation PASS → 992 flake-free.
 - Branch: `main` past v0.3.0 (latest ADR-033 commits)
 - Release: `release` branch at `v0.3.0` (Phase 3 / §8 enforcement / analyze.py / logs UI tab).
 - LLM tier: `small` / `large` / `dmn` 모두 `gpt-5.5`. `reasoning_effort` per-tier (small=low, large=medium, dmn=low). 콜별 override 가능 — ADR-011. Unified single-call stream — ADR-012.
@@ -252,7 +252,7 @@ scripts/        sensitivity report helper
 
 ## Known limitations / quirks
 
-- **[추적 대상, C1 dogfooding 2026-05-19] 상태 포화**: 멀티세션 실 대화(`c1_relationship_sim`)에서 `bonding` 이 세션2부터 1.0, `arousal` 이 후반 내내 1.0 으로 고정(clamp 천장). 포화 시 9-dim 내면이 변별력을 잃어 "독립적 내면" 주장이 약화. 원인 후보: Δmax/clamping·W 행렬 게인·reactivity 누적. Phase 6(실 대화 W 행렬 미세조정)의 *구체적 1순위 대상*. 별도 분석/ADR 후보.
+- ~~[추적 대상] 상태 포화~~ **→ ADR-046 으로 해결(2026-05-19)**: 근본 = `InternalState.update` 의 A 입력 게인(bonding←social_reward 0.3) ≫ D 회복(0.1) → 지속 동방향 입력 시 [0,1] 천장 clamp. 수정 = A 입력항 압축(soft ceiling, 양+→×(1−state)/음−→×state); W·D·안정성 증명 불변. 검증: 15턴 지속입력 후 bonding 1.0→**0.82**(점근), dynamic range·[0,1]·W−D 안정성 보존, 전체 회귀 불변식 위반 0. felt 재평가(C1 파이프라인 재실행)는 사람 몫의 별도 후속.
 - **[추적 대상, 동일] episodic 계측 + 연속성 confound**: `_snap` 이 episodic 카운트를 못 읽어(n/a), 멀티세션 연속성이 episodic 서브시스템 덕인지 같은 orch 의 LLM dialogue 컨텍스트 덕인지 *분리 불가*(B5 slice-2 와 동형 confound). 해소엔 (a) episodic 계측 수정 + (b) slice-2b 엄밀 격리(상태/기억 동결 토글, orchestrator 수술) 필요. ADR-045 참조.
 - 5 worktree directories may persist on disk after `git worktree remove` (Windows file locks). Cleanup manually or skip — git records say cleaned.
 - spec §12 시나리오 26 (non-dual awareness): xfail strict — "표현 시 이원성 복원" 은 텍스트 기반 존재의 ontological 한계.

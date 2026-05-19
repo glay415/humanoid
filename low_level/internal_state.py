@@ -122,8 +122,17 @@ class InternalState:
     def update(self, experience_vector: np.ndarray) -> np.ndarray:
         """3행렬 상태 업데이트. 반환: 업데이트된 state (9,)."""
         deviation = self.state - self.baselines
+        a_term = self.A @ experience_vector
+        # ADR-046: 압축 입력(soft ceiling). 지속 동방향 입력이 [0,1]
+        # 천장에 clamp → 9-dim 내면 변별력 상실(C1 dogfooding 에서 INTJ
+        # register 붕괴로 발현)을 방지. 양(+) 입력 성분은 1 방향 헤드룸
+        # (1-state), 음(-) 성분은 0 방향(state) 으로 점근 → 입력만으로
+        # 경계에 도달 불가. W·D·Δmax·최종 [0,1] clip 전부 불변 — A 입력
+        # 맵만 재형상(W−D 안정성 증명이 다룬 적 없는 비동차 항).
+        headroom = np.where(a_term >= 0.0, 1.0 - self.state, self.state)
+        a_term = a_term * headroom
         delta = (
-            self.A @ experience_vector
+            a_term
             + self.W @ deviation
             + self.D @ (self.baselines - self.state)
         )
@@ -156,6 +165,9 @@ class InternalState:
             }
         """
         a_exp = self.A @ experience_vector
+        # ADR-046: update() 와 동일한 압축 입력 — debug 분해가 실제 적용
+        # Δ 와 일치하도록 미러링(api-contract debug/state 정확성).
+        a_exp = a_exp * np.where(a_exp >= 0.0, 1.0 - self.state, self.state)
         deviation = self.state - self.baselines
         w_dev = self.W @ deviation
         d_rec = self.D @ (self.baselines - self.state)
