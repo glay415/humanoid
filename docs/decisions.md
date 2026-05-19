@@ -2252,6 +2252,83 @@ fail-exemplar 가 풀에 포함돼야 보임 — slice 5 생성 파이프라인 
 
 ---
 
+## ADR-045 — B5 아키텍처 ablation: judge-free 상태-궤적 메커니즘층 (2026-05-19)
+
+**Context**: 사용자가 정확히 지적 — persona_eval v2(ADR-040~044)가
+substrate-agnostic 으로 드리프트, 인지아키텍처를 한 번도 테스트 안 함
+(채점 발화가 전부 프롬프트/서브에이전트 생성, 실제 파이프라인 미경유).
+"아키텍처가 사라지면 뭐가 달라지나"에 경험적으로 답해야 함 =
+persona-eval-v2.md B5 ablation.
+
+audit(`main.py::build_full_orchestrator`): C0~C5 토글 표면 **부재** —
+episodic/reconsolidation/prospective/DMN/self_narrative/markers/fast_path
+전부 무조건 주입. graded 매트릭스(C1~C4)는 orchestrator 수술 필요.
+
+핵심 발견: `low_level/`(InternalState 9-vec + mood leaky-integral +
+drives + DMN 트리거)은 **LLM-free 순수 NumPy**. "아키텍처가 vanilla
+프롬프트 대비 무엇을 더하나"의 근본 답 — *상태가 (a) 턴 간 자체
+동역학으로 지속하고 (b) 즉시 입력의 순함수가 아니다* — 는 judge·LLM·
+사람 없이 결정론적으로 증명 가능. C0(stateless 프롬프트)는 그 객체
+자체가 없어 대조가 *범주적*(κ 아님).
+
+**Decision**: B5 를 두 층으로. 본 ADR = **메커니즘층(slice 1)** 만.
+
+- **메커니즘층(judge-free, 결정론, LLM 0)**: 실제 low_level 파이프라인을
+  돌려 세 범주 속성을 증명, 그대로 영구 pytest 화:
+  1. **경로의존**: 동일 현재 입력을 *다른 히스토리*로 도달 → 다른 상태
+     (state ≠ f(현재입력)). stateless 프롬프트 불가.
+  2. **유휴 진화**: *입력 0*(빈 경험) 턴에도 상태가 변함(mood leaky-
+     integral baseline 회귀 / drive 결핍 성장) — 자율 동역학.
+  3. **기질 분기**: 동일 입력열, 다른 기질 YAML → 궤적 수치 발산
+     ("같은 코드 다른 기질 → 다른 사람" 의 *측정*).
+  이것이 substrate-agnostic 드리프트의 해독제 — 판정 장치가 아니라
+  아키텍처 메커니즘을 직접 측정. 비용 0, 매 커밋 회귀.
+- **행동층(slice 2+, 후속)**: 그 상태가 *생성 텍스트*를 stateless
+  프롬프트가 못 내는 방식으로 바꾸는가(I8 own-center). 여기서 비로소
+  우리가 만든 판정 장치(panel/judge/triangulate)를 *아키텍처에 겨눔*.
+  graded C1~C4 토글(orchestrator 수술) + I8형 프로브 = slice 2 범위.
+
+### 명시적 비범위
+
+- graded 매트릭스(C1~C4 부분 ablation)·I8 행동 프로브·orchestrator
+  토글 파라미터화 = slice 2+(별도). 본 ADR 은 *아키텍처가 stateless
+  프롬프트와 범주적으로 다른 객체임* 의 결정론적 증명까지.
+- 메커니즘층이 "상태가 있다"는 다소 정의적(tautological) 면 인정 —
+  그래서 행동층(상태가 *출력*을 바꾸는가)이 본 thesis 의 핵심이며
+  slice 2 에서 우리가 만든 apparatus 를 거기 겨눈다. 본 ADR 은 그
+  전제(상태가 입력-탈동조·지속·기질분기)를 못 박는다.
+
+### 구현·측정 결과 (slice 1, 2026-05-19)
+
+`tests/test_architecture_state_dynamics.py` (LLM 0·결정론·4 pass,
+1032→**1036**). 실제 low_level 파이프라인 측정 (`b5_mechanism_run.md`):
+
+| 속성 | 측정값 |
+|---|---|
+| 경로의존(동일 현재입력·정반대 히스토리) | 최종 상태 **L2=1.73** (9-dim [0,1], max 3.0) |
+| 유휴 진화(입력 0, 6턴 누적 drift) | **0.154** |
+| 기질 분기(ENTJ vs ESFJ, 동일 입력열) | 궤적 누적 **L2=1.78** |
+
+→ "아키텍처가 사라지면?" 의 답 = 응답이 9-dim 지속 내면을 *통째로*
+잃음(히스토리 1.73 / 자율 / 기질 1.78 → 전부 0). C0(stateless
+프롬프트)는 정의상 현재 프롬프트 순함수라 이 셋이 *원천 부재* —
+대조가 κ 아닌 *범주*. 부산물: temperament_default ≡ temperament_test
+(diff 0, 기질 demo 무용) → persona YAML(ENTJ/ESFJ) 사용.
+
+**정직한 경계**: 메커니즘층은 "아키텍처=stateless 프롬프트와 범주적
+다른 *객체*" 확정(다소 정의적). *그 상태가 생성 텍스트를 더 사람답게/
+독립적으로 바꾸는가*(I8 own-center)는 미증명 = 행동층(slice 2). 거기서
+apparatus(panel/judge)를 아키텍처에 겨눔. 관찰: mood['valence']는
+run_low_level_only 유휴턴 미갱신(자율 동역학 담지=9-dim D 행렬).
+
+**Status**: accepted (slice 1 메커니즘층 측정 완료 — 경로의존 1.73 /
+유휴 0.154 / 기질 1.78, 결정론·LLM 0). 드리프트 해독: 판정 장치가
+아니라 아키텍처 코드를 직접 측정. 다음=행동층 slice 2(graded 토글
++ I8 프로브에 apparatus 겨눔, orchestrator 수술 필요). ADR-040 북극성
+/ ADR-044 well-posed 에 이어 "아키텍처가 무엇을 더하나" 경험적 1차 답.
+
+---
+
 ## Future ADRs (placeholder)
 
 다음과 같은 결정이 일어나면 ADR 를 append:
