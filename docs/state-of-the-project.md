@@ -252,6 +252,8 @@ scripts/        sensitivity report helper
 
 ## Known limitations / quirks
 
+- **[추적 대상, C1 dogfooding 2026-05-19] 상태 포화**: 멀티세션 실 대화(`c1_relationship_sim`)에서 `bonding` 이 세션2부터 1.0, `arousal` 이 후반 내내 1.0 으로 고정(clamp 천장). 포화 시 9-dim 내면이 변별력을 잃어 "독립적 내면" 주장이 약화. 원인 후보: Δmax/clamping·W 행렬 게인·reactivity 누적. Phase 6(실 대화 W 행렬 미세조정)의 *구체적 1순위 대상*. 별도 분석/ADR 후보.
+- **[추적 대상, 동일] episodic 계측 + 연속성 confound**: `_snap` 이 episodic 카운트를 못 읽어(n/a), 멀티세션 연속성이 episodic 서브시스템 덕인지 같은 orch 의 LLM dialogue 컨텍스트 덕인지 *분리 불가*(B5 slice-2 와 동형 confound). 해소엔 (a) episodic 계측 수정 + (b) slice-2b 엄밀 격리(상태/기억 동결 토글, orchestrator 수술) 필요. ADR-045 참조.
 - 5 worktree directories may persist on disk after `git worktree remove` (Windows file locks). Cleanup manually or skip — git records say cleaned.
 - spec §12 시나리오 26 (non-dual awareness): xfail strict — "표현 시 이원성 복원" 은 텍스트 기반 존재의 ontological 한계.
 - spec §12 시나리오 27 (collective transcendence): skip — 시뮬레이션 환경이 1-person.
