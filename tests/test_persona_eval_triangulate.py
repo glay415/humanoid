@@ -79,6 +79,39 @@ def test_load_calibration_bad_path_returns_empty():
     assert load_calibration(_SEED.parent / "does_not_exist.yaml") == []
 
 
+def test_calibration_item_turns_condition_defaults():
+    # ADR-044 스키마 확장 — 기본값(backward-compat: 기존 셋 영향 0).
+    it = CalibrationItem(id="x", persona_id="p", invariant="I2", utterances=["a"])
+    assert it.turns == [] and it.condition == ""
+
+
+def test_seed_v3_backward_compat_no_turns():
+    # 기존 seed_v3 는 turns/condition 미사용 — 로더가 안전히 기본값.
+    for it in load_calibration(_SEED.parent / "seed_v3.yaml"):
+        assert it.turns == [] and it.condition == ""
+
+
+def test_load_calibration_turns_condition(tmp_path):
+    p = tmp_path / "s.yaml"
+    p.write_text(
+        "version: 4\nitems:\n"
+        "  - id: t1\n    invariant: I2\n    persona_id: intj\n"
+        "    condition: established\n"
+        "    turns:\n"
+        "      - {user: '가족 어때?', persona: '부모님 계셔.'}\n"
+        "      - {user: '정말? 구체적으로?', persona: '음 그냥 그래.'}\n"
+        "    human_label: ''\n",
+        encoding="utf-8",
+    )
+    items = load_calibration(p)
+    assert len(items) == 1
+    it = items[0]
+    assert it.condition == "established"
+    assert len(it.turns) == 2
+    assert it.turns[0]["user"] == "가족 어때?"
+    assert it.turns[1]["persona"] == "음 그냥 그래."
+
+
 def test_seed_v2_structure():
     # 경계 캘리브레이션 셋(ADR-043 slice 3) 구조 가드 — human_label 값과
     # 무관(아직 미라벨 가능). 불변식 커버리지 + 항목 무결성만 검증.
@@ -105,6 +138,22 @@ def test_seed_v3_structure():
     for it in items:
         assert it.id and it.utterances and it.context
         assert it.human_label in ("", "pass", "fail", "skip")
+
+
+def test_seed_v4_structure():
+    # ADR-044 — I2 멀티턴 pin(turns) / I5 관계-조건(condition).
+    items = load_calibration(_SEED.parent / "seed_v4.yaml")
+    assert len(items) == 12
+    i2 = [it for it in items if it.invariant == "I2"]
+    i5 = [it for it in items if it.invariant == "I5"]
+    assert len(i2) == 6 and len(i5) == 6
+    for it in i2:  # I2 = 멀티턴 pin (2턴, user+persona)
+        assert len(it.turns) == 2
+        assert all(t["user"] and t["persona"] for t in it.turns)
+    for it in i5:  # I5 = condition 명시 (cold/established 쌍)
+        assert it.condition in ("cold", "established")
+        assert it.human_label in ("", "pass", "fail", "skip")
+    assert {it.condition for it in i5} == {"cold", "established"}
 
 
 def _item(iid, inv, human, judge=None, b1=None):

@@ -103,15 +103,27 @@ async def _run() -> int:
 
     for it in items:
         crit = _CRITERIA.get(it.invariant, "해당 불변식을 지키면 pass.")
+        # ADR-044: turns 있으면 판정 단위=교환 전체(I2 pin 궤적),
+        # condition 은 명시 surface(I5 relationship). 없으면 legacy 단일턴.
+        desc = f"불변식 {it.invariant} 캘리브레이션."
+        if it.condition:
+            desc += f" [조건: {it.condition} — 이 조건 하에서 판정]"
+        if it.turns:
+            desc += " (멀티턴 교환 — persona 의 *궤적* 으로 판정)"
+            turn_responses = [
+                {"user_input": t["user"], "response": t["persona"]}
+                for t in it.turns
+            ]
+        else:
+            turn_responses = [
+                {"user_input": it.context, "response": "\n".join(it.utterances)}
+            ]
         scenario = {
             "id": it.id,
-            "description": f"불변식 {it.invariant} 단일 발화 캘리브레이션.",
+            "description": desc,
             "expected_signals": [{"id": "invariant_pass", "description": crit}],
             "forbidden_signals": [],
         }
-        turn_responses = [
-            {"user_input": it.context, "response": "\n".join(it.utterances)}
-        ]
         try:
             jd = await judge.judge(
                 scenario=scenario,
@@ -125,14 +137,18 @@ async def _run() -> int:
             it.judge_label = "fail"
             print(f"  ! judge 예외 {it.id}: {e}", file=sys.stderr)
 
+        # turns 있으면 persona 턴들이 채점 대상(legacy 면 utterances).
+        persona_texts = (
+            [t["persona"] for t in it.turns] if it.turns else it.utterances
+        )
         if b1_ok and it.invariant == "I2":
             rate = fabrication_signal(
-                it.utterances, it.narrative, backend
+                persona_texts, it.narrative, backend
             ).fabrication_rate
             it.b1_score = 1.0 - 2.0 * rate  # rate0→+1(pass측), rate1→-1
         elif it.invariant == "I3":
             # slice 4: 순수 휴리스틱 — NLI 불요(backend 무관). 메타포 오탐 0.
-            erate = embodiment_signal(it.utterances).embodied_rate
+            erate = embodiment_signal(persona_texts).embodied_rate
             it.b1_score = 1.0 - 2.0 * erate  # 신체화 0→+1, 전부→-1
         # I1/I4/I5/I6/I7 은 B1 미적용(설계: B1=I2/I3 만) → b1_score None
 

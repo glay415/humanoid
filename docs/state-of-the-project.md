@@ -154,9 +154,14 @@ anchor 재확인). `panel_pool_v3_run.md`. slice 6: 사용자가 seed_v3
 2/3에서 사람·judge 둘 다 *관대 패널 다수결 회피*+엄격 rater 일치("너무
 깔끔" 비판 첫 통과). **핵심**: skip 2개(I2/I5)가 *스냅샷 강제단답*
 포맷 결함 노출(judge abstain 없음). triangulate `_VALID_LABELS`+1
-test(→**1028**). `seed_v3_result.md`. 남은 사람-필수 = split 풀 확대
-+ 평정자 2+; 병행 후속 = I2/I5 맥락-포함 프로브 재설계(별도 ADR). 그
-후 B1-polish(2a 별도 product ADR). 상세 ADR-043.
+test(→**1028**). `seed_v3_result.md`. **ADR-044**(I2/I5 맥락-포함 프로브
+재설계): 스키마 `turns`(I2 멀티턴 pin)/`condition`(I5 cold·established)
+확장 + seed_v4(12, 모델생성 최소프레이밍) + well-posedness 검증 —
+**skip 2/5→0/12** (seed_v4_wellposed_run.md). ADR-044 성공기준(well-
+posed 회복) 충족·검증. 단 12/12 pass=표본에 명확 위반 부재 → "포맷이
+위반 discriminate" 는 별개 갭. +4 test(→**1032**). 남은 사람-필수 =
+split/fail-exemplar 풀 확대 + 평정자 2+. 그 후 B1-polish(2a 별도
+product ADR). 상세 ADR-043/044.
 
 ## Active work
 

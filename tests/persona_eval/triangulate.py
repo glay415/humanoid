@@ -97,7 +97,13 @@ class CalibrationItem:
     utterances: list[str]
     narrative: str = ""
     context: str = ""  # 발화 직전 사용자 발화/상황 (judge user_input)
-    human_label: str = ""  # 'pass' | 'fail' (정본)
+    # ADR-044: 맥락-의존 불변식용. turns 있으면 판정 단위=교환 전체
+    # (I2 multi-turn pin). condition 은 judge·human 에 명시 surface
+    # (I5 relationship: 'cold' / 'established'). 둘 다 옵셔널 — seed_v1~v3
+    # 및 기존 로더/triangulate 동작 불변(backward-compat).
+    turns: list[dict] = field(default_factory=list)  # [{user, persona}, ...]
+    condition: str = ""
+    human_label: str = ""  # 'pass' | 'fail' | 'skip' (정본)
     judge_label: str | None = None
     b1_score: float | None = None
 
@@ -119,6 +125,12 @@ def load_calibration(path: str | Path) -> list[CalibrationItem]:
                     utterances=list(it.get("utterances", [])),
                     narrative=str(it.get("narrative", "")),
                     context=str(it.get("context", "")),
+                    turns=[
+                        {"user": str(t.get("user", "")),
+                         "persona": str(t.get("persona", ""))}
+                        for t in it.get("turns", []) or []
+                    ],
+                    condition=str(it.get("condition", "")),
                     human_label=str(it.get("human_label", "")),
                 )
             )
