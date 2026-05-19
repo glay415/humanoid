@@ -2106,13 +2106,32 @@ human + B1↔human 둘 다 1.0). 전부 1.0 인 건 여전히 designer-authored/
 + 평정자 2+)이 풀 몫. ③은 ①을 *의미있게* 만드는 인프라(진짜 갈리는
 케이스가 와도 B1 이 죽은 다리가 아니라 독립 교차검증으로 작동).
 
+### slice 4b — agent-panel cross-check (코드 없음, 2026-05-19)
+
+사용자 의도 정정: 코드 하니스가 아니라 *Claude sub-agent 팀을 띄워 직접
+평정*. Claude 패널 ≠ gpt-5.5 judge → 실제 cross-family. 4 stance(엄격/
+관대/판별자/순진 사용자) 가 seed_v2 14개 독립 채점(human/서로 미공개).
+상세 `tests/persona_eval/calibration/panel_v2_run.md`.
+
+결과: **패널 만장일치 13/14**, 유일 split=#6 i3_ambiguous_walk(D 순진만
+pass). 패널 다수결↔human 14/14, 패널↔judge 14/14. 의미:
+- (긍정) cross-family 4 stance 가 judge 와 13/14 직접 일치 → judge 가
+  idiosyncratic 아님(앞서 빈 독립 신호 일부 충전, B1 보강과 별개 축).
+- (핵심 진단) 다양한 4 stance+사람+judge 13/14 만장 ⇒ seed_v2 는
+  대부분 *결정 가능*, **진짜 splitting=14 중 1뿐**. κ=1.0 반복 원인
+  정량 확정 = designer-authored 한계. agent-panel 이 *난이도 채굴기*로
+  정확히 작동(사용자 아이디어 경험적 정당화).
+- #6 fail 은 루브릭 '애매하면 엄격'에 의존 — 가장 덜 오염된 D 가 반대
+  ⇒ 진짜 독립 인간 모집단은 더 갈릴 수 있음. ③로 살린 항목이 유일
+  경계인 점도 시사적.
+
 **Status**: accepted. slice 1(코어)+2(seed_v1 κ=1.0)+3(경계 κ=1.0,
-designer/단일평정자/B1κ0 한계)+4(③ B1 I3 다리 보강: B1↔human κ
-0→1.0, 메타포 오탐 0). judge = *방향상* 신뢰, "검증 완료" 아님.
-다음 = ①(agent-panel 케이스 채굴 → disagreement 큰 것만 사람 anchor
-라벨; 패널=judge와 다른 계열, 독립 anchor 아님 명시). 진짜 게이트 =
-B2.3 full(저자 아닌 splitting 케이스 + 평정자 2+). 그 후 B1-polish(2a
-별도 product ADR). ADR-040/041 "측정 먼저" 일관.
+designer/단일평정자 한계)+4(③ B1 I3 다리 κ0→1.0)+4b(agent-panel:
+cross-family 보강 + "splitting=1/14" 정량 진단). judge = *방향상*
+신뢰(+cross-family 보강), "검증 완료" 아님 — seed_v2 는 약한 B2.3
+도구로 판명. 진짜 게이트 = agent-panel 을 *저자 아닌 실제 출력 풀*에
+돌려 split 항목만 추출 → 평정자 2+ 사람 anchor(B2.3 현실 형태). 그 후
+B1-polish(2a 별도 product ADR). ADR-040/041 "측정 먼저" 일관.
 
 ---
 

@@ -139,11 +139,14 @@ per-inv I1~I7 전부 +1.0), `validated=True`. 경계에서도 judge 가 독립
 simile 배제로 메타포 오탐 0, NLI 불요) → seed_v2 재실측 **B1↔human
 κ 0.000→+1.000**, judge↔B1 ρ→1.0, judge↔human 1.0 유지. +6 tests
 (→**1026**). triangulation 이 I2/I3 2-leg 로 섬. 단 전부 1.0 은 여전히
-designer/단일평정자 한계 — ③은 ①을 의미있게 만드는 인프라. 다음 = ①
-(judge와 다른 계열 agent-panel 케이스 채굴 → disagreement 큰 것만 사람
-anchor 라벨; 패널은 독립 anchor 아님 명시). 진짜 게이트 B2.3 full =
-저자 아닌 splitting 케이스 + 평정자 2+. 그 후 B1-polish(2a 별도
-product ADR). 상세 ADR-043.
+designer/단일평정자 한계. slice 4b(agent-panel, 코드없음): Claude
+4-stance 패널(≠gpt-5.5 judge=cross-family)이 seed_v2 독립채점 →
+**만장 13/14, split #6 1개뿐**, 패널↔judge 14/14. 의미: judge
+cross-family 보강(+) & seed_v2 는 splitting=1/14 인 약한 B2.3 도구로
+정량 판명(designer-authored 한계 확정), agent-panel 이 난이도 채굴기로
+작동. 상세 `calibration/panel_v2_run.md`. 진짜 게이트 = agent-panel 을
+*저자 아닌 실제 출력 풀*에 돌려 split 만 추출 → 평정자 2+ 사람 anchor.
+그 후 B1-polish(2a 별도 product ADR). 상세 ADR-043.
 
 ## Active work
 
