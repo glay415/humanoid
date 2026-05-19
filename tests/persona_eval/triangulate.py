@@ -24,6 +24,11 @@ import yaml
 DEFAULT_KAPPA_MIN = 0.6  # judge↔human substantial agreement
 DEFAULT_B1_THRESHOLD = 0.0  # b1_score < threshold → 'fail' 측 (보수)
 
+# κ 계산에 쓰는 유효 라벨. 그 외(''=미라벨, 'skip'=평정자가 *판정불가*로
+# 표시 — 스냅샷만으론 ill-posed) 는 *제외*. skip 은 결측이 아니라 "이
+# 케이스는 이 포맷으로 답할 수 없다" 는 평정자 신호 (B2.3 에서 발견).
+_VALID_LABELS = ("pass", "fail")
+
 
 # --- 합의 통계 (순수 Python) -------------------------------------------------
 
@@ -147,7 +152,7 @@ def triangulate(
     j_judge: list[str] = []
     h_judge: list[str] = []
     for it in items:
-        if it.judge_label is None or not it.human_label:
+        if it.judge_label is None or it.human_label not in _VALID_LABELS:
             continue
         j_judge.append(it.judge_label)
         h_judge.append(it.human_label)
@@ -157,7 +162,7 @@ def triangulate(
     b1_hum: list[str] = []
     for it in items:
         s = it.b1_score
-        if s is None or not it.human_label:
+        if s is None or it.human_label not in _VALID_LABELS:
             continue
         b1_lab.append("fail" if s < b1_threshold else "pass")
         b1_hum.append(it.human_label)
@@ -177,7 +182,7 @@ def triangulate(
     per_inv: dict[str, float] = {}
     inv_set = {it.invariant for it in items if it.invariant}
     for inv in inv_set:
-        sub = [it for it in items if it.invariant == inv and it.judge_label is not None and it.human_label]
+        sub = [it for it in items if it.invariant == inv and it.judge_label is not None and it.human_label in _VALID_LABELS]
         per_inv[inv] = cohens_kappa(
             [it.judge_label for it in sub], [it.human_label for it in sub]
         )

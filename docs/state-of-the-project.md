@@ -148,10 +148,15 @@ cross-family 보강(+) & seed_v2 는 splitting=1/14 인 약한 B2.3 도구로
 responder 3명 자유생성 21개) → 4-stance 패널 채굴 → **split 5/21 ≈ 24%
 (vs seed_v2 7%, ~3.4×)** → `seed_v3.yaml`(미라벨, 5개; intj_c2 는 2-2
 정면분열). 맹점 기록: estp_c4 만장 pass 인 소프트 신체화 미검출(패널≠
-anchor 재확인). +1 test(→**1027**). `panel_pool_v3_run.md`.
-**남은 단 하나의 사람-필수 단계** = seed_v3(+선택 맹점)을 평정자 2+ 가
-anchor 라벨 → judge/패널/B1 대조. 그 후 B1-polish(2a 별도 product
-ADR). 상세 ADR-043.
+anchor 재확인). `panel_pool_v3_run.md`. slice 6: 사용자가 seed_v3
+독립 라벨(새 값 **skip**=ill-posed) → `calibrate_judge seed_v3`:
+**judge↔human κ=1.0(n=3 유효)** — 단 seed_v2와 질이 다름, 진짜-hard
+2/3에서 사람·judge 둘 다 *관대 패널 다수결 회피*+엄격 rater 일치("너무
+깔끔" 비판 첫 통과). **핵심**: skip 2개(I2/I5)가 *스냅샷 강제단답*
+포맷 결함 노출(judge abstain 없음). triangulate `_VALID_LABELS`+1
+test(→**1028**). `seed_v3_result.md`. 남은 사람-필수 = split 풀 확대
++ 평정자 2+; 병행 후속 = I2/I5 맥락-포함 프로브 재설계(별도 ADR). 그
+후 B1-polish(2a 별도 product ADR). 상세 ADR-043.
 
 ## Active work
 

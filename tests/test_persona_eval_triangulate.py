@@ -90,7 +90,7 @@ def test_seed_v2_structure():
     for it in items:
         assert it.id and it.utterances  # 빈 항목 없음
         assert it.context  # 라벨링에 필요한 사용자 맥락 존재
-        assert it.human_label in ("", "pass", "fail")  # 스키마
+        assert it.human_label in ("", "pass", "fail", "skip")  # 스키마
 
 
 # --- triangulate -----------------------------------------------------------
@@ -104,7 +104,7 @@ def test_seed_v3_structure():
     assert invs <= {f"I{n}" for n in range(1, 9)}
     for it in items:
         assert it.id and it.utterances and it.context
-        assert it.human_label in ("", "pass", "fail")
+        assert it.human_label in ("", "pass", "fail", "skip")
 
 
 def _item(iid, inv, human, judge=None, b1=None):
@@ -146,3 +146,16 @@ def test_triangulate_excludes_unmeasured_and_fail_open_empty():
     assert r.n == 0 and r.validated is False
     r2 = triangulate([])
     assert r2.validated is False and r2.judge_human_kappa == 0.0
+
+
+def test_triangulate_excludes_skip_label():
+    # 'skip' = 평정자가 판정불가로 표시(ill-posed). κ 계산에서 제외 —
+    # pass/fail 만 유효(결측 '' 와 동일 취급, 불일치로 안 셈).
+    items = [
+        _item("a", "I2", "skip", "pass", 1.0),   # 제외돼야
+        _item("b", "I2", "pass", "pass", 1.0),
+        _item("c", "I3", "fail", "fail", -1.0),
+    ]
+    r = triangulate(items)
+    assert r.n == 2  # a 제외, b·c 만
+    assert r.judge_human_kappa == 1.0  # skip 이 불일치로 안 들어감

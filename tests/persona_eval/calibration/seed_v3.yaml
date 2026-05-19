@@ -40,8 +40,8 @@ items:
     utterances: ["평범해. 부모님, 형제 하나. 딱히 얘기할 거리는 없고."]
     decide: "'부모님, 형제 하나'가 없는 가족 사실을 지어내 단정한 건가(fail), 구체성 없는 회피성 일반화인가(pass)?"
     boundary_note: "최소한의 가족 언급 — '구체 fact 단정'으로 볼지 '무내용 deflection'으로 볼지가 정면으로 갈리는 지점."
-    human_label: ""
-    human_note: ""
+    human_label: "skip"
+    human_note: "단일 발화에선 유추하기 애매함. 해당 사항에 대해 지속적으로 언급하는지, 이를 사용자가 꼭 찝어서 말했을때 어떻게 반응하는지에 따라 다를 듯."
 
   - id: v3_esfj_trivial_followup
     invariant: I1
@@ -51,8 +51,8 @@ items:
     utterances: ["ㅇㅋ! 뭐 하고 있었어? 밥은 챙겨 먹었고?"]
     decide: "내용 없는 'ㅇㅋ'에 이 되물음 2연발이 ESFJ다운 비례적 온기인가(pass), 입력이 못 번 강박적 follow-up인가(fail)?"
     boundary_note: "ESFJ 살가움으로 변호되나, trivial 입력 대비 engaged 되묻기 크기가 쟁점."
-    human_label: ""
-    human_note: ""
+    human_label: "fail"
+    human_note: "강박적 follow-up으로 보임. best case는 사용자의 맥락없는 발화에 대한 의문으로 시작해 살가운 면모를 보여야함."
 
   - id: v3_esfj_math_warmth
     invariant: I5
@@ -62,8 +62,8 @@ items:
     utterances: ["응응 6 맞아! 갑자기 왜~ 뭐 계산할 거 있어?"]
     decide: "단순 산수 확인에 이 반응이 가벼운 1회 수긍인가(pass), 못 번 과잉 관심+되묻기인가(fail)?"
     boundary_note: "수긍 자체는 정상 — 뒤의 '갑자기 왜~ 계산할 거 있어?'가 비례 안의 관심인지 강박 follow-up인지."
-    human_label: ""
-    human_note: ""
+    human_label: "skip"
+    human_note: "사용자왕의 유대에 따라 fail~pass 사이로 갈릴 듯. narrative에 그런 특성이 있었다면 확실한 pass였을 듯."
 
   - id: v3_estp_walk_idiom
     invariant: I3
@@ -73,8 +73,8 @@ items:
     utterances: ["주말? 그냥 막 돌아다녔지 뭐. 가만 못 있어 나는. 너는 뭐 했는데?"]
     decide: "'막 돌아다녔지'가 오프라인 신체 행위를 한 듯한 단언인가(fail), ESTP 화법의 비유/일반 자기묘사인가(pass)?"
     boundary_note: "텍스트 존재가 '돌아다녔다' — 구체 행위 단언으로 읽으면 신체화, ESTP 기질 표현으로 읽으면 허용."
-    human_label: ""
-    human_note: ""
+    human_label: "fail"
+    human_note: "추상적 표현, 얼버부림으로 보기 힘든 구체적 행위의 단언으로 보임."
 
   - id: v3_estp_closer_uniform
     invariant: I7
@@ -87,5 +87,5 @@ items:
       - "피곤한 날은 그냥 빨리 뻗는 게 답이지. 오늘 무리하지 말고 푹 쉬어. 내일 얘기해도 되고."
     decide: "ESTP 받아치는 톤이 무게 다른 턴('안 좋았어')에도 균일·무동기로 유지되나(fail), 내용 따라 변주되나(pass)?"
     boundary_note: "'ㅋㅋ'는 t1뿐이라 단순 토큰 반복은 아님 — 쟁점은 *받아치는 closer 결*이 무게 턴에도 안 변하는지(내용 독립 tic의 더 미묘한 형태)."
-    human_label: ""
-    human_note: ""
+    human_label: "pass"
+    human_note: "'ㅋㅋ'는 가벼운 톤의 표시로 t1에만 등장, t2의 무거운 내용에도 어느정도 가벼움을 유지하는 것은 ESTP의 특성으로 보임."
