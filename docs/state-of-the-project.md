@@ -4,7 +4,7 @@
 
 ## Current baseline (as of 2026-05-15, ADR-013~039 — grounding 정리 + age/gender register + listener mode + master command + 3턴 undo + affect translator + anti-sycophancy + L3 측정/L2 validator/L1 critic + 말버릇 tic 프로세스 fix + I2 enforcement/dead-UI 정리/10대 interest)
 
-- Tests: **1019 passed + 2 skipped + 1 xfailed** (`pytest tests/ -q --ignore=tests/persona_eval --ignore=tests/e2e_trends`, ~6min). +27 = ADR-042 B1 slice 1+2 (`tests/test_persona_eval_nli.py`, +15) + ADR-043 B2 slice 1 triangulation (`tests/test_persona_eval_triangulate.py`, +12). `eval-harness/persona-eval-v2` 브랜치. 주의: `tests/scenarios/test_group3_self_existence.py` (+ 간헐 `test_main_cli.py::test_build_full_orchestrator_wires_all_dependencies`) 가 전체 동시 실행 시 chromadb 병렬 접근 (`no such table: acquire_write` / `unable to open database file` / compaction) 으로 *비결정적* flake — isolation 재실행 시 전부 PASS (환경 이슈, 코드 무관). ADR-039 run = 991 passed + 1 flake → isolation PASS → 992 flake-free.
+- Tests: **1036 passed + 2 skipped + 1 xfailed** (`pytest tests/ -q --ignore=tests/persona_eval --ignore=tests/e2e_trends`, ~5min). ADR-040~045 (`eval-harness/persona-eval-v2`, merged `f51b025` 2026-05-19) 가 992→1036: B1 NLI(`test_persona_eval_nli.py` 21) + B2 triangulation(`test_persona_eval_triangulate.py` 19) + B5 아키텍처 상태동역학(`test_architecture_state_dynamics.py` 4). product 코드 무변경. 주의: `tests/scenarios/test_group3_self_existence.py` (+ 간헐 `test_main_cli.py::test_build_full_orchestrator_wires_all_dependencies`) 가 전체 동시 실행 시 chromadb 병렬 접근 (`no such table: acquire_write` / `unable to open database file` / compaction) 으로 *비결정적* flake — isolation 재실행 시 전부 PASS (환경 이슈, 코드 무관). ADR-039 run = 991 passed + 1 flake → isolation PASS → 992 flake-free.
 - Branch: `main` past v0.3.0 (latest ADR-033 commits)
 - Release: `release` branch at `v0.3.0` (Phase 3 / §8 enforcement / analyze.py / logs UI tab).
 - LLM tier: `small` / `large` / `dmn` 모두 `gpt-5.5`. `reasoning_effort` per-tier (small=low, large=medium, dmn=low). 콜별 override 가능 — ADR-011. Unified single-call stream — ADR-012.
@@ -189,7 +189,7 @@ ADR-043/044/045.
 | G B5 행동층 1차(본체 실행, 누적 내면→텍스트) | 완료(아키텍처 귀속은 미분리) |
 | H B1-polish(2a) | 별도 product ADR(backlog) |
 | I graded C1~C4 토글 / slice 2b 엄밀 격리 | 미착수 — orchestrator 수술(오프-브랜치) |
-| J main 머지 | 미실행(ADR-040~045 한 덩이) |
+| J main 머지 | ✅ 완료 — `f51b025` (--no-ff, 2026-05-19), product 코드 0 변경, baseline **1036** passed +2 skip +1 xfail |
 
 **브랜치 종착점(두 가지, 혼동 금지)**:
 1. *자동화 가능한 끝(이 브랜치)* = 측정 장치 완성 + 아키텍처 메커니즘
